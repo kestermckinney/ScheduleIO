@@ -1,0 +1,9 @@
+# Copyright (C) 2026 Paul McKinney
+# SPDX-License-Identifier: GPL-3.0-only
+
+build/
+*.user
+*.qmake.stash
+.qtcreator/
+.DS_Store
+CMakeLists.txt.user*
