@@ -39,6 +39,7 @@ MppProject TstSemanticRoundtrip::makeSampleProject()
     t1.finish = QDateTime(QDate(2026, 1, 9), QTime(17, 0), Qt::UTC);
     t1.durationMillis = qint64(8) * 3600 * 1000;   // divisible by the duration unit
     t1.percentComplete = 0.5;
+    t1.notes = QStringLiteral("{\\rtf1\\ansi Design note — keep it raw.}");
     MppTask t2;
     t2.uniqueId = 2; t2.id = 2; t2.outlineLevel = 1;
     t2.name = QStringLiteral("Implement — 実装");

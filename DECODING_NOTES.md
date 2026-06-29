@@ -117,6 +117,11 @@ Block-0 FIXED fields, by `FIELD_ARRAY` index → offset: **ID(23)@0**, **PERCENT
 fixtures. PercentComplete matches ~87–100% — summary tasks store a duration-weighted rollup that
 differs from the displayed/exported value (leaf tasks are exact).
 
+Also block-0 FIXED: **CONSTRAINT_TYPE(17)@64** (u16, 100% match), **CONSTRAINT_DATE(18)@66**
+(timestamp). **WBS(16)** and **NOTES(15)** are `loc=VAR` but WBS is *not stored* (no var records) —
+it equals the computed **OutlineNumber**, so it is derived (dotted per-level counters; project
+summary = "0"). WBS matches 100% (Has Macros 82/83, one outline-gap edge).
+
 **META bit-flag + derived fields (DONE):**
 - **MILESTONE**: bit in the 47-byte FixedMeta item — `getInt(metaItem, 10) & 0x02` for Project
   2013/2016 (`getInt(metaItem, 8) & 0x20` for 2010). MppBitFlag reads `getInt(data,offset)&mask`.
@@ -130,20 +135,130 @@ differs from the displayed/exported value (leaf tasks are exact).
 
 - **Resources** (`TBkndRsc`, FixedMeta item size **37**, field map `0x00020015`): NAME=var key 1,
   INITIALS=var key 2 (resource type high word `0x0C40`); UID(27)@4, ID(0)@0, MAX_UNITS(4)@8 (8-byte
-  double, 1.0==100%), all block-0 FIXED. Resource-name recall = 100% (7/7, 48/48, 67/67).
+  double **in ten-thousandths** — 100% stored as 10000.0, so divide by 10000), block-0 FIXED.
+  Resource-name recall = 100% (7/7, 48/48, 67/67); max-units 100%. NOTE: STANDARD_RATE (field 6,
+  fixed @16) reads **0** — resource rates are NOT a fixed field; they live in cost-rate tables (see
+  the cost-rate section below).
 - **Assignments** (`TBkndAssn`, FixedMeta item size **34**, field map `0x00020017`, type high word
   `0x0F40`): UID(0)@0, TASK_UID(1)@4, RESOURCE_UID(2)@8, UNITS(7)@12 (double), WORK(8)@20 (double,
   tenths-of-minute), all block-0 FIXED. Assignment-link recall ≥95% (all XML links found; the `.mpp`
   holds extra assignment rows beyond the filtered export). Generic helper `block0FixedOffsets(fm,
   highWord)` parses any entity field map.
+- **Predecessor links** (`TBkndCons`, MPXJ `ConstraintFactory`): FixedMeta item **10**, FixedData
+  records **20 bytes**. Per meta item: `u16@0 != 0` ⇒ skip; `u32@+4` = record offset into FixedData.
+  Record: `u32@0`=relation UID, `u32@4`=predecessor task UID, `u32@8`=successor task UID,
+  `u16@12`=type; skip if either UID 0 or equal. **Lag**: `i32@14` (tenths of a minute, Project
+  2013/2016; older files use @16); the units word at @18 affects only the display unit, so
+  `lagMillis = value*6000`. Link recall 100% (Average 20/20, Example 64/64); lag validated 20/20 and
+  64/64 vs XML `<LinkLag>` in `tst_entities_oracle`.
+- **Project start/finish dates**: PropsKey PROJECT_START_DATE=**0x02400002**,
+  PROJECT_FINISH_DATE=**0x02400003** in `   114/Props` (4-byte MPP timestamps). 100% match.
+  (NOTE: PropsKey ints are decimal — 37748738 = 0x02400002, not 0x024003E2.)
+- **Calendars** (`TBkndCal`, MPXJ AbstractCalendarFactory): FixedMeta item **10**, FixedData block
+  **12**. For Project 2013/2016: calendarID@8, baseID@0, resourceID@4 (the first ~4 items are
+  0xFFFF-marked headers with calID 0 — skip). A **base** calendar (baseID==0xFFFFFFFF) gets its name
+  from var-data type **1**; a **resource** calendar's name is the linked resource's name (via
+  resourceID@4). Calendar-name recall 100% (9/9, 37/37, 56/56). **Working-day mask** from
+  CALENDAR_DATA (var type **8**): 7 days × 60 bytes, `u16@(60*i)`=default flag, `u16@(60*i+2)`=period
+  count (>0 == working), MPP day index 0=Sunday; absent ⇒ default Mon-Fri (0x1F). These fixtures only
+  use default working time (no type-8 records present), so the mask validates as Mon-Fri. 100% match.
+- **Title / Author**: the standard `\005SummaryInformation` OLE property set ([MS-OLEPS]) — header
+  section offset @44, section = [size][count] then (propId, propOffset) pairs; PIDSI_TITLE=2,
+  PIDSI_AUTHOR=4; values VT_LPSTR(0x1E, ANSI) / VT_LPWSTR(0x1F, UTF-16), `[u32 len incl NUL][bytes]`.
+  100% match. (`readSummaryInformation`.)
+
+### Cost, baselines & custom fields (DONE — `tst_cost_oracle`, `tst_baseline_oracle`, `tst_custom_oracle`)
+
+Field indices are ported verbatim from MPXJ `MPPTaskField`/`MPPResourceField`/`MPPAssignmentField`
+`FIELD_ARRAY` into `src/codec/mppfieldids.{h,cpp}` (cost scalars, baseline sets 0–10, and the full
+custom-field descriptor tables). A field's low-word index is both its FixedData field-map index and
+its Var2Data key; the high word selects the entity (task `0x0B40`, resource `0x0C40`, assignment
+`0x0F40`).
+
+- **Location is per-file.** Whether a field lands in FixedData (block 0/1) or Var2Data varies, so
+  `entityFieldLocations(fieldMap, highWord)` (in `docserializer.cpp`) resolves each index to a
+  `{block, offset}` or a var key, and `fillCostBaselineCustom` reads it from there (fixed preferred).
+  In the fixtures the cost scalars are FIXED doubles while **all baseline fields are VAR**.
+- **Cost = a plain 8-byte IEEE double in the project currency unit — NOT hundredths.** (Verified:
+  task UID 464 reads `395999.85` directly at the COST offset.) `FieldDecoders::readDouble`. The
+  `/100` seen in the WINPROJ decompilation applies to other code paths, not MPP14 FixedData.
+- **Work = a double in *thousandths* of a minute**, so `ms = value * 60` (e.g. 8h → `480000` →
+  `28'800'000` ms; verified vs XML on UID 1/6/72/87). `FieldDecoders::decodeWorkDouble`. (This is a
+  different unit from DURATION, which is a u32 in tenths of a minute.)
+- **Baseline fields**, var keys (baseline 0): COST=6, WORK=1, START=43, FINISH=44, DURATION=27;
+  baseline 1 = COST 484/WORK 485/START 482/FINISH 483/DUR 487, etc. (MPXJ also maps baseline
+  start/finish/duration a second time to the block-1 indices 1299+; we keep the first/lower form.)
+  Baseline dates are 4-byte MPP timestamps, cost a double, work a thousandths-of-minute double,
+  duration a u32 tenths-of-minute. A baseline appears only when ≥1 of its fields is present.
+- **Resource cost** is frequently not stored on the resource (Project computes it from cost-rate
+  tables, which we don't decode). Where `cost`/`actualCost`/`remainingCost` read 0, `readRealMpp`
+  rolls them up from the resource's assignment costs, matching the exported resource cost (Has Macros
+  67/67 after rollup).
+- **Custom fields** → `MppCustomField{fieldId, name, value}` where `fieldId = (high<<16)|index`,
+  which equals the MSPDI `<FieldID>` exactly (e.g. `188743731 = 0x0B400033`, index 51 = Text1). The
+  value type follows the slot kind (Text/Outline Code→QString, Number→double, Cost→currency double,
+  Date/Start/Finish→QDateTime, Duration→qint64 ms, Flag→bool). Oracle: 577/577 and 248/248 custom
+  attributes value-correct vs the XML `<ExtendedAttribute>` list.
+
+Results vs XML (Average / Example / Has Macros): task Cost/Fixed/Actual/Remaining 100%; resource
+Cost 100%; assignment Cost 100%; baseline Start/Finish/Cost/Work/Duration 100%; custom fields 100%.
+
+Diagnostic: `dump_fields <file.mpp> [task|resource|assignment]` prints the full field map (idx, loc,
+block) plus a var-type histogram and per-task baseline blobs.
+
+### Notes (raw RTF) — DONE (`tst_notes_oracle`: task + resource validated)
+
+Notes are a **var-data** field: var key **15** (task), **20** (resource), **71** (assignment) — the
+MPXJ `MPP*Field.NOTES` index. Unlike names, MPXJ reads NOTES with `Var2Data.getString` (not
+`getUnicodeString`), i.e. an **8-bit (Latin1), NUL-terminated** string — the bytes are the **raw RTF
+source** (`{\rtf1...}`). `readNotesRtf` in `docserializer.cpp` returns it verbatim into
+`MppTask/MppResource/MppAssignment::notes` (no RTF stripping). Scaffold round-trips it as a
+`kFieldNotes` var entry. `tst_notes_oracle` validates task + resource notes against the Average
+Project fixture (the XML stores plain text, so it checks each XML note line is recovered inside the
+decoded RTF — 2/2 task, 2/2 resource). Assignment notes use the same decoder but no fixture has them
+yet, so they are covered only by the round-trip test.
+
+### Resource cost-rate tables (DONE — `tst_costrate_oracle`)
+
+Resource rates live in **var data** under keys **61..65** = cost-rate tables **A..E**
+(MPXJ `ResourceField.COST_RATE_A..E`). Each table blob (MPXJ `CostRateTableFactory`): 16-byte
+header, then **44-byte entries** — `stdRate dbl@0`, `stdFmt u16@8`, `otRate dbl@16`, `otFmt u16@24`,
+`costPerUse dbl@32` (/100), `endDate@40` (tenths-of-minute timestamp via
+`decodeTimestampTenths` = epoch + i32*6 s). Rates are stored **per hour**; `rateFromHours` converts
+to the format's unit (`fmt` is Microsoft work-time-units, `0xFFFF`=hours; minutes /60, days ×8,
+weeks ×40 using default 480/2400 min) — fixtures are all per-hour so the stored double equals the
+XML rate. End-date heuristics (MPXJ): `>= 2049-12-31 23:59` ⇒ open-ended; minute on a 5-min boundary
+⇒ step back 1 min; entries with non-zero seconds are noise and skipped. Entries are sorted by end
+date, each start = previous end + 1 min. `parseCostRateTable` in docserializer →
+`MppResource::costRates` (`MppCostRate{table,startDate,endDate,standardRate,standardRateUnit,
+overtimeRate,overtimeRateUnit,costPerUse}`). Validated: current rate 43/43 (Example) and 63/63 (Has
+Macros), and the full per-resource standard-rate sets. Scaffold round-trips as `kFieldCostRates`.
+
+### Calendar working hours & exceptions (DONE — `tst_calendar_oracle`)
+
+From the CALENDAR_DATA blob (var type 8). Layout (MPXJ `AbstractCalendar(AndException)Factory`,
+MPP14 hours offset 0): **7 x 60-byte day blocks** (index 0=Sunday..6=Saturday), then exceptions at
+**offset 420**. Per day block at `60*i`: `flag u16@0`; `flag==1` ⇒ default day (a **base** calendar
+uses the standard week's hours, a **derived** calendar inherits — leave empty); else
+`periodCount u16@2`, then periods `start@8+p*2`, `durationTenths@20+p*4`. Times: `getTime` short =
+minutes×10 (tenths-of-minute since midnight); duration short = tenths-of-minute (×6000 ms).
+Exceptions: `count u16@420`, then 92-byte blocks (+4): `fromDate days@0`, `toDate days@2` (epoch
+**1983-12-31**, like the fixed-data timestamps — NOT 1984-01-01); `periodCount u16@14`
+(0 ⇒ non-working); periods `start@20+p*2`, `dur@32+p*4`; `nameLen i32@88` (round up to ×4);
+UTF-16 name@92. `parseCalendarData` → `MppCalendar.workingTimes` (7 lists, Monday..Sunday) +
+`exceptions` (`MppCalendarException`). **GOTCHA:** calendar FixedData meta offsets are NOT in storage
+order, so calendars use `readVarSizedBlocks` (block end = next-higher offset, MPXJ FixedData
+semantics) instead of `readFixedBlocks` — otherwise out-of-order calendars (e.g. a newly added one)
+are silently dropped. Validated: weekday hours 70/70 (Average), 259/259, 392/392; exceptions 2/2
+(Average's "Company Picknick" non-working + "Super Fun Day" working). Scaffold round-trips as
+`kFieldCalData`.
 
 ### Next fields
 
-- More VAR string fields by index (task NOTES=15, WBS=16; resource e-mail, group, ...).
-- CRITICAL (derive from total slack), constraints (`TBkndCons`), calendars (`TBkndCal`),
-  outline codes (`TBkndOutlCode`).
-- Project-level properties (title/author/dates) from the top-level Props.
-- Predecessor/successor links (the `RELATION_FIELD_MAP` / task link records).
+- Calendar work weeks (alternate working-week ranges); only the default week's hours are read.
+- Resource e-mail/group/type, assignment lag.
+- CRITICAL (derive from total slack); outline codes (`TBkndOutlCode`).
+- More SummaryInformation/DocumentSummaryInformation props (company, manager, ...).
 - Version detection (ApplicationVersion) to pick the right MILESTONE bit table for 2010 files.
 
 ## Diagnostics

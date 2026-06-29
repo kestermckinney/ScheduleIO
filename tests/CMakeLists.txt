@@ -35,6 +35,16 @@ mppio_add_test(tst_task_names_oracle oracle/tst_task_names_oracle.cpp)
 mppio_add_test(tst_task_dates_oracle oracle/tst_task_dates_oracle.cpp)
 mppio_add_test(tst_task_fields_oracle oracle/tst_task_fields_oracle.cpp)
 mppio_add_test(tst_entities_oracle oracle/tst_entities_oracle.cpp)
+mppio_add_test(tst_cost_oracle oracle/tst_cost_oracle.cpp)
+mppio_add_test(tst_baseline_oracle oracle/tst_baseline_oracle.cpp)
+mppio_add_test(tst_custom_oracle oracle/tst_custom_oracle.cpp)
+mppio_add_test(tst_notes_oracle oracle/tst_notes_oracle.cpp)
+mppio_add_test(tst_costrate_oracle oracle/tst_costrate_oracle.cpp)
+mppio_add_test(tst_calendar_oracle oracle/tst_calendar_oracle.cpp)
+
+# XmlIO - MS Project compatible XML (MSPDI) read/write over the shared model
+mppio_add_test(tst_xml_roundtrip      xml/tst_xml_roundtrip.cpp)
+mppio_add_test(tst_xml_mpp_crosscheck xml/tst_xml_mpp_crosscheck.cpp)
 
 # Layer 5 - dynamic loading of the built shared library
 mppio_add_test(tst_dynamicload     loader/tst_dynamicload.cpp)
@@ -54,3 +64,11 @@ target_include_directories(dump_props PRIVATE ${CMAKE_SOURCE_DIR}/src)
 qt_add_executable(dump_dates probe/dump_dates.cpp)
 target_link_libraries(dump_dates PRIVATE mppio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_dates PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(dump_fields probe/dump_fields.cpp)
+target_link_libraries(dump_fields PRIVATE mppio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_fields PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(xml_diff probe/xml_diff.cpp)
+target_link_libraries(xml_diff PRIVATE mppio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(xml_diff PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)

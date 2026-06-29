@@ -4,6 +4,7 @@
 // Diagnostic: dump an entity field map from "   114/Props" with MPXJ semantics.
 // usage: dump_props <file.mpp> [task|resource|assignment]
 
+#include "codec/bkndvardata.h"
 #include "ole/compoundfile.h"
 
 #include <QByteArray>
@@ -34,6 +35,39 @@ int main(int argc, char **argv)
     const QByteArray props = cf.readStream({ QStringLiteral("   114"), QStringLiteral("Props") });
     if (props.size() < 16) { std::printf("no   114/Props\n"); return 1; }
 
+    if (which == "cal") {
+        const QByteArray meta = cf.readStream({ QStringLiteral("   114"), QStringLiteral("TBkndCal"), QStringLiteral("FixedMeta") });
+        const QByteArray data = cf.readStream({ QStringLiteral("   114"), QStringLiteral("TBkndCal"), QStringLiteral("FixedData") });
+        std::printf("TBkndCal FixedMeta=%d FixedData=%d  count(meta/10)=%d\n",
+                    meta.size(), data.size(), (meta.size() - 16) / 10);
+        const int count = (meta.size() - 16) / 10;
+        int printed = 0;
+        for (int loop = 0; loop < count; ++loop) {
+            quint32 off = u32(meta, 16 + loop * 10 + 4);
+            quint32 nx = (loop + 1 < count) ? u32(meta, 16 + (loop + 1) * 10 + 4) : quint32(data.size());
+            if (off >= quint32(data.size()) || nx <= off) continue;
+            const QByteArray b = data.mid(int(off), int(nx - off));
+            if (printed++ < 14)
+                std::printf("  loop=%d off=%u size=%d  base@0=%u res@4=%u cal@8=%u\n",
+                            loop, off, b.size(),
+                            b.size() >= 4 ? u32(b, 0) : 0, b.size() >= 8 ? u32(b, 4) : 0,
+                            b.size() >= 12 ? u32(b, 8) : 0);
+        }
+        // List the calendar var records (uid, type, blob len) directly.
+        const QByteArray vm = cf.readStream({ QStringLiteral("   114"), QStringLiteral("TBkndCal"), QStringLiteral("VarMeta") });
+        const QByteArray v2 = cf.readStream({ QStringLiteral("   114"), QStringLiteral("TBkndCal"), QStringLiteral("Var2Data") });
+        std::printf("cal VarMeta=%d Var2Data=%d\n", vm.size(), v2.size());
+        int shown = 0;
+        for (int o = 24; o + 12 <= vm.size() && shown < 24; o += 12) {
+            const quint32 uid = u32(vm, o), voff = u32(vm, o + 4);
+            const quint16 type = u16(vm, o + 8);
+            const quint32 blen = (int(voff) + 4 <= v2.size()) ? u32(v2, int(voff)) : 0;
+            std::printf("  uid=%u type=%u off=%u len=%u\n", uid, type, voff, blen);
+            ++shown;
+        }
+        return 0;
+    }
+
     QByteArray map1, map2;
     for (int o = 16; o + 12 <= props.size(); ) {
         const quint32 len = u32(props, o), key = u32(props, o + 4);
@@ -45,6 +79,28 @@ int main(int argc, char **argv)
     }
     const QByteArray map = !map1.isEmpty() ? map1 : map2;
     std::printf("%s field map: %d bytes (%d entries)\n", which.constData(), map.size(), map.size() / 28);
+
+    if (which == "resource") {
+        const QByteArray meta = cf.readStream({ QStringLiteral("   114"), QStringLiteral("TBkndRsc"), QStringLiteral("FixedMeta") });
+        const QByteArray data = cf.readStream({ QStringLiteral("   114"), QStringLiteral("TBkndRsc"), QStringLiteral("FixedData") });
+        const int count = (meta.size() - 16) / 37;
+        auto dbl = [&](const QByteArray &b, int o) {
+            if (o + 8 > b.size()) return 0.0;
+            quint64 bits = qFromLittleEndian<quint64>(reinterpret_cast<const uchar*>(b.constData()) + o);
+            double v; memcpy(&v, &bits, 8); return v; };
+        int shown = 0;
+        for (int loop = 0; loop < count && shown < 12; ++loop) {
+            quint32 off = u32(meta, 16 + loop * 37 + 4);
+            quint32 nx = (loop + 1 < count) ? u32(meta, 16 + (loop + 1) * 37 + 4) : quint32(data.size());
+            if (off >= quint32(data.size()) || nx <= off) continue;
+            const QByteArray b = data.mid(int(off), int(nx - off));
+            if (b.size() < 24) continue;
+            std::printf("  uid@4=%u  d@8=%.4f  i@16=%u  d@16=%.4f  d@24=%.4f\n",
+                        u32(b, 4), dbl(b, 8), u32(b, 16), dbl(b, 16), dbl(b, 24));
+            ++shown;
+        }
+        return 0;
+    }
 
     int lastOffset = 0, blockIndex = 0;
     for (int i = 0; i + 28 <= map.size(); i += 28) {
@@ -62,7 +118,7 @@ int main(int argc, char **argv)
             blockIdx = blockIndex;
         }
         // Print the low-index fields (the core ones) to keep output readable.
-        if (idx <= 30 || idx == 300)
+        if (idx <= 40 || idx == 299 || idx == 300)
             std::printf("idx=%-4u type=0x%08x loc=%-5s offset=%-5u block=%d\n",
                         idx, typeValue, loc, dataBlockOffset, blockIdx);
     }

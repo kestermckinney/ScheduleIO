@@ -38,6 +38,10 @@ public:
     // paired with their owning unique id, in VarMeta record order.
     QVector<Entry> stringsForType(quint16 type) const;
 
+    // Raw blob (the bytes after the u32 length prefix) for a given (uniqueId,
+    // type), or empty if absent. Used for non-string var data (e.g. calendars).
+    QByteArray blobFor(quint32 uniqueId, quint16 type) const;
+
 private:
     struct Record {
         quint32 uniqueId = 0;

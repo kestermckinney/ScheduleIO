@@ -13,5 +13,6 @@ bool MppProject::operator==(const MppProject &o) const
         && tasks == o.tasks
         && resources == o.resources
         && assignments == o.assignments
-        && calendars == o.calendars;
+        && calendars == o.calendars
+        && relations == o.relations;
 }

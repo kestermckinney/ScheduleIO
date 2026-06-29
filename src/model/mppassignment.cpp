@@ -11,5 +11,12 @@ bool MppAssignment::operator==(const MppAssignment &o) const
         && taskUniqueId == o.taskUniqueId
         && resourceUniqueId == o.resourceUniqueId
         && qFuzzyCompare(units + 1.0, o.units + 1.0)
-        && workMillis == o.workMillis;
+        && workMillis == o.workMillis
+        && notes == o.notes
+        && cost == o.cost
+        && actualCost == o.actualCost
+        && remainingCost == o.remainingCost
+        && costVariance == o.costVariance
+        && baselines == o.baselines
+        && customFields == o.customFields;
 }

@@ -4,6 +4,9 @@
 #include "codec/fielddecoders.h"
 
 #include <QTest>
+#include <QtEndian>
+
+#include <cstring>
 
 using namespace FieldDecoders;
 
@@ -17,6 +20,7 @@ private slots:
     void percentClampsAndScales();
     void guidRoundTrip();
     void unicodeStringRoundTrip();
+    void doubleAndWork();
     void shortBuffersFailCleanly();
 };
 
@@ -74,6 +78,24 @@ void TstFieldDecoders::unicodeStringRoundTrip()
         if (!s.isEmpty())
             QCOMPARE(consumed, enc.size());
     }
+}
+
+void TstFieldDecoders::doubleAndWork()
+{
+    // readDouble round-trips an 8-byte LE double, e.g. a currency amount.
+    QByteArray buf(8, '\0');
+    const double cost = 395999.85;
+    quint64 bits;
+    std::memcpy(&bits, &cost, 8);
+    qToLittleEndian<quint64>(bits, reinterpret_cast<uchar *>(buf.data()));
+    double out = 0.0;
+    QVERIFY(readDouble(buf, 0, &out));
+    QVERIFY(qFuzzyCompare(out, cost));
+    QVERIFY(!readDouble(buf, 4, &out));   // would overrun
+
+    // Work: 480000 thousandths-of-minute == 8 hours.
+    QCOMPARE(decodeWorkDouble(480000.0), qint64(8) * 60 * 60 * 1000);
+    QCOMPARE(decodeWorkDouble(0.0), qint64(0));
 }
 
 void TstFieldDecoders::shortBuffersFailCleanly()

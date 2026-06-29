@@ -5,6 +5,9 @@
 
 #include <QtEndian>
 
+#include <cmath>
+#include <cstring>
+
 namespace FieldDecoders {
 
 QDateTime epoch()
@@ -49,6 +52,14 @@ QDateTime decodeMppTimestamp(const QByteArray &block, int offset)
         .addSecs(static_cast<qint64>(time) * 6);   // time is tenths of a minute
 }
 
+QDateTime decodeTimestampTenths(const QByteArray &d, int offset)
+{
+    qint32 tenths = 0;
+    if (!readI32(d, offset, &tenths))
+        return QDateTime();
+    return epoch().addSecs(static_cast<qint64>(tenths) * 6);   // 1 tenth-minute == 6 s
+}
+
 qint64 decodeDurationTenthMinutes(qint32 raw)
 {
     // raw is in tenths of a minute -> milliseconds.
@@ -58,6 +69,25 @@ qint64 decodeDurationTenthMinutes(qint32 raw)
 qint32 encodeDurationTenthMinutes(qint64 millis)
 {
     return static_cast<qint32>(millis / 6000);
+}
+
+bool readDouble(const QByteArray &d, int off, double *out)
+{
+    if (off < 0 || off + 8 > d.size())
+        return false;
+    const quint64 bits = qFromLittleEndian<quint64>(
+        reinterpret_cast<const uchar *>(d.constData() + off));
+    double v;
+    std::memcpy(&v, &bits, sizeof(v));
+    *out = v;
+    return true;
+}
+
+qint64 decodeWorkDouble(double thousandthsOfMinute)
+{
+    // Work is stored in 1/1000 of a minute, so value * 60 == milliseconds
+    // (e.g. 8h -> 480000 -> 28'800'000 ms). Verified against the XML oracle.
+    return llround(thousandthsOfMinute * 60.0);
 }
 
 double decodePercent(quint16 raw)

@@ -14,5 +14,16 @@ bool MppTask::operator==(const MppTask &o) const
         && durationMillis == o.durationMillis
         && qFuzzyCompare(percentComplete + 1.0, o.percentComplete + 1.0)
         && milestone == o.milestone
-        && summary == o.summary;
+        && summary == o.summary
+        && constraintType == o.constraintType
+        && constraintDate == o.constraintDate
+        && wbs == o.wbs
+        && notes == o.notes
+        && cost == o.cost
+        && fixedCost == o.fixedCost
+        && actualCost == o.actualCost
+        && remainingCost == o.remainingCost
+        && costVariance == o.costVariance
+        && baselines == o.baselines
+        && customFields == o.customFields;
 }

@@ -8,5 +8,7 @@ bool MppCalendar::operator==(const MppCalendar &o) const
     return uniqueId == o.uniqueId
         && name == o.name
         && baseCalendarUniqueId == o.baseCalendarUniqueId
-        && workingDayMask == o.workingDayMask;
+        && workingDayMask == o.workingDayMask
+        && workingTimes == o.workingTimes
+        && exceptions == o.exceptions;
 }

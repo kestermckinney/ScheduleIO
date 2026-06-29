@@ -1,0 +1,37 @@
+site_name: MppIO Documentation
+
+theme:
+  name: readthedocs
+  highlightjs: true
+
+nav:
+  - 'Home': index.md
+  - 'Getting Started':
+    - 'Building': GettingStarted/Building.md
+    - 'Basic Usage': GettingStarted/BasicUsage.md
+    - 'XML Interchange': GettingStarted/XmlInterchange.md
+    - 'Dynamic Loading': GettingStarted/DynamicLoading.md
+  - 'API Reference':
+    - 'MppIO Class': API/MppIO.md
+    - 'XmlIO Class': API/XmlIO.md
+  - 'Data Model':
+    - 'Overview': DataModel/Overview.md
+    - 'MppProject': DataModel/MppProject.md
+    - 'MppTask': DataModel/MppTask.md
+    - 'MppResource': DataModel/MppResource.md
+    - 'MppAssignment': DataModel/MppAssignment.md
+    - 'MppRelation': DataModel/MppRelation.md
+    - 'MppCalendar': DataModel/MppCalendar.md
+    - 'MppBaseline': DataModel/MppBaseline.md
+    - 'MppCustomField': DataModel/MppCustomField.md
+    - 'MppCostRate': DataModel/MppCostRate.md
+  - 'Reference':
+    - 'Field Coverage': Reference/FieldCoverage.md
+    - 'File Format Notes': Reference/FileFormat.md
+
+markdown_extensions:
+  - tables
+  - attr_list
+  - md_in_html
+  - def_list
+  - fenced_code

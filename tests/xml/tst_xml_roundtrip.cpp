@@ -1,0 +1,180 @@
+// Copyright (C) 2026 Paul McKinney
+// SPDX-License-Identifier: GPL-3.0-only
+
+#include "xmlio.h"
+
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QTest>
+
+#ifndef MPPIO_FIXTURE_DIR
+#define MPPIO_FIXTURE_DIR ""
+#endif
+
+// XmlIO must be a faithful reader/writer of the MSPDI model: parsing an XML
+// document, writing it back out, and parsing it again must yield an identical
+// MppProject. This proves the writer emits everything the reader reads (i.e. the
+// round trip is lossless for the modelled fields) on real MS Project exports.
+class TstXmlRoundtrip : public QObject
+{
+    Q_OBJECT
+private slots:
+    void synthetic();
+    void fixtures_data();
+    void fixtures();
+};
+
+void TstXmlRoundtrip::synthetic()
+{
+    // A small hand-built project exercises every modelled entity without needing
+    // any fixture present, so the round trip is always covered.
+    MppProject p;
+    p.formatVersion = MppProject::FormatVersion::Mpp14;
+    p.title = QStringLiteral("Round & Trip <\"test\">");
+    p.author = QStringLiteral("Tester");
+    p.startDate = QDateTime(QDate(2026, 1, 5), QTime(8, 0));
+    p.finishDate = QDateTime(QDate(2026, 2, 27), QTime(17, 0));
+
+    MppTask summary;
+    summary.uniqueId = 1;
+    summary.id = 1;
+    summary.outlineLevel = 1;
+    summary.name = QStringLiteral("Phase 1");
+    summary.summary = true;
+    summary.start = p.startDate;
+    summary.finish = p.finishDate;
+    summary.durationMillis = 40LL * 3600 * 1000;
+
+    MppTask task;
+    task.uniqueId = 2;
+    task.id = 2;
+    task.outlineLevel = 2;
+    task.name = QStringLiteral("Design");
+    task.start = p.startDate;
+    task.finish = QDateTime(QDate(2026, 1, 12), QTime(17, 0));
+    task.durationMillis = 32LL * 3600 * 1000;
+    task.percentComplete = 0.5;
+    task.milestone = false;
+    task.constraintType = 4;
+    task.constraintDate = p.startDate;
+    task.wbs = QStringLiteral("1.1");
+    task.notes = QStringLiteral("{\\rtf1 line one}");
+    task.cost = 1234.5;
+    task.fixedCost = 100.0;
+    task.actualCost = 600.0;
+    task.remainingCost = 634.5;
+
+    MppBaseline base;
+    base.number = 0;
+    base.cost = 1200.0;
+    base.workMillis = 16LL * 3600 * 1000;
+    base.start = task.start;
+    base.finish = task.finish;
+    base.durationMillis = task.durationMillis;
+    task.baselines.append(base);
+
+    MppCustomField textField;
+    textField.fieldId = 0x0B400033;   // task Text1
+    textField.name = QStringLiteral("Text1");
+    textField.value = QStringLiteral("custom value");
+    task.customFields.append(textField);
+
+    p.tasks << summary << task;
+
+    MppRelation rel;
+    rel.predecessorTaskUid = 1;
+    rel.successorTaskUid = 2;
+    rel.type = MppRelation::FinishToStart;
+    rel.lagMillis = 60LL * 60 * 1000;   // 1h, a whole number of tenth-minutes
+    p.relations.append(rel);
+
+    MppResource res;
+    res.uniqueId = 1;
+    res.id = 1;
+    res.name = QStringLiteral("Alice");
+    res.initials = QStringLiteral("A");
+    res.maxUnits = 1.0;
+    res.cost = 600.0;
+    MppCostRate cr;
+    cr.table = 0;
+    cr.startDate = p.startDate;
+    cr.standardRate = 75.0;
+    cr.standardRateUnit = 2;
+    res.costRates.append(cr);
+    p.resources.append(res);
+
+    MppAssignment asn;
+    asn.uniqueId = 1;
+    asn.taskUniqueId = 2;
+    asn.resourceUniqueId = 1;
+    asn.units = 1.0;
+    asn.workMillis = 16LL * 3600 * 1000;
+    asn.cost = 600.0;
+    p.assignments.append(asn);
+
+    MppCalendar cal;
+    cal.uniqueId = 1;
+    cal.name = QStringLiteral("Standard");
+    cal.baseCalendarUniqueId = -1;
+    cal.workingDayMask = 0x1F;   // Mon..Fri
+    for (int i = 0; i < 7; ++i) {
+        QList<MppTimeRange> day;
+        if (i < 5) {
+            day.append({ QTime(8, 0), QTime(12, 0) });
+            day.append({ QTime(13, 0), QTime(17, 0) });
+        }
+        cal.workingTimes.append(day);
+    }
+    MppCalendarException ex;
+    ex.fromDate = QDate(2026, 12, 25);
+    ex.toDate = QDate(2026, 12, 25);
+    ex.name = QStringLiteral("Christmas");
+    ex.working = false;
+    cal.exceptions.append(ex);
+    p.calendars.append(cal);
+
+    XmlIO a;
+    a.setProject(p);
+    const QByteArray xml = a.saveToData();
+    QVERIFY2(!xml.isEmpty(), qPrintable(a.errorString()));
+
+    XmlIO b;
+    QVERIFY2(b.openFromData(xml), qPrintable(b.errorString()));
+
+    // The model survives the write->read round trip unchanged...
+    QCOMPARE(b.project(), p);
+
+    // ...and a second round trip is stable too.
+    XmlIO c;
+    QVERIFY(c.openFromData(b.saveToData()));
+    QCOMPARE(c.project(), b.project());
+}
+
+void TstXmlRoundtrip::fixtures_data()
+{
+    QTest::addColumn<QString>("xml");
+    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.xml") }, QDir::Files))
+        QTest::newRow(qPrintable(f)) << QDir(dir).filePath(f);
+}
+
+void TstXmlRoundtrip::fixtures()
+{
+    QFETCH(QString, xml);
+
+    XmlIO a;
+    QVERIFY2(a.open(xml), qPrintable(a.errorString()));
+
+    const QByteArray written = a.saveToData();
+    QVERIFY2(!written.isEmpty(), qPrintable(a.errorString()));
+
+    XmlIO b;
+    QVERIFY2(b.openFromData(written), qPrintable(b.errorString()));
+
+    // Real MS Project exports must round-trip through our model losslessly.
+    QCOMPARE(b.project(), a.project());
+}
+
+QTEST_MAIN(TstXmlRoundtrip)
+#include "tst_xml_roundtrip.moc"

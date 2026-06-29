@@ -54,3 +54,20 @@ QVector<BkndVarData::Entry> BkndVarData::stringsForType(quint16 type) const
     }
     return out;
 }
+
+QByteArray BkndVarData::blobFor(quint32 uniqueId, quint16 type) const
+{
+    const uchar *v = reinterpret_cast<const uchar *>(m_var2.constData());
+    const quint32 size = static_cast<quint32>(m_var2.size());
+    for (const Record &r : m_records) {
+        if (r.type != type || r.uniqueId != uniqueId)
+            continue;
+        if (r.offset + 4 > size)
+            return QByteArray();
+        const quint32 len = qFromLittleEndian<quint32>(v + r.offset);
+        if (len == 0 || r.offset + 4 + len > size)
+            return QByteArray();
+        return m_var2.mid(static_cast<int>(r.offset + 4), static_cast<int>(len));
+    }
+    return QByteArray();
+}

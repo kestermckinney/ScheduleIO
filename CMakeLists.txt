@@ -21,16 +21,23 @@ find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core)
 
 set(MPPIO_SOURCES
     mppio.cpp
+    xmlio.cpp
+    src/xml/xmlserializer.cpp
     src/ole/compoundfile.cpp
     src/codec/streamquartet.cpp
     src/codec/fielddecoders.cpp
     src/codec/bkndvardata.cpp
     src/codec/propsreader.cpp
+    src/codec/mppfieldids.cpp
     src/model/mppproject.cpp
     src/model/mpptask.cpp
     src/model/mppresource.cpp
     src/model/mppassignment.cpp
     src/model/mppcalendar.cpp
+    src/model/mpprelation.cpp
+    src/model/mppbaseline.cpp
+    src/model/mppcustomfield.cpp
+    src/model/mppcostrate.cpp
     src/serializer/docserializer.cpp
     src/serializer/mpp12serializer.cpp
     src/serializer/mpp14serializer.cpp
@@ -38,17 +45,24 @@ set(MPPIO_SOURCES
 
 set(MPPIO_HEADERS
     mppio.h
+    xmlio.h
     mppio_export.h
+    src/xml/xmlserializer.h
     src/ole/compoundfile.h
     src/codec/streamquartet.h
     src/codec/fielddecoders.h
     src/codec/bkndvardata.h
     src/codec/propsreader.h
+    src/codec/mppfieldids.h
     src/model/mppproject.h
     src/model/mpptask.h
     src/model/mppresource.h
     src/model/mppassignment.h
     src/model/mppcalendar.h
+    src/model/mpprelation.h
+    src/model/mppbaseline.h
+    src/model/mppcustomfield.h
+    src/model/mppcostrate.h
     src/serializer/docserializer.h
     src/serializer/mpp12serializer.h
     src/serializer/mpp14serializer.h

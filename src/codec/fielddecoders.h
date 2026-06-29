@@ -31,6 +31,10 @@ quint32   encodeTimestampSeconds(const QDateTime &dt);
 // Returns an invalid QDateTime for the "no date" sentinels. UTC for stability.
 QDateTime decodeMppTimestamp(const QByteArray &block, int offset);
 
+// A 4-byte timestamp stored as a count of tenths of a minute since the epoch
+// (MPXJ getTimestampFromTenths) — used by the cost-rate tables. UTC for stability.
+QDateTime decodeTimestampTenths(const QByteArray &d, int offset);
+
 // Durations are stored as tenths of a minute. We normalise to milliseconds in
 // the model so callers never deal with raw units.
 qint64 decodeDurationTenthMinutes(qint32 raw);
@@ -39,6 +43,16 @@ qint32 encodeDurationTenthMinutes(qint64 millis);
 // Percent-complete is stored as an integer 0..100; the model uses a 0.0..1.0 ratio.
 double decodePercent(quint16 raw);
 quint16 encodePercent(double ratio);
+
+// Little-endian 8-byte IEEE double (bounds-safe: returns false on short input).
+// Cost/work/number values in real .mpp FixedData/Var2Data are stored this way.
+// NOTE: in MPP14 a currency value is the plain amount (e.g. 395999.85), not the
+// hundredths-of-a-unit integer seen in some other Project code paths.
+bool readDouble(const QByteArray &d, int off, double *out);
+
+// Work/effort is stored as a double in thousandths of a minute (so 8h == 480000);
+// normalise to milliseconds. (Confirmed vs the XML oracle: value * 60 == ms.)
+qint64 decodeWorkDouble(double thousandthsOfMinute);
 
 // 16-byte GUID <-> QUuid.
 QUuid  decodeGuid(const QByteArray &bytes16);

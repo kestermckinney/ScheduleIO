@@ -8,6 +8,7 @@
 
 #include "model/mppassignment.h"
 #include "model/mppcalendar.h"
+#include "model/mpprelation.h"
 #include "model/mppresource.h"
 #include "model/mpptask.h"
 
@@ -39,6 +40,7 @@ public:
     QList<MppResource> resources;
     QList<MppAssignment> assignments;
     QList<MppCalendar> calendars;
+    QList<MppRelation> relations;
 
     bool operator==(const MppProject &o) const;
     bool operator!=(const MppProject &o) const { return !(*this == o); }

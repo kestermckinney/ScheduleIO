@@ -1,0 +1,897 @@
+// Copyright (C) 2026 Paul McKinney
+// SPDX-License-Identifier: GPL-3.0-only
+
+#include "xml/xmlserializer.h"
+
+#include "codec/mppfieldids.h"
+
+#include <QDateTime>
+#include <QHash>
+#include <QMetaType>
+#include <QMultiHash>
+#include <QRegularExpression>
+#include <QXmlStreamReader>
+#include <QXmlStreamWriter>
+
+#include <cmath>
+
+// The MSPDI namespace every element lives in.
+static const QString kMspdiNs = QStringLiteral("http://schemas.microsoft.com/project");
+
+namespace {
+
+// ---- value conversions ------------------------------------------------------
+
+// MSPDI carries an ISO-8601 duration (e.g. "PT640H0M0S", sometimes "P2DT3H...").
+// The model normalises every duration/work value to milliseconds.
+qint64 parseIsoDuration(const QString &s)
+{
+    if (s.isEmpty())
+        return 0;
+    static const QRegularExpression re(
+        QStringLiteral("^(-?)P(?:(\\d+)D)?T(\\d+)H(\\d+)M(\\d+(?:\\.\\d+)?)S$"));
+    const QRegularExpressionMatch m = re.match(s.trimmed());
+    if (!m.hasMatch())
+        return 0;
+    const qint64 sign = m.captured(1) == QLatin1String("-") ? -1 : 1;
+    const qint64 days = m.captured(2).toLongLong();
+    const qint64 hours = m.captured(3).toLongLong();
+    const qint64 minutes = m.captured(4).toLongLong();
+    const double seconds = m.captured(5).toDouble();
+    const qint64 ms = days * 86400000LL + hours * 3600000LL + minutes * 60000LL
+        + static_cast<qint64>(std::llround(seconds * 1000.0));
+    return sign * ms;
+}
+
+QString formatIsoDuration(qint64 ms)
+{
+    QString sign;
+    if (ms < 0) {
+        sign = QStringLiteral("-");
+        ms = -ms;
+    }
+    const qint64 hours = ms / 3600000LL;
+    qint64 rem = ms % 3600000LL;
+    const qint64 minutes = rem / 60000LL;
+    rem %= 60000LL;
+    const qint64 seconds = rem / 1000LL;
+    const qint64 millis = rem % 1000LL;
+    QString secStr = QString::number(seconds);
+    if (millis != 0) {
+        // MSPDI carries sub-second precision (e.g. "PT9H0M1.62S"); keep it so the
+        // value round-trips exactly. Trim trailing zeros for a canonical form.
+        secStr = QString::number(seconds + millis / 1000.0, 'f', 3);
+        while (secStr.endsWith(QLatin1Char('0')))
+            secStr.chop(1);
+        if (secStr.endsWith(QLatin1Char('.')))
+            secStr.chop(1);
+    }
+    return QStringLiteral("%1PT%2H%3M%4S").arg(sign).arg(hours).arg(minutes).arg(secStr);
+}
+
+QDateTime parseDateTime(const QString &s)
+{
+    return QDateTime::fromString(s.trimmed(), Qt::ISODate);
+}
+
+QString formatDateTime(const QDateTime &dt)
+{
+    return dt.toString(Qt::ISODate);
+}
+
+// Whole numbers print without a decimal point; everything else round-trips at
+// full double precision so read(write(x)) == read(x).
+QString formatNumber(double v)
+{
+    if (std::floor(v) == v && std::fabs(v) < 1e15)
+        return QString::number(static_cast<qint64>(v));
+    // Shortest decimal that still parses back to exactly v: clean output (like
+    // MS Project's own) while guaranteeing read(write(x)) == read(x).
+    for (int prec = 1; prec < 17; ++prec) {
+        const QString s = QString::number(v, 'g', prec);
+        if (s.toDouble() == v)
+            return s;
+    }
+    return QString::number(v, 'g', 17);
+}
+
+QTime parseTime(const QString &s)
+{
+    return QTime::fromString(s.trimmed(), QStringLiteral("HH:mm:ss"));
+}
+
+QString formatTime(const QTime &t)
+{
+    return t.toString(QStringLiteral("HH:mm:ss"));
+}
+
+// ---- custom ("extended") field plumbing ------------------------------------
+
+// Resolve a full MPP field id to its definition (name + decode kind), so an XML
+// <ExtendedAttribute> value can be stored in the model's natural Qt type and
+// written back the same way the binary reader would have produced it.
+const MppFieldIds::CustomFieldDef *customFieldDef(int fieldId)
+{
+    const quint16 high = static_cast<quint16>((fieldId >> 16) & 0xFFFF);
+    const quint16 index = static_cast<quint16>(fieldId & 0xFFFF);
+    const QVector<MppFieldIds::CustomFieldDef> *defs = nullptr;
+    if (high == MppFieldIds::kTaskHigh)
+        defs = &MppFieldIds::taskCustomFields();
+    else if (high == MppFieldIds::kResourceHigh)
+        defs = &MppFieldIds::resourceCustomFields();
+    else if (high == MppFieldIds::kAssignmentHigh)
+        defs = &MppFieldIds::assignmentCustomFields();
+    if (!defs)
+        return nullptr;
+    for (const MppFieldIds::CustomFieldDef &d : *defs) {
+        if (d.index == index)
+            return &d;
+    }
+    return nullptr;
+}
+
+QVariant customValueFromString(const MppFieldIds::CustomFieldDef *def, const QString &raw)
+{
+    using MppFieldIds::FieldKind;
+    if (!def)
+        return raw;   // unknown field: keep the literal text
+    switch (def->kind) {
+    case FieldKind::String:
+        return raw;
+    case FieldKind::Number:
+    case FieldKind::Currency:
+        return raw.toDouble();
+    case FieldKind::DateTime:
+        return parseDateTime(raw);
+    case FieldKind::Duration:
+        return QVariant::fromValue<qint64>(parseIsoDuration(raw));
+    case FieldKind::Bool:
+        return raw == QLatin1String("1") || raw.compare(QLatin1String("true"), Qt::CaseInsensitive) == 0;
+    }
+    return raw;
+}
+
+QString customValueToString(const QVariant &v)
+{
+    switch (v.typeId()) {
+    case QMetaType::QString:
+        return v.toString();
+    case QMetaType::Double:
+        return formatNumber(v.toDouble());
+    case QMetaType::LongLong:
+    case QMetaType::Int:
+        return formatIsoDuration(v.toLongLong());   // qint64 == a duration in ms
+    case QMetaType::Bool:
+        return v.toBool() ? QStringLiteral("1") : QStringLiteral("0");
+    case QMetaType::QDateTime:
+        return formatDateTime(v.toDateTime());
+    default:
+        return v.toString();
+    }
+}
+
+// =========================== reading ========================================
+
+MppBaseline parseBaseline(QXmlStreamReader &r)
+{
+    MppBaseline b;
+    while (r.readNextStartElement()) {
+        const QStringView n = r.name();
+        if (n == u"Number")
+            b.number = r.readElementText().toInt();
+        else if (n == u"Cost")
+            b.cost = r.readElementText().toDouble();
+        else if (n == u"Work")
+            b.workMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"Duration")
+            b.durationMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"Start")
+            b.start = parseDateTime(r.readElementText());
+        else if (n == u"Finish")
+            b.finish = parseDateTime(r.readElementText());
+        else
+            r.skipCurrentElement();
+    }
+    return b;
+}
+
+void parsePredecessorLink(QXmlStreamReader &r, int successorUid, QList<MppRelation> &out)
+{
+    MppRelation rel;
+    rel.successorTaskUid = successorUid;
+    while (r.readNextStartElement()) {
+        const QStringView n = r.name();
+        if (n == u"PredecessorUID")
+            rel.predecessorTaskUid = r.readElementText().toInt();
+        else if (n == u"Type")
+            rel.type = r.readElementText().toInt();
+        else if (n == u"LinkLag")
+            rel.lagMillis = r.readElementText().toLongLong() * 6000;   // tenths of a min -> ms
+        else
+            r.skipCurrentElement();
+    }
+    out.append(rel);
+}
+
+void parseExtendedAttribute(QXmlStreamReader &r, QList<MppCustomField> &out)
+{
+    int fieldId = 0;
+    QString raw;
+    bool haveValue = false;
+    while (r.readNextStartElement()) {
+        const QStringView n = r.name();
+        if (n == u"FieldID")
+            fieldId = r.readElementText().toInt();
+        else if (n == u"Value") {
+            raw = r.readElementText();
+            haveValue = true;
+        } else
+            r.skipCurrentElement();
+    }
+    if (fieldId == 0 || !haveValue)
+        return;
+    const MppFieldIds::CustomFieldDef *def = customFieldDef(fieldId);
+    MppCustomField cf;
+    cf.fieldId = fieldId;
+    cf.name = def ? QString::fromLatin1(def->name) : QString();
+    cf.value = customValueFromString(def, raw);
+    if (cf.value.isValid())
+        out.append(cf);
+}
+
+MppTask parseTask(QXmlStreamReader &r, QList<MppRelation> &relations)
+{
+    MppTask t;
+    while (r.readNextStartElement()) {
+        const QStringView n = r.name();
+        if (n == u"UID")
+            t.uniqueId = r.readElementText().toInt();
+        else if (n == u"ID")
+            t.id = r.readElementText().toInt();
+        else if (n == u"OutlineLevel")
+            t.outlineLevel = r.readElementText().toInt();
+        else if (n == u"Name")
+            t.name = r.readElementText();
+        else if (n == u"WBS")
+            t.wbs = r.readElementText();
+        else if (n == u"Start")
+            t.start = parseDateTime(r.readElementText());
+        else if (n == u"Finish")
+            t.finish = parseDateTime(r.readElementText());
+        else if (n == u"Duration")
+            t.durationMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"PercentComplete")
+            t.percentComplete = r.readElementText().toDouble() / 100.0;
+        else if (n == u"Milestone")
+            t.milestone = r.readElementText().toInt() != 0;
+        else if (n == u"Summary")
+            t.summary = r.readElementText().toInt() != 0;
+        else if (n == u"ConstraintType")
+            t.constraintType = r.readElementText().toInt();
+        else if (n == u"ConstraintDate")
+            t.constraintDate = parseDateTime(r.readElementText());
+        else if (n == u"FixedCost")
+            t.fixedCost = r.readElementText().toDouble();
+        else if (n == u"Cost")
+            t.cost = r.readElementText().toDouble();
+        else if (n == u"ActualCost")
+            t.actualCost = r.readElementText().toDouble();
+        else if (n == u"RemainingCost")
+            t.remainingCost = r.readElementText().toDouble();
+        else if (n == u"Notes")
+            t.notes = r.readElementText();
+        else if (n == u"Baseline")
+            t.baselines.append(parseBaseline(r));
+        else if (n == u"PredecessorLink")
+            parsePredecessorLink(r, t.uniqueId, relations);
+        else if (n == u"ExtendedAttribute")
+            parseExtendedAttribute(r, t.customFields);
+        else
+            r.skipCurrentElement();
+    }
+    return t;
+}
+
+MppCostRate parseRate(QXmlStreamReader &r)
+{
+    MppCostRate cr;
+    while (r.readNextStartElement()) {
+        const QStringView n = r.name();
+        if (n == u"RateTable")
+            cr.table = r.readElementText().toInt();
+        else if (n == u"RatesFrom")
+            cr.startDate = parseDateTime(r.readElementText());
+        else if (n == u"RatesTo")
+            cr.endDate = parseDateTime(r.readElementText());
+        else if (n == u"StandardRate")
+            cr.standardRate = r.readElementText().toDouble();
+        else if (n == u"StandardRateFormat")
+            cr.standardRateUnit = r.readElementText().toInt();
+        else if (n == u"OvertimeRate")
+            cr.overtimeRate = r.readElementText().toDouble();
+        else if (n == u"OvertimeRateFormat")
+            cr.overtimeRateUnit = r.readElementText().toInt();
+        else if (n == u"CostPerUse")
+            cr.costPerUse = r.readElementText().toDouble();
+        else
+            r.skipCurrentElement();
+    }
+    return cr;
+}
+
+MppResource parseResource(QXmlStreamReader &r)
+{
+    MppResource res;
+    while (r.readNextStartElement()) {
+        const QStringView n = r.name();
+        if (n == u"UID")
+            res.uniqueId = r.readElementText().toInt();
+        else if (n == u"ID")
+            res.id = r.readElementText().toInt();
+        else if (n == u"Name")
+            res.name = r.readElementText();
+        else if (n == u"Initials")
+            res.initials = r.readElementText();
+        else if (n == u"MaxUnits")
+            res.maxUnits = r.readElementText().toDouble();
+        else if (n == u"Cost")
+            res.cost = r.readElementText().toDouble();
+        else if (n == u"ActualCost")
+            res.actualCost = r.readElementText().toDouble();
+        else if (n == u"RemainingCost")
+            res.remainingCost = r.readElementText().toDouble();
+        else if (n == u"CostVariance")
+            res.costVariance = r.readElementText().toDouble();
+        else if (n == u"Notes")
+            res.notes = r.readElementText();
+        else if (n == u"Baseline")
+            res.baselines.append(parseBaseline(r));
+        else if (n == u"ExtendedAttribute")
+            parseExtendedAttribute(r, res.customFields);
+        else if (n == u"Rates") {
+            while (r.readNextStartElement()) {
+                if (r.name() == u"Rate")
+                    res.costRates.append(parseRate(r));
+                else
+                    r.skipCurrentElement();
+            }
+        } else
+            r.skipCurrentElement();
+    }
+    return res;
+}
+
+MppAssignment parseAssignment(QXmlStreamReader &r)
+{
+    MppAssignment a;
+    while (r.readNextStartElement()) {
+        const QStringView n = r.name();
+        if (n == u"UID")
+            a.uniqueId = r.readElementText().toInt();
+        else if (n == u"TaskUID")
+            a.taskUniqueId = r.readElementText().toInt();
+        else if (n == u"ResourceUID")
+            a.resourceUniqueId = r.readElementText().toInt();
+        else if (n == u"Units")
+            a.units = r.readElementText().toDouble();
+        else if (n == u"Work")
+            a.workMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"Cost")
+            a.cost = r.readElementText().toDouble();
+        else if (n == u"ActualCost")
+            a.actualCost = r.readElementText().toDouble();
+        else if (n == u"RemainingCost")
+            a.remainingCost = r.readElementText().toDouble();
+        else if (n == u"CostVariance")
+            a.costVariance = r.readElementText().toDouble();
+        else if (n == u"Notes")
+            a.notes = r.readElementText();
+        else if (n == u"Baseline")
+            a.baselines.append(parseBaseline(r));
+        else if (n == u"ExtendedAttribute")
+            parseExtendedAttribute(r, a.customFields);
+        else
+            r.skipCurrentElement();
+    }
+    return a;
+}
+
+QList<MppTimeRange> parseWorkingTimes(QXmlStreamReader &r)
+{
+    QList<MppTimeRange> times;
+    while (r.readNextStartElement()) {
+        if (r.name() == u"WorkingTime") {
+            MppTimeRange range;
+            while (r.readNextStartElement()) {
+                const QStringView n = r.name();
+                if (n == u"FromTime")
+                    range.start = parseTime(r.readElementText());
+                else if (n == u"ToTime")
+                    range.end = parseTime(r.readElementText());
+                else
+                    r.skipCurrentElement();
+            }
+            if (range.start.isValid() && range.end.isValid())
+                times.append(range);
+        } else
+            r.skipCurrentElement();
+    }
+    return times;
+}
+
+void parseWeekDay(QXmlStreamReader &r, MppCalendar &cal)
+{
+    int dayType = -1;
+    bool working = false;
+    QList<MppTimeRange> times;
+    QDate fromDate, toDate;   // only used for legacy (DayType 0) exceptions
+    while (r.readNextStartElement()) {
+        const QStringView n = r.name();
+        if (n == u"DayType")
+            dayType = r.readElementText().toInt();
+        else if (n == u"DayWorking")
+            working = r.readElementText().toInt() != 0;
+        else if (n == u"WorkingTimes")
+            times = parseWorkingTimes(r);
+        else if (n == u"TimePeriod") {
+            while (r.readNextStartElement()) {
+                const QStringView tn = r.name();
+                if (tn == u"FromDate")
+                    fromDate = parseDateTime(r.readElementText()).date();
+                else if (tn == u"ToDate")
+                    toDate = parseDateTime(r.readElementText()).date();
+                else
+                    r.skipCurrentElement();
+            }
+        } else
+            r.skipCurrentElement();
+    }
+
+    if (dayType >= 1 && dayType <= 7) {
+        const int index = (dayType + 5) % 7;   // DayType 1=Sun..7=Sat -> 0=Mon..6=Sun
+        if (working)
+            cal.workingDayMask |= static_cast<quint8>(1u << index);
+        cal.workingTimes[index] = times;
+    } else if (dayType == 0 && fromDate.isValid()) {
+        MppCalendarException ex;
+        ex.fromDate = fromDate;
+        ex.toDate = toDate.isValid() ? toDate : fromDate;
+        ex.working = working;
+        ex.workingTimes = times;
+        cal.exceptions.append(ex);
+    }
+}
+
+void parseException(QXmlStreamReader &r, MppCalendar &cal)
+{
+    MppCalendarException ex;
+    while (r.readNextStartElement()) {
+        const QStringView n = r.name();
+        if (n == u"Name")
+            ex.name = r.readElementText();
+        else if (n == u"DayWorking")
+            ex.working = r.readElementText().toInt() != 0;
+        else if (n == u"WorkingTimes")
+            ex.workingTimes = parseWorkingTimes(r);
+        else if (n == u"TimePeriod") {
+            while (r.readNextStartElement()) {
+                const QStringView tn = r.name();
+                if (tn == u"FromDate")
+                    ex.fromDate = parseDateTime(r.readElementText()).date();
+                else if (tn == u"ToDate")
+                    ex.toDate = parseDateTime(r.readElementText()).date();
+                else
+                    r.skipCurrentElement();
+            }
+        } else
+            r.skipCurrentElement();
+    }
+    if (ex.fromDate.isValid()) {
+        if (!ex.toDate.isValid())
+            ex.toDate = ex.fromDate;
+        cal.exceptions.append(ex);
+    }
+}
+
+MppCalendar parseCalendar(QXmlStreamReader &r)
+{
+    MppCalendar cal;
+    cal.workingTimes.clear();
+    for (int i = 0; i < 7; ++i)
+        cal.workingTimes.append(QList<MppTimeRange>());
+    while (r.readNextStartElement()) {
+        const QStringView n = r.name();
+        if (n == u"UID")
+            cal.uniqueId = r.readElementText().toInt();
+        else if (n == u"Name")
+            cal.name = r.readElementText();
+        else if (n == u"BaseCalendarUID")
+            cal.baseCalendarUniqueId = r.readElementText().toInt();
+        else if (n == u"WeekDays") {
+            while (r.readNextStartElement()) {
+                if (r.name() == u"WeekDay")
+                    parseWeekDay(r, cal);
+                else
+                    r.skipCurrentElement();
+            }
+        } else if (n == u"Exceptions") {
+            while (r.readNextStartElement()) {
+                if (r.name() == u"Exception")
+                    parseException(r, cal);
+                else
+                    r.skipCurrentElement();
+            }
+        } else
+            r.skipCurrentElement();
+    }
+    return cal;
+}
+
+MppProject::FormatVersion versionFromSaveVersion(int sv)
+{
+    switch (sv) {
+    case 12:
+        return MppProject::FormatVersion::Mpp12;
+    case 14:
+        return MppProject::FormatVersion::Mpp14;
+    default:
+        return MppProject::FormatVersion::Unknown;
+    }
+}
+
+// =========================== writing ========================================
+
+void writeText(QXmlStreamWriter &w, const char *name, const QString &value)
+{
+    w.writeTextElement(QString::fromLatin1(name), value);
+}
+
+void writeBaseline(QXmlStreamWriter &w, const MppBaseline &b)
+{
+    w.writeStartElement(QStringLiteral("Baseline"));
+    writeText(w, "Number", QString::number(b.number));
+    if (b.start.isValid())
+        writeText(w, "Start", formatDateTime(b.start));
+    if (b.finish.isValid())
+        writeText(w, "Finish", formatDateTime(b.finish));
+    writeText(w, "Duration", formatIsoDuration(b.durationMillis));
+    writeText(w, "Work", formatIsoDuration(b.workMillis));
+    writeText(w, "Cost", formatNumber(b.cost));
+    w.writeEndElement();
+}
+
+void writeExtendedAttributes(QXmlStreamWriter &w, const QList<MppCustomField> &fields)
+{
+    for (const MppCustomField &cf : fields) {
+        w.writeStartElement(QStringLiteral("ExtendedAttribute"));
+        writeText(w, "FieldID", QString::number(cf.fieldId));
+        writeText(w, "Value", customValueToString(cf.value));
+        w.writeEndElement();
+    }
+}
+
+void writeWorkingTimes(QXmlStreamWriter &w, const QList<MppTimeRange> &times)
+{
+    w.writeStartElement(QStringLiteral("WorkingTimes"));
+    for (const MppTimeRange &t : times) {
+        w.writeStartElement(QStringLiteral("WorkingTime"));
+        writeText(w, "FromTime", formatTime(t.start));
+        writeText(w, "ToTime", formatTime(t.end));
+        w.writeEndElement();
+    }
+    w.writeEndElement();
+}
+
+void writeCalendar(QXmlStreamWriter &w, const MppCalendar &cal)
+{
+    w.writeStartElement(QStringLiteral("Calendar"));
+    writeText(w, "UID", QString::number(cal.uniqueId));
+    writeText(w, "Name", cal.name);
+    writeText(w, "IsBaseCalendar", cal.baseCalendarUniqueId < 0 ? QStringLiteral("1") : QStringLiteral("0"));
+    writeText(w, "BaseCalendarUID", QString::number(cal.baseCalendarUniqueId));
+
+    w.writeStartElement(QStringLiteral("WeekDays"));
+    for (int dayType = 1; dayType <= 7; ++dayType) {
+        const int index = (dayType + 5) % 7;   // 0=Mon..6=Sun
+        const bool working = (cal.workingDayMask >> index) & 1u;
+        w.writeStartElement(QStringLiteral("WeekDay"));
+        writeText(w, "DayType", QString::number(dayType));
+        writeText(w, "DayWorking", working ? QStringLiteral("1") : QStringLiteral("0"));
+        if (working && index < cal.workingTimes.size() && !cal.workingTimes[index].isEmpty())
+            writeWorkingTimes(w, cal.workingTimes[index]);
+        w.writeEndElement();
+    }
+    w.writeEndElement();
+
+    if (!cal.exceptions.isEmpty()) {
+        w.writeStartElement(QStringLiteral("Exceptions"));
+        for (const MppCalendarException &ex : cal.exceptions) {
+            w.writeStartElement(QStringLiteral("Exception"));
+            w.writeStartElement(QStringLiteral("TimePeriod"));
+            writeText(w, "FromDate", formatDateTime(QDateTime(ex.fromDate, QTime(0, 0))));
+            writeText(w, "ToDate", formatDateTime(QDateTime(ex.toDate, QTime(0, 0))));
+            w.writeEndElement();
+            if (!ex.name.isEmpty())
+                writeText(w, "Name", ex.name);
+            writeText(w, "DayWorking", ex.working ? QStringLiteral("1") : QStringLiteral("0"));
+            if (ex.working && !ex.workingTimes.isEmpty())
+                writeWorkingTimes(w, ex.workingTimes);
+            w.writeEndElement();
+        }
+        w.writeEndElement();
+    }
+    w.writeEndElement();
+}
+
+void writeTask(QXmlStreamWriter &w, const MppTask &t, const QMultiHash<int, const MppRelation *> &linksBySucc)
+{
+    w.writeStartElement(QStringLiteral("Task"));
+    writeText(w, "UID", QString::number(t.uniqueId));
+    writeText(w, "ID", QString::number(t.id));
+    if (!t.name.isEmpty())
+        writeText(w, "Name", t.name);
+    if (!t.wbs.isEmpty())
+        writeText(w, "WBS", t.wbs);
+    writeText(w, "OutlineLevel", QString::number(t.outlineLevel));
+    if (t.start.isValid())
+        writeText(w, "Start", formatDateTime(t.start));
+    if (t.finish.isValid())
+        writeText(w, "Finish", formatDateTime(t.finish));
+    writeText(w, "Duration", formatIsoDuration(t.durationMillis));
+    writeText(w, "PercentComplete", QString::number(qRound(t.percentComplete * 100.0)));
+    writeText(w, "Milestone", t.milestone ? QStringLiteral("1") : QStringLiteral("0"));
+    writeText(w, "Summary", t.summary ? QStringLiteral("1") : QStringLiteral("0"));
+    writeText(w, "ConstraintType", QString::number(t.constraintType));
+    if (t.constraintDate.isValid())
+        writeText(w, "ConstraintDate", formatDateTime(t.constraintDate));
+    writeText(w, "FixedCost", formatNumber(t.fixedCost));
+    writeText(w, "Cost", formatNumber(t.cost));
+    writeText(w, "ActualCost", formatNumber(t.actualCost));
+    writeText(w, "RemainingCost", formatNumber(t.remainingCost));
+    if (!t.notes.isEmpty())
+        writeText(w, "Notes", t.notes);
+    for (const MppBaseline &b : t.baselines)
+        writeBaseline(w, b);
+    // Predecessor links live on the successor task in MSPDI.
+    const QList<const MppRelation *> links = linksBySucc.values(t.uniqueId);
+    // values() reverses insertion order; restore document order.
+    for (auto it = links.crbegin(); it != links.crend(); ++it) {
+        const MppRelation *rel = *it;
+        w.writeStartElement(QStringLiteral("PredecessorLink"));
+        writeText(w, "PredecessorUID", QString::number(rel->predecessorTaskUid));
+        writeText(w, "Type", QString::number(rel->type));
+        writeText(w, "LinkLag", QString::number(rel->lagMillis / 6000));
+        w.writeEndElement();
+    }
+    writeExtendedAttributes(w, t.customFields);
+    w.writeEndElement();
+}
+
+void writeResource(QXmlStreamWriter &w, const MppResource &res)
+{
+    w.writeStartElement(QStringLiteral("Resource"));
+    writeText(w, "UID", QString::number(res.uniqueId));
+    writeText(w, "ID", QString::number(res.id));
+    if (!res.name.isEmpty())
+        writeText(w, "Name", res.name);
+    if (!res.initials.isEmpty())
+        writeText(w, "Initials", res.initials);
+    writeText(w, "MaxUnits", formatNumber(res.maxUnits));
+    writeText(w, "Cost", formatNumber(res.cost));
+    writeText(w, "ActualCost", formatNumber(res.actualCost));
+    writeText(w, "RemainingCost", formatNumber(res.remainingCost));
+    writeText(w, "CostVariance", formatNumber(res.costVariance));
+    if (!res.notes.isEmpty())
+        writeText(w, "Notes", res.notes);
+    for (const MppBaseline &b : res.baselines)
+        writeBaseline(w, b);
+    if (!res.costRates.isEmpty()) {
+        w.writeStartElement(QStringLiteral("Rates"));
+        for (const MppCostRate &cr : res.costRates) {
+            w.writeStartElement(QStringLiteral("Rate"));
+            if (cr.startDate.isValid())
+                writeText(w, "RatesFrom", formatDateTime(cr.startDate));
+            if (cr.endDate.isValid())
+                writeText(w, "RatesTo", formatDateTime(cr.endDate));
+            writeText(w, "RateTable", QString::number(cr.table));
+            writeText(w, "StandardRate", formatNumber(cr.standardRate));
+            writeText(w, "StandardRateFormat", QString::number(cr.standardRateUnit));
+            writeText(w, "OvertimeRate", formatNumber(cr.overtimeRate));
+            writeText(w, "OvertimeRateFormat", QString::number(cr.overtimeRateUnit));
+            writeText(w, "CostPerUse", formatNumber(cr.costPerUse));
+            w.writeEndElement();
+        }
+        w.writeEndElement();
+    }
+    writeExtendedAttributes(w, res.customFields);
+    w.writeEndElement();
+}
+
+void writeAssignment(QXmlStreamWriter &w, const MppAssignment &a)
+{
+    w.writeStartElement(QStringLiteral("Assignment"));
+    writeText(w, "UID", QString::number(a.uniqueId));
+    writeText(w, "TaskUID", QString::number(a.taskUniqueId));
+    writeText(w, "ResourceUID", QString::number(a.resourceUniqueId));
+    writeText(w, "Units", formatNumber(a.units));
+    writeText(w, "Work", formatIsoDuration(a.workMillis));
+    writeText(w, "Cost", formatNumber(a.cost));
+    writeText(w, "ActualCost", formatNumber(a.actualCost));
+    writeText(w, "RemainingCost", formatNumber(a.remainingCost));
+    writeText(w, "CostVariance", formatNumber(a.costVariance));
+    if (!a.notes.isEmpty())
+        writeText(w, "Notes", a.notes);
+    for (const MppBaseline &b : a.baselines)
+        writeBaseline(w, b);
+    writeExtendedAttributes(w, a.customFields);
+    w.writeEndElement();
+}
+
+// Emit a project-level <ExtendedAttributes> block describing every custom field
+// that appears on any entity, so Microsoft Project can associate the values on
+// import. (The reader ignores this block; entity values carry the data.)
+void writeExtendedAttributeDefs(QXmlStreamWriter &w, const MppProject &p)
+{
+    QHash<int, QString> defs;   // fieldId -> name, in first-seen order via a list
+    QList<int> order;
+    auto collect = [&](const QList<MppCustomField> &fields) {
+        for (const MppCustomField &cf : fields) {
+            if (!defs.contains(cf.fieldId)) {
+                defs.insert(cf.fieldId, cf.name);
+                order.append(cf.fieldId);
+            }
+        }
+    };
+    for (const MppTask &t : p.tasks)
+        collect(t.customFields);
+    for (const MppResource &r : p.resources)
+        collect(r.customFields);
+    for (const MppAssignment &a : p.assignments)
+        collect(a.customFields);
+    if (order.isEmpty())
+        return;
+    w.writeStartElement(QStringLiteral("ExtendedAttributes"));
+    for (int fieldId : order) {
+        w.writeStartElement(QStringLiteral("ExtendedAttribute"));
+        writeText(w, "FieldID", QString::number(fieldId));
+        if (!defs[fieldId].isEmpty())
+            writeText(w, "FieldName", defs[fieldId]);
+        w.writeEndElement();
+    }
+    w.writeEndElement();
+}
+
+} // namespace
+
+namespace XmlSerializer {
+
+bool read(const QByteArray &xml, MppProject &out, QString *error)
+{
+    out = MppProject();
+    QXmlStreamReader r(xml);
+
+    if (!r.readNextStartElement()) {
+        if (error)
+            *error = QStringLiteral("empty or malformed XML document");
+        return false;
+    }
+    if (r.name() != u"Project") {
+        if (error)
+            *error = QStringLiteral("not an MSPDI document (root element is <%1>, expected <Project>)")
+                         .arg(r.name().toString());
+        return false;
+    }
+
+    while (r.readNextStartElement()) {
+        const QStringView n = r.name();
+        if (n == u"SaveVersion")
+            out.formatVersion = versionFromSaveVersion(r.readElementText().toInt());
+        else if (n == u"Title")
+            out.title = r.readElementText();
+        else if (n == u"Author")
+            out.author = r.readElementText();
+        else if (n == u"StartDate")
+            out.startDate = parseDateTime(r.readElementText());
+        else if (n == u"FinishDate")
+            out.finishDate = parseDateTime(r.readElementText());
+        else if (n == u"Calendars") {
+            while (r.readNextStartElement()) {
+                if (r.name() == u"Calendar")
+                    out.calendars.append(parseCalendar(r));
+                else
+                    r.skipCurrentElement();
+            }
+        } else if (n == u"Tasks") {
+            while (r.readNextStartElement()) {
+                if (r.name() == u"Task")
+                    out.tasks.append(parseTask(r, out.relations));
+                else
+                    r.skipCurrentElement();
+            }
+        } else if (n == u"Resources") {
+            while (r.readNextStartElement()) {
+                if (r.name() == u"Resource")
+                    out.resources.append(parseResource(r));
+                else
+                    r.skipCurrentElement();
+            }
+        } else if (n == u"Assignments") {
+            while (r.readNextStartElement()) {
+                if (r.name() == u"Assignment")
+                    out.assignments.append(parseAssignment(r));
+                else
+                    r.skipCurrentElement();
+            }
+        } else {
+            r.skipCurrentElement();
+        }
+    }
+
+    if (r.hasError()) {
+        if (error)
+            *error = QStringLiteral("XML parse error at line %1: %2")
+                         .arg(r.lineNumber()).arg(r.errorString());
+        return false;
+    }
+    return true;
+}
+
+QByteArray write(const MppProject &in, QString *error)
+{
+    Q_UNUSED(error);
+    QByteArray bytes;
+    QXmlStreamWriter w(&bytes);
+    w.setAutoFormatting(true);
+    w.setAutoFormattingIndent(1);
+
+    w.writeStartDocument(QStringLiteral("1.0"));
+    w.writeStartElement(QStringLiteral("Project"));
+    w.writeDefaultNamespace(kMspdiNs);
+
+    const int sv = in.formatVersion == MppProject::FormatVersion::Unknown
+        ? 14 : static_cast<int>(in.formatVersion);
+    writeText(w, "SaveVersion", QString::number(sv));
+    if (!in.title.isEmpty())
+        writeText(w, "Title", in.title);
+    if (!in.author.isEmpty())
+        writeText(w, "Author", in.author);
+    if (in.startDate.isValid())
+        writeText(w, "StartDate", formatDateTime(in.startDate));
+    if (in.finishDate.isValid())
+        writeText(w, "FinishDate", formatDateTime(in.finishDate));
+
+    writeExtendedAttributeDefs(w, in);
+
+    if (!in.calendars.isEmpty()) {
+        w.writeStartElement(QStringLiteral("Calendars"));
+        for (const MppCalendar &c : in.calendars)
+            writeCalendar(w, c);
+        w.writeEndElement();
+    }
+
+    // Index predecessor links by successor so each task can emit its own.
+    QMultiHash<int, const MppRelation *> linksBySucc;
+    for (const MppRelation &rel : in.relations)
+        linksBySucc.insert(rel.successorTaskUid, &rel);
+
+    w.writeStartElement(QStringLiteral("Tasks"));
+    for (const MppTask &t : in.tasks)
+        writeTask(w, t, linksBySucc);
+    w.writeEndElement();
+
+    w.writeStartElement(QStringLiteral("Resources"));
+    for (const MppResource &res : in.resources)
+        writeResource(w, res);
+    w.writeEndElement();
+
+    w.writeStartElement(QStringLiteral("Assignments"));
+    for (const MppAssignment &a : in.assignments)
+        writeAssignment(w, a);
+    w.writeEndElement();
+
+    w.writeEndElement();   // Project
+    w.writeEndDocument();
+    return bytes;
+}
+
+} // namespace XmlSerializer
