@@ -1,13 +1,15 @@
 // Copyright (C) 2026 Paul McKinney
 // SPDX-License-Identifier: GPL-3.0-only
 
-#ifndef MPPCUSTOMFIELD_H
-#define MPPCUSTOMFIELD_H
+#ifndef SCHEDULE_CUSTOMFIELD_H
+#define SCHEDULE_CUSTOMFIELD_H
 
-#include "mppio_export.h"
+#include "scheduleio_export.h"
 
 #include <QString>
 #include <QVariant>
+
+namespace schedule {
 
 // One custom ("extended") field value on an entity, e.g. Text1, Number3, Cost2,
 // Flag5, Date1, Duration4, Start2 or Outline Code1. Microsoft Project exposes a
@@ -15,7 +17,7 @@
 // keep the populated ones in a list of these. `value` holds the decoded value in
 // its natural Qt type (QString / double / qint64 / bool / QDateTime) so callers
 // switch on `value.typeId()` or on the well-known `name`.
-class MPPIO_EXPORT MppCustomField
+class SCHEDULEIO_EXPORT CustomField
 {
 public:
     int fieldId = 0;      // full MPP field id (high word entity + low word index),
@@ -23,8 +25,10 @@ public:
     QString name;         // human label, e.g. "Text1", "Cost2", "Outline Code1"
     QVariant value;       // decoded value in its natural type
 
-    bool operator==(const MppCustomField &o) const;
-    bool operator!=(const MppCustomField &o) const { return !(*this == o); }
+    bool operator==(const CustomField &o) const;
+    bool operator!=(const CustomField &o) const { return !(*this == o); }
 };
 
-#endif // MPPCUSTOMFIELD_H
+} // namespace schedule
+
+#endif // SCHEDULE_CUSTOMFIELD_H

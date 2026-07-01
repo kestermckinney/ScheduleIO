@@ -3,14 +3,14 @@
 `XmlIO` is the public facade for reading and writing **Microsoft Project compatible XML** — the
 MSPDI format (namespace `http://schemas.microsoft.com/project`) that Microsoft Project itself
 exports and imports as `.xml`. It reads such a file into an
-[`MppProject`](../DataModel/MppProject.md) and writes one back out.
+[`schedule::Project`](../DataModel/Project.md) and writes one back out.
 
 ```cpp
 #include "xmlio.h"
 ```
 
 `XmlIO` shares the **exact same object model** as [`MppIO`](MppIO.md): both populate an
-`MppProject`. That means you can load a project from a binary `.mpp` with `MppIO` and save it as
+`schedule::Project`. That means you can load a project from a binary `.mpp` with `MppIO` and save it as
 `.xml` with `XmlIO` (or the reverse) with no translation step in between — see
 [XML Interchange](../GettingStarted/XmlInterchange.md).
 
@@ -25,7 +25,7 @@ The class is non-copyable (`Q_DISABLE_COPY`). Create one per file you want to re
 
 ### `XmlIO()` / `~XmlIO()`
 
-Construct and destroy an instance. A fresh instance holds an empty `MppProject`.
+Construct and destroy an instance. A fresh instance holds an empty `schedule::Project`.
 
 ---
 
@@ -78,20 +78,20 @@ array only on a genuine failure (an empty project still produces a valid documen
 
 ---
 
-### `const MppProject &project() const`
+### `const schedule::Project &project() const`
 
 Return a reference to the current in-memory project — the result of the most recent successful
 `open()` / `openFromData()`, or whatever was set with `setProject()`.
 
 ```cpp
-const MppProject &p = io.project();
-for (const MppTask &t : p.tasks)
+const schedule::Project &p = io.project();
+for (const schedule::Task &t : p.tasks)
     use(t);
 ```
 
 ---
 
-### `void setProject(const MppProject &project)`
+### `void setProject(const schedule::Project &project)`
 
 Replace the current in-memory project. Call this before `save()` / `saveToData()` — for example with
 a project read from a `.mpp` via `MppIO`, or one the host built itself.
@@ -112,7 +112,7 @@ succeeded.
 | **Project** | `SaveVersion`, `Title`, `Author`, `StartDate`, `FinishDate` |
 | **Tasks** | UID, ID, `Name`, `WBS`, `OutlineLevel`, `Start`, `Finish`, `Duration`, `PercentComplete`, `Milestone`, `Summary`, `ConstraintType`/`ConstraintDate`, `Notes`, costs |
 | **Baselines** | task `<Baseline>` (number, start, finish, duration, work, cost) |
-| **Predecessor links** | `<PredecessorLink>` on the successor task ↔ `MppProject.relations` |
+| **Predecessor links** | `<PredecessorLink>` on the successor task ↔ `schedule::Project.relations` |
 | **Extended attributes** | `<ExtendedAttribute>` ↔ `customFields` (decoded to the field's natural Qt type) |
 | **Resources** | UID, ID, `Name`, `Initials`, `MaxUnits`, costs, notes, `<Rates>` ↔ cost-rate tables |
 | **Assignments** | UID, `TaskUID`, `ResourceUID`, `Units`, `Work`, costs, notes |

@@ -1,9 +1,11 @@
 // Copyright (C) 2026 Paul McKinney
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include "model/mppcostrate.h"
+#include "model/costrate.h"
 
-bool MppCostRate::operator==(const MppCostRate &o) const
+namespace schedule {
+
+bool CostRate::operator==(const CostRate &o) const
 {
     return table == o.table
         && startDate == o.startDate
@@ -14,3 +16,5 @@ bool MppCostRate::operator==(const MppCostRate &o) const
         && overtimeRateUnit == o.overtimeRateUnit
         && costPerUse == o.costPerUse;
 }
+
+} // namespace schedule

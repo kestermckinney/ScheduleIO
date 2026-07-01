@@ -10,13 +10,13 @@
 #include <QHash>
 #include <QTest>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 // The whole point of XmlIO is that it shares MppIO's in-memory model. This test
 // loads the same project both ways -- the .mpp via MppIO and the .xml via XmlIO --
-// and checks the two MppProject structures agree on the data they both decode.
+// and checks the two schedule::Project structures agree on the data they both decode.
 // That is only possible because they populate the very same types.
 class TstXmlMppCrosscheck : public QObject
 {
@@ -30,7 +30,7 @@ void TstXmlMppCrosscheck::interop_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
         const QString xml = QDir(dir).filePath(QFileInfo(f).completeBaseName() + QStringLiteral(".xml"));
         if (QFile::exists(xml))
@@ -40,7 +40,7 @@ void TstXmlMppCrosscheck::interop_data()
 
 void TstXmlMppCrosscheck::interop()
 {
-    if (QDir(QStringLiteral(MPPIO_FIXTURE_DIR))
+    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
             .entryList({ QStringLiteral("*.mpp") }, QDir::Files).isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
 
@@ -52,17 +52,17 @@ void TstXmlMppCrosscheck::interop()
     XmlIO text;
     QVERIFY2(text.open(xml), qPrintable(text.errorString()));
 
-    const MppProject &fromMpp = bin.project();
-    const MppProject &fromXml = text.project();
+    const schedule::Project &fromMpp = bin.project();
+    const schedule::Project &fromXml = text.project();
 
     // Both decoders populate the same model type -- prove interop on task names.
     QHash<int, QString> mppNames;
-    for (const MppTask &t : fromMpp.tasks)
+    for (const schedule::Task &t : fromMpp.tasks)
         if (!t.name.isEmpty())
             mppNames.insert(t.uniqueId, t.name);
 
     QHash<int, QString> xmlNames;
-    for (const MppTask &t : fromXml.tasks)
+    for (const schedule::Task &t : fromXml.tasks)
         if (!t.name.isEmpty())
             xmlNames.insert(t.uniqueId, t.name);
 

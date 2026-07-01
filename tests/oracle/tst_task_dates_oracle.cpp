@@ -11,8 +11,8 @@
 #include <QTest>
 #include <QXmlStreamReader>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 // Layer 3 oracle: task Start / Finish / Duration decoded from the binary .mpp
@@ -83,7 +83,7 @@ void TstTaskDatesOracle::datesMatchXml_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
         const QString xml = QDir(dir).filePath(QFileInfo(f).completeBaseName() + QStringLiteral(".xml"));
         if (QFile::exists(xml))
@@ -100,7 +100,7 @@ static bool sameInstant(const QDateTime &decoded, const QDateTime &xml)
 
 void TstTaskDatesOracle::datesMatchXml()
 {
-    if (QDir(QStringLiteral(MPPIO_FIXTURE_DIR))
+    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
             .entryList({ QStringLiteral("*.mpp") }, QDir::Files).isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
 
@@ -110,8 +110,8 @@ void TstTaskDatesOracle::datesMatchXml()
     MppIO io;
     QVERIFY2(io.open(mpp), qPrintable(io.errorString()));
 
-    QHash<int, MppTask> decoded;
-    for (const MppTask &t : io.project().tasks)
+    QHash<int, schedule::Task> decoded;
+    for (const schedule::Task &t : io.project().tasks)
         decoded.insert(t.uniqueId, t);
 
     const QHash<int, XmlTask> expected = tasksFromXml(xml);

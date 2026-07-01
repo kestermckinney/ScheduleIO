@@ -10,8 +10,8 @@
 #include <QTest>
 #include <QXmlStreamReader>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 // Layer 3 oracle: the task names MppIO decodes from a real binary .mpp must
@@ -64,7 +64,7 @@ void TstTaskNamesOracle::taskNamesMatchXml_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
         const QString base = QFileInfo(f).completeBaseName();
         const QString xml = QDir(dir).filePath(base + QStringLiteral(".xml"));
@@ -75,7 +75,7 @@ void TstTaskNamesOracle::taskNamesMatchXml_data()
 
 void TstTaskNamesOracle::taskNamesMatchXml()
 {
-    if (QDir(QStringLiteral(MPPIO_FIXTURE_DIR))
+    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
             .entryList({ QStringLiteral("*.mpp") }, QDir::Files)
             .isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
@@ -87,7 +87,7 @@ void TstTaskNamesOracle::taskNamesMatchXml()
     QVERIFY2(io.open(mpp), qPrintable(io.errorString()));
 
     QSet<QString> decoded;
-    for (const MppTask &t : io.project().tasks)
+    for (const schedule::Task &t : io.project().tasks)
         if (!t.name.isEmpty())
             decoded.insert(t.name);
 

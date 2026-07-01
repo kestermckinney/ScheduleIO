@@ -7,8 +7,8 @@
 #include <QFile>
 #include <QTest>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 // Validates the real MS-CFB reader against the user's real .mpp fixtures, and
@@ -47,14 +47,14 @@ void TstFixtureCfb::dump(const CompoundFile &cf, const QStringList &path, int de
 void TstFixtureCfb::parsesRealContainers_data()
 {
     QTest::addColumn<QString>("path");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files))
         QTest::newRow(qPrintable(f)) << QDir(dir).filePath(f);
 }
 
 void TstFixtureCfb::parsesRealContainers()
 {
-    if (QDir(QStringLiteral(MPPIO_FIXTURE_DIR))
+    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
             .entryList({ QStringLiteral("*.mpp") }, QDir::Files)
             .isEmpty())
         QSKIP("no .mpp fixtures present");

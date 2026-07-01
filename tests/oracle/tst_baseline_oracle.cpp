@@ -11,8 +11,8 @@
 #include <QTest>
 #include <QXmlStreamReader>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 // Layer 3 oracle: saved baselines decoded from var data must agree with the nested
@@ -80,7 +80,7 @@ void TstBaselineOracle::baselinesMatchXml_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
         const QString xml = QDir(dir).filePath(QFileInfo(f).completeBaseName() + QStringLiteral(".xml"));
         if (QFile::exists(xml))
@@ -96,7 +96,7 @@ static bool sameInstant(const QDateTime &decoded, const QDateTime &xml)
 
 void TstBaselineOracle::baselinesMatchXml()
 {
-    if (QDir(QStringLiteral(MPPIO_FIXTURE_DIR))
+    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
             .entryList({ QStringLiteral("*.mpp") }, QDir::Files).isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
 
@@ -114,9 +114,9 @@ void TstBaselineOracle::baselinesMatchXml()
         QSKIP("this fixture has no saved baselines in its XML export");
 
     // Decoded: uid -> (number -> baseline)
-    QHash<int, QHash<int, MppBaseline>> decoded;
-    for (const MppTask &t : io.project().tasks)
-        for (const MppBaseline &b : t.baselines)
+    QHash<int, QHash<int, schedule::Baseline>> decoded;
+    for (const schedule::Task &t : io.project().tasks)
+        for (const schedule::Baseline &b : t.baselines)
             decoded[t.uniqueId].insert(b.number, b);
 
     int startN = 0, startOk = 0, finishN = 0, finishOk = 0;

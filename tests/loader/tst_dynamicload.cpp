@@ -6,8 +6,8 @@
 #include <QLibrary>
 #include <QTest>
 
-#ifndef MPPIO_LIB_PATH
-#define MPPIO_LIB_PATH ""
+#ifndef SCHEDULEIO_LIB_PATH
+#define SCHEDULEIO_LIB_PATH ""
 #endif
 
 // Proves the headline requirement: the library can be loaded at runtime on this
@@ -26,12 +26,12 @@ void TstDynamicLoad::loadsAndResolvesFactory()
     using DestroyFn = void (*)(MppIO *);
     using VersionFn = const char *(*)();
 
-    QLibrary lib(QStringLiteral(MPPIO_LIB_PATH));
+    QLibrary lib(QStringLiteral(SCHEDULEIO_LIB_PATH));
     QVERIFY2(lib.load(), qPrintable(lib.errorString()));
 
-    auto create  = reinterpret_cast<CreateFn>(lib.resolve("mppio_create"));
-    auto destroy = reinterpret_cast<DestroyFn>(lib.resolve("mppio_destroy"));
-    auto version = reinterpret_cast<VersionFn>(lib.resolve("mppio_version"));
+    auto create  = reinterpret_cast<CreateFn>(lib.resolve("scheduleio_create"));
+    auto destroy = reinterpret_cast<DestroyFn>(lib.resolve("scheduleio_destroy"));
+    auto version = reinterpret_cast<VersionFn>(lib.resolve("scheduleio_version"));
 
     QVERIFY(create);
     QVERIFY(destroy);

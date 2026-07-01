@@ -20,7 +20,7 @@
 #include <cstring>
 #include <numeric>
 
-using FormatVersion = MppProject::FormatVersion;
+using FormatVersion = schedule::Project::FormatVersion;
 
 namespace {
 
@@ -59,12 +59,12 @@ bool getI64(const QByteArray &b, int off, qint64 *out)
 // These are the scaffold's own self-consistent encodings (used only so the model
 // survives read -> write -> read); they are unrelated to the real .mpp layout.
 
-QByteArray packBaselines(const QList<MppBaseline> &list)
+QByteArray packBaselines(const QList<schedule::Baseline> &list)
 {
     using namespace FieldDecoders;
     QByteArray b;
     putU32(b, static_cast<quint32>(list.size()));
-    for (const MppBaseline &x : list) {
+    for (const schedule::Baseline &x : list) {
         putU32(b, static_cast<quint32>(x.number));
         putDouble(b, x.cost);
         putI64(b, x.workMillis);
@@ -75,16 +75,16 @@ QByteArray packBaselines(const QList<MppBaseline> &list)
     return b;
 }
 
-QList<MppBaseline> unpackBaselines(const QByteArray &b)
+QList<schedule::Baseline> unpackBaselines(const QByteArray &b)
 {
     using namespace FieldDecoders;
-    QList<MppBaseline> out;
+    QList<schedule::Baseline> out;
     quint32 n = 0;
     if (!readU32(b, 0, &n))
         return out;
     int o = 4;
     for (quint32 i = 0; i < n; ++i) {
-        MppBaseline x;
+        schedule::Baseline x;
         quint32 num = 0, s = 0, f = 0;
         double cost = 0.0; qint64 work = 0, dur = 0;
         if (!readU32(b, o, &num)) break;        o += 4;
@@ -107,12 +107,12 @@ QList<MppBaseline> unpackBaselines(const QByteArray &b)
 // Value tags for a custom field's QVariant.
 enum CustomTag : quint8 { TagString = 0, TagDouble = 1, TagI64 = 2, TagBool = 3, TagDate = 4 };
 
-QByteArray packCustom(const QList<MppCustomField> &list)
+QByteArray packCustom(const QList<schedule::CustomField> &list)
 {
     using namespace FieldDecoders;
     QByteArray b;
     putU32(b, static_cast<quint32>(list.size()));
-    for (const MppCustomField &c : list) {
+    for (const schedule::CustomField &c : list) {
         putI32(b, c.fieldId);
         const QByteArray nm(reinterpret_cast<const char *>(c.name.utf16()), c.name.size() * 2);
         putU32(b, static_cast<quint32>(nm.size()));
@@ -136,12 +136,12 @@ QByteArray packCustom(const QList<MppCustomField> &list)
     return b;
 }
 
-QByteArray packCostRates(const QList<MppCostRate> &list)
+QByteArray packCostRates(const QList<schedule::CostRate> &list)
 {
     using namespace FieldDecoders;
     QByteArray b;
     putU32(b, static_cast<quint32>(list.size()));
-    for (const MppCostRate &c : list) {
+    for (const schedule::CostRate &c : list) {
         putU32(b, static_cast<quint32>(c.table));
         putU32(b, encodeTimestampSeconds(c.startDate));
         putU32(b, encodeTimestampSeconds(c.endDate));
@@ -154,16 +154,16 @@ QByteArray packCostRates(const QList<MppCostRate> &list)
     return b;
 }
 
-QList<MppCostRate> unpackCostRates(const QByteArray &b)
+QList<schedule::CostRate> unpackCostRates(const QByteArray &b)
 {
     using namespace FieldDecoders;
-    QList<MppCostRate> out;
+    QList<schedule::CostRate> out;
     quint32 n = 0;
     if (!readU32(b, 0, &n))
         return out;
     int o = 4;
     for (quint32 i = 0; i < n; ++i) {
-        MppCostRate c;
+        schedule::CostRate c;
         quint32 tbl = 0, s = 0, e = 0, su = 0, ou = 0;
         if (!readU32(b, o, &tbl)) break;        o += 4;
         if (!readU32(b, o, &s)) break;          o += 4;
@@ -197,18 +197,18 @@ QString getUtf16(const QByteArray &b, int &o)
     return s;
 }
 
-void putTimeRanges(QByteArray &b, const QList<MppTimeRange> &ranges)
+void putTimeRanges(QByteArray &b, const QList<schedule::TimeRange> &ranges)
 {
     putU32(b, static_cast<quint32>(ranges.size()));
-    for (const MppTimeRange &r : ranges) {
+    for (const schedule::TimeRange &r : ranges) {
         putU32(b, static_cast<quint32>(qMax(0, r.start.msecsSinceStartOfDay())));
         putU32(b, static_cast<quint32>(qMax(0, r.end.msecsSinceStartOfDay())));
     }
 }
 
-QList<MppTimeRange> getTimeRanges(const QByteArray &b, int &o)
+QList<schedule::TimeRange> getTimeRanges(const QByteArray &b, int &o)
 {
-    QList<MppTimeRange> out;
+    QList<schedule::TimeRange> out;
     quint32 n = 0;
     if (!FieldDecoders::readU32(b, o, &n)) { o = b.size(); return out; }
     o += 4;
@@ -221,14 +221,14 @@ QList<MppTimeRange> getTimeRanges(const QByteArray &b, int &o)
     return out;
 }
 
-QByteArray packCalData(const QList<QList<MppTimeRange>> &hours, const QList<MppCalendarException> &exc)
+QByteArray packCalData(const QList<QList<schedule::TimeRange>> &hours, const QList<schedule::CalendarException> &exc)
 {
     QByteArray b;
     putU32(b, static_cast<quint32>(hours.size()));
-    for (const QList<MppTimeRange> &day : hours)
+    for (const QList<schedule::TimeRange> &day : hours)
         putTimeRanges(b, day);
     putU32(b, static_cast<quint32>(exc.size()));
-    for (const MppCalendarException &e : exc) {
+    for (const schedule::CalendarException &e : exc) {
         putI64(b, e.fromDate.isValid() ? e.fromDate.toJulianDay() : 0);
         putI64(b, e.toDate.isValid() ? e.toDate.toJulianDay() : 0);
         putU8(b, e.working ? 1 : 0);
@@ -238,7 +238,7 @@ QByteArray packCalData(const QList<QList<MppTimeRange>> &hours, const QList<MppC
     return b;
 }
 
-void unpackCalData(const QByteArray &b, QList<QList<MppTimeRange>> *hours, QList<MppCalendarException> *exc)
+void unpackCalData(const QByteArray &b, QList<QList<schedule::TimeRange>> *hours, QList<schedule::CalendarException> *exc)
 {
     using namespace FieldDecoders;
     int o = 0;
@@ -251,7 +251,7 @@ void unpackCalData(const QByteArray &b, QList<QList<MppTimeRange>> *hours, QList
     if (!readU32(b, o, &exCount)) return;
     o += 4;
     for (quint32 i = 0; i < exCount; ++i) {
-        MppCalendarException e;
+        schedule::CalendarException e;
         qint64 fj = 0, tj = 0;
         if (!getI64(b, o, &fj)) break; o += 8;
         if (!getI64(b, o, &tj)) break; o += 8;
@@ -265,16 +265,16 @@ void unpackCalData(const QByteArray &b, QList<QList<MppTimeRange>> *hours, QList
     }
 }
 
-QList<MppCustomField> unpackCustom(const QByteArray &b)
+QList<schedule::CustomField> unpackCustom(const QByteArray &b)
 {
     using namespace FieldDecoders;
-    QList<MppCustomField> out;
+    QList<schedule::CustomField> out;
     quint32 n = 0;
     if (!readU32(b, 0, &n))
         return out;
     int o = 4;
     for (quint32 i = 0; i < n; ++i) {
-        MppCustomField c;
+        schedule::CustomField c;
         qint32 fid = 0; quint32 nlen = 0;
         if (!readI32(b, o, &fid)) break;        o += 4;
         if (!readU32(b, o, &nlen)) break;       o += 4;
@@ -305,7 +305,7 @@ QList<MppCustomField> unpackCustom(const QByteArray &b)
     return out;
 }
 
-QByteArray packTask(const MppTask &t)
+QByteArray packTask(const schedule::Task &t)
 {
     using namespace FieldDecoders;
     QByteArray r;
@@ -329,10 +329,10 @@ QByteArray packTask(const MppTask &t)
 }
 constexpr int kTaskRecordSize = 74;
 
-MppTask unpackTask(const QByteArray &r)
+schedule::Task unpackTask(const QByteArray &r)
 {
     using namespace FieldDecoders;
-    MppTask t;
+    schedule::Task t;
     quint32 u = 0; qint32 i = 0; quint16 s = 0;
     readU32(r, 0, &u);  t.uniqueId = static_cast<int>(u);
     readU32(r, 4, &u);  t.id = static_cast<int>(u);
@@ -354,7 +354,7 @@ MppTask unpackTask(const QByteArray &r)
     return t;
 }
 
-QByteArray packResource(const MppResource &res)
+QByteArray packResource(const schedule::Resource &res)
 {
     QByteArray r;
     putU32(r, static_cast<quint32>(res.uniqueId));
@@ -368,9 +368,9 @@ QByteArray packResource(const MppResource &res)
 }
 constexpr int kResourceRecordSize = 44;
 
-MppResource unpackResource(const QByteArray &r)
+schedule::Resource unpackResource(const QByteArray &r)
 {
-    MppResource res;
+    schedule::Resource res;
     quint32 u = 0;
     FieldDecoders::readU32(r, 0, &u);  res.uniqueId = static_cast<int>(u);
     FieldDecoders::readU32(r, 4, &u);  res.id = static_cast<int>(u);
@@ -382,7 +382,7 @@ MppResource unpackResource(const QByteArray &r)
     return res;
 }
 
-QByteArray packAssignment(const MppAssignment &a)
+QByteArray packAssignment(const schedule::Assignment &a)
 {
     QByteArray r;
     putU32(r, static_cast<quint32>(a.uniqueId));
@@ -398,9 +398,9 @@ QByteArray packAssignment(const MppAssignment &a)
 }
 constexpr int kAssignmentRecordSize = 52;
 
-MppAssignment unpackAssignment(const QByteArray &r)
+schedule::Assignment unpackAssignment(const QByteArray &r)
 {
-    MppAssignment a;
+    schedule::Assignment a;
     quint32 u = 0; qint32 i = 0;
     FieldDecoders::readU32(r, 0, &u);  a.uniqueId = static_cast<int>(u);
     FieldDecoders::readU32(r, 4, &u);  a.taskUniqueId = static_cast<int>(u);
@@ -414,7 +414,7 @@ MppAssignment unpackAssignment(const QByteArray &r)
     return a;
 }
 
-QByteArray packRelation(const MppRelation &r)
+QByteArray packRelation(const schedule::Relation &r)
 {
     QByteArray b;
     putU32(b, static_cast<quint32>(r.uniqueId));
@@ -426,9 +426,9 @@ QByteArray packRelation(const MppRelation &r)
 }
 constexpr int kRelationRecordSize = 20;
 
-MppRelation unpackRelation(const QByteArray &b)
+schedule::Relation unpackRelation(const QByteArray &b)
 {
-    MppRelation r;
+    schedule::Relation r;
     quint32 u = 0; qint32 i = 0;
     FieldDecoders::readU32(b, 0, &u);  r.uniqueId = static_cast<int>(u);
     FieldDecoders::readU32(b, 4, &u);  r.predecessorTaskUid = static_cast<int>(u);
@@ -438,7 +438,7 @@ MppRelation unpackRelation(const QByteArray &b)
     return r;
 }
 
-QByteArray packCalendar(const MppCalendar &c)
+QByteArray packCalendar(const schedule::Calendar &c)
 {
     QByteArray b;
     putU32(b, static_cast<quint32>(c.uniqueId));
@@ -448,9 +448,9 @@ QByteArray packCalendar(const MppCalendar &c)
 }
 constexpr int kCalendarRecordSize = 9;
 
-MppCalendar unpackCalendar(const QByteArray &b)
+schedule::Calendar unpackCalendar(const QByteArray &b)
 {
-    MppCalendar c;
+    schedule::Calendar c;
     quint32 u = 0; qint32 i = 0;
     FieldDecoders::readU32(b, 0, &u);  c.uniqueId = static_cast<int>(u);
     FieldDecoders::readI32(b, 4, &i);  c.baseCalendarUniqueId = i;
@@ -458,7 +458,7 @@ MppCalendar unpackCalendar(const QByteArray &b)
     return c;
 }
 
-QByteArray serializeProps(const MppProject &p, FormatVersion v)
+QByteArray serializeProps(const schedule::Project &p, FormatVersion v)
 {
     QByteArray b;
     putU16(b, static_cast<quint16>(static_cast<int>(v)));
@@ -469,7 +469,7 @@ QByteArray serializeProps(const MppProject &p, FormatVersion v)
     return b;
 }
 
-void deserializeProps(const QByteArray &b, MppProject &p)
+void deserializeProps(const QByteArray &b, schedule::Project &p)
 {
     using namespace FieldDecoders;
     quint16 ver = 0;
@@ -681,16 +681,16 @@ double rateFromHours(double perHour, quint16 fmt)
 // then 44-byte entries [stdRate dbl@0][stdFmt u16@8][otRate dbl@16][otFmt u16@24]
 // [costPerUse dbl@32 (/100)][endDate tenths@40]. Entries are sorted by end date and
 // given start dates from the previous entry's end + 1 minute.
-QList<MppCostRate> parseCostRateTable(const QByteArray &blob, int table)
+QList<schedule::CostRate> parseCostRateTable(const QByteArray &blob, int table)
 {
     using namespace FieldDecoders;
     auto dbl = [](const QByteArray &b, int o) { double v = 0.0; readDouble(b, o, &v); return v; };
-    QList<MppCostRate> out;
+    QList<schedule::CostRate> out;
     for (int i = 16; i + 44 <= blob.size(); i += 44) {
         quint16 stdFmt = 0, otFmt = 0;
         readU16(blob, i + 8, &stdFmt);
         readU16(blob, i + 24, &otFmt);
-        MppCostRate e;
+        schedule::CostRate e;
         e.table = table;
         e.standardRate = rateFromHours(dbl(blob, i), stdFmt);
         e.standardRateUnit = (stdFmt == 0xFFFF) ? 2 : int(stdFmt);
@@ -715,7 +715,7 @@ QList<MppCostRate> parseCostRateTable(const QByteArray &blob, int table)
         out.append(e);
     }
     // Sort by end date (open-ended/invalid sorts last) and fill in start dates.
-    std::sort(out.begin(), out.end(), [](const MppCostRate &a, const MppCostRate &b) {
+    std::sort(out.begin(), out.end(), [](const schedule::CostRate &a, const schedule::CostRate &b) {
         if (a.endDate.isValid() != b.endDate.isValid())
             return a.endDate.isValid();          // valid (earlier) before open-ended
         return a.endDate.isValid() && a.endDate < b.endDate;
@@ -794,8 +794,8 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
                             const MppFieldIds::BaselineSet *baselineSets,
                             const QVector<MppFieldIds::CustomFieldDef> &customDefs,
                             const CostOut &costOut,
-                            QList<MppBaseline> *baselines,
-                            QList<MppCustomField> *customFields)
+                            QList<schedule::Baseline> *baselines,
+                            QList<schedule::CustomField> *customFields)
 {
     using namespace FieldDecoders;
     using namespace MppFieldIds;
@@ -845,7 +845,7 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
     if (baselines) {
         for (int n = 0; n < kBaselineCount; ++n) {
             const BaselineSet &bs = baselineSets[n];
-            MppBaseline b;
+            schedule::Baseline b;
             b.number = n;
             bool any = false;
             if (getDouble(bs.cost, &b.cost)) any = true;
@@ -920,7 +920,7 @@ double readDoubleLE(const QByteArray &d, int off)
 
 // Resources: names/initials from var data (NAME=1, INITIALS=2), UID/ID/MaxUnits
 // from FixedData (resource field map 0x00020015, FixedMeta item size 37).
-void readRealResources(const CompoundFile &cf, MppProject &out, const PropsReader &props)
+void readRealResources(const CompoundFile &cf, schedule::Project &out, const PropsReader &props)
 {
     const QString rsc = QStringLiteral("TBkndRsc");
     if (!cf.hasStorage({ kDataStorage, rsc }))
@@ -951,7 +951,7 @@ void readRealResources(const CompoundFile &cf, MppProject &out, const PropsReade
         if (!names.contains(int(uid)))   // only real, named resources
             continue;
         seen.insert(int(uid));
-        MppResource r;
+        schedule::Resource r;
         r.uniqueId = int(uid);
         r.name = names.value(int(uid));
         r.initials = initials.value(int(uid));
@@ -980,7 +980,7 @@ void readRealResources(const CompoundFile &cf, MppProject &out, const PropsReade
 
 // Assignments: link task<->resource with units/work, all from FixedData
 // (assignment field map 0x00020017, FixedMeta item size 34).
-void readRealAssignments(const CompoundFile &cf, MppProject &out, const PropsReader &props)
+void readRealAssignments(const CompoundFile &cf, schedule::Project &out, const PropsReader &props)
 {
     const QString assn = QStringLiteral("TBkndAssn");
     if (!cf.hasStorage({ kDataStorage, assn }))
@@ -1007,7 +1007,7 @@ void readRealAssignments(const CompoundFile &cf, MppProject &out, const PropsRea
         if (!FieldDecoders::readU32(b, taskOff, &taskUid)
             || !FieldDecoders::readU32(b, resOff, &resUid))
             continue;
-        MppAssignment a;
+        schedule::Assignment a;
         quint32 v32 = 0;
         if (uidOff >= 0 && FieldDecoders::readU32(b, uidOff, &v32))
             a.uniqueId = int(v32);
@@ -1040,7 +1040,7 @@ void readRealAssignments(const CompoundFile &cf, MppProject &out, const PropsRea
 // task UID, data[8]=succ task UID, data[12]=relation type (u16), data[14]=lag
 // (i32 tenths of a minute, Project 2013/2016). The meta item's +4 field is the
 // record's offset into FixedData; +0 (u16) != 0 marks it dead.
-void readRealRelations(const CompoundFile &cf, MppProject &out)
+void readRealRelations(const CompoundFile &cf, schedule::Project &out)
 {
     const QString cons = QStringLiteral("TBkndCons");
     if (!cf.hasStorage({ kDataStorage, cons }))
@@ -1067,7 +1067,7 @@ void readRealRelations(const CompoundFile &cf, MppProject &out)
             continue;
         seen.insert(int(uid));
         FieldDecoders::readU16(rec, 12, &type);
-        MppRelation r;
+        schedule::Relation r;
         r.uniqueId = int(uid);
         r.predecessorTaskUid = int(t1);
         r.successorTaskUid = int(t2);
@@ -1113,8 +1113,8 @@ quint8 calendarWorkingMask(const QByteArray &data)
 // offset 420 the exceptions. Times are tenths-of-a-minute since midnight; an
 // exception block is 92 bytes plus a 4-byte-aligned UTF-16 name.
 void parseCalendarData(const QByteArray &blob, bool isBaseCalendar,
-                       QList<QList<MppTimeRange>> *outHours,
-                       QList<MppCalendarException> *outExceptions)
+                       QList<QList<schedule::TimeRange>> *outHours,
+                       QList<schedule::CalendarException> *outExceptions)
 {
     using namespace FieldDecoders;
     auto mppTime = [](quint16 v) -> QTime {
@@ -1128,15 +1128,15 @@ void parseCalendarData(const QByteArray &blob, bool isBaseCalendar,
     // blob day index (0=Sunday..6=Saturday) -> our index (0=Monday..6=Sunday).
     static const int idxToDay[7] = { 6, 0, 1, 2, 3, 4, 5 };
     static const bool defWork[7] = { false, true, true, true, true, true, false };
-    static const MppTimeRange kMorning { QTime(8, 0), QTime(12, 0) };
-    static const MppTimeRange kAfternoon { QTime(13, 0), QTime(17, 0) };
+    static const schedule::TimeRange kMorning { QTime(8, 0), QTime(12, 0) };
+    static const schedule::TimeRange kAfternoon { QTime(13, 0), QTime(17, 0) };
 
     outHours->clear();
     for (int d = 0; d < 7; ++d)
-        outHours->append(QList<MppTimeRange>());
+        outHours->append(QList<schedule::TimeRange>());
 
     for (int i = 0; i < 7; ++i) {
-        QList<MppTimeRange> ranges;
+        QList<schedule::TimeRange> ranges;
         quint16 flag = 1;
         if (!blob.isEmpty())
             readU16(blob, 60 * i, &flag);
@@ -1155,7 +1155,7 @@ void parseCalendarData(const QByteArray &blob, bool isBaseCalendar,
                     break;
                 readU16(blob, 60 * i + 20 + p * 4, &dur);
                 const QTime start = mppTime(st);
-                ranges << MppTimeRange{ start, endOf(start, dur) };
+                ranges << schedule::TimeRange{ start, endOf(start, dur) };
             }
         }
         (*outHours)[idxToDay[i]] = ranges;
@@ -1167,7 +1167,7 @@ void parseCalendarData(const QByteArray &blob, bool isBaseCalendar,
         readU16(blob, offset, &exCount);
         offset += 4;   // align past the count to the first exception
         for (int k = 0; k < exCount && offset + 92 <= blob.size(); ++k) {
-            MppCalendarException ex;
+            schedule::CalendarException ex;
             quint16 fromDays = 0, toDays = 0, periodCount = 0;
             readU16(blob, offset, &fromDays);
             readU16(blob, offset + 2, &toDays);
@@ -1184,7 +1184,7 @@ void parseCalendarData(const QByteArray &blob, bool isBaseCalendar,
                 readU16(blob, offset + 20 + p * 2, &st);
                 readU16(blob, offset + 32 + p * 4, &dur);
                 const QTime start = mppTime(st);
-                ex.workingTimes << MppTimeRange{ start, endOf(start, dur) };
+                ex.workingTimes << schedule::TimeRange{ start, endOf(start, dur) };
             }
             quint32 nameLen = 0;
             readU32(blob, offset + 88, &nameLen);
@@ -1236,7 +1236,7 @@ QVector<QByteArray> readVarSizedBlocks(const QByteArray &meta, const QByteArray 
 // Calendars (TBkndCal, MPXJ AbstractCalendarFactory / MPP14CalendarFactory):
 // FixedMeta item 10, FixedData block 12. For Project 2013/2016: calendarID@8,
 // baseCalendarID@0. Name = var-data type 1 (CALENDAR_NAME).
-void readRealCalendars(const CompoundFile &cf, MppProject &out)
+void readRealCalendars(const CompoundFile &cf, schedule::Project &out)
 {
     const QString cal = QStringLiteral("TBkndCal");
     if (!cf.hasStorage({ kDataStorage, cal }))
@@ -1251,7 +1251,7 @@ void readRealCalendars(const CompoundFile &cf, MppProject &out)
 
     // Resource calendars take their name from the linked resource.
     QHash<int, QString> resName;
-    for (const MppResource &r : out.resources)
+    for (const schedule::Resource &r : out.resources)
         resName.insert(r.uniqueId, r.name);
 
     const QVector<QByteArray> blocks = readVarSizedBlocks(
@@ -1266,7 +1266,7 @@ void readRealCalendars(const CompoundFile &cf, MppProject &out)
         if (calId == 0 || seen.contains(int(calId)))
             continue;
         seen.insert(int(calId));
-        MppCalendar c;
+        schedule::Calendar c;
         c.uniqueId = int(calId);
         const bool isBase = (baseId == 0xFFFFFFFFu || baseId == 0 || baseId == calId);
         if (isBase) {
@@ -1287,7 +1287,7 @@ void readRealCalendars(const CompoundFile &cf, MppProject &out)
 // ([MS-OLEPS]): header (section offset at byte 44), section = [size][count] then
 // (propId, propOffset) pairs; PIDSI_TITLE=2, PIDSI_AUTHOR=4. String values are
 // VT_LPSTR (0x1E, ANSI) or VT_LPWSTR (0x1F, UTF-16), each [u32 len][bytes].
-void readSummaryInformation(const CompoundFile &cf, MppProject &out)
+void readSummaryInformation(const CompoundFile &cf, schedule::Project &out)
 {
     const QByteArray s = cf.readStream({ QString(QChar(0x05)) + QStringLiteral("SummaryInformation") });
     quint32 sectionOff = 0, propCount = 0;
@@ -1328,9 +1328,9 @@ void readSummaryInformation(const CompoundFile &cf, MppProject &out)
 // Reads what we have so far reverse-engineered from real files: task names from
 // "   114/TBkndTask" (VarMeta field code 6 -> Var2Data UTF-16 strings). Other
 // fields (UID, dates, duration, resources) are the next RE increments.
-bool readRealMpp(const CompoundFile &cf, MppProject &out, MppProject::FormatVersion ver)
+bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Project::FormatVersion ver)
 {
-    out = MppProject();
+    out = schedule::Project();
     out.formatVersion = ver;
 
     const QString task = QStringLiteral("TBkndTask");
@@ -1346,7 +1346,7 @@ bool readRealMpp(const CompoundFile &cf, MppProject &out, MppProject::FormatVers
         if (e.value.isEmpty() || pos.contains(uid))
             continue;
         pos.insert(uid, out.tasks.size());
-        MppTask t;
+        schedule::Task t;
         t.uniqueId = uid;
         t.name = e.value;
         out.tasks.append(t);
@@ -1403,7 +1403,7 @@ bool readRealMpp(const CompoundFile &cf, MppProject &out, MppProject::FormatVers
             if (it == pos.constEnd() || filled.contains(int(uid32)))
                 continue;
             filled.insert(int(uid32));
-            MppTask &t = out.tasks[it.value()];
+            schedule::Task &t = out.tasks[it.value()];
             t.start = effectiveDate(loop, off.start1, off.start, b0);
             t.finish = effectiveDate(loop, off.finish1, off.finish, b0);
             quint32 u32v = 0;
@@ -1449,7 +1449,7 @@ bool readRealMpp(const CompoundFile &cf, MppProject &out, MppProject::FormatVers
                   [&](int a, int b) { return out.tasks[a].id < out.tasks[b].id; });
         QVector<int> counters;   // WBS / OutlineNumber counter per outline level
         for (int i = 0; i < byId.size(); ++i) {
-            MppTask &cur = out.tasks[byId[i]];
+            schedule::Task &cur = out.tasks[byId[i]];
             const bool hasChild = (i + 1 < byId.size())
                 && out.tasks[byId[i + 1]].outlineLevel > cur.outlineLevel;
             cur.summary = hasChild || cur.outlineLevel == 0;
@@ -1482,12 +1482,12 @@ bool readRealMpp(const CompoundFile &cf, MppProject &out, MppProject::FormatVers
     // model matches the resource cost MS Project displays/exports.
     if (!out.assignments.isEmpty() && !out.resources.isEmpty()) {
         QHash<int, double> costByRes, actualByRes, remainByRes;
-        for (const MppAssignment &a : out.assignments) {
+        for (const schedule::Assignment &a : out.assignments) {
             costByRes[a.resourceUniqueId]   += a.cost;
             actualByRes[a.resourceUniqueId] += a.actualCost;
             remainByRes[a.resourceUniqueId] += a.remainingCost;
         }
-        for (MppResource &r : out.resources) {
+        for (schedule::Resource &r : out.resources) {
             if (r.cost == 0.0)          r.cost = costByRes.value(r.uniqueId, 0.0);
             if (r.actualCost == 0.0)    r.actualCost = actualByRes.value(r.uniqueId, 0.0);
             if (r.remainingCost == 0.0) r.remainingCost = remainByRes.value(r.uniqueId, 0.0);
@@ -1552,7 +1552,7 @@ std::unique_ptr<DocSerializer> DocSerializer::create(FormatVersion v)
     }
 }
 
-bool DocSerializer::read(const CompoundFile &cf, MppProject &out, QString *error) const
+bool DocSerializer::read(const CompoundFile &cf, schedule::Project &out, QString *error) const
 {
     if (!cf.isValid()) {
         if (error) *error = QStringLiteral("invalid compound file");
@@ -1569,13 +1569,13 @@ bool DocSerializer::read(const CompoundFile &cf, MppProject &out, QString *error
         return false;
     }
 
-    out = MppProject();
+    out = schedule::Project();
     deserializeProps(cf.readStream({ QStringLiteral("Project"), QStringLiteral("Props") }), out);
 
     QString qerr;
     const StreamQuartet tasks = StreamQuartet::decode(readQuartet(cf, QStringLiteral("Task")), &qerr);
     for (int i = 0; i < tasks.fixedRecords.size(); ++i) {
-        MppTask t = unpackTask(tasks.fixedRecords.at(i));
+        schedule::Task t = unpackTask(tasks.fixedRecords.at(i));
         for (const auto &ve : tasks.varEntries) {
             if (static_cast<int>(ve.itemIndex) != i)
                 continue;
@@ -1592,7 +1592,7 @@ bool DocSerializer::read(const CompoundFile &cf, MppProject &out, QString *error
 
     const StreamQuartet res = StreamQuartet::decode(readQuartet(cf, QStringLiteral("Resource")), &qerr);
     for (int i = 0; i < res.fixedRecords.size(); ++i) {
-        MppResource r = unpackResource(res.fixedRecords.at(i));
+        schedule::Resource r = unpackResource(res.fixedRecords.at(i));
         for (const auto &ve : res.varEntries) {
             if (static_cast<int>(ve.itemIndex) != i)
                 continue;
@@ -1610,7 +1610,7 @@ bool DocSerializer::read(const CompoundFile &cf, MppProject &out, QString *error
 
     const StreamQuartet asn = StreamQuartet::decode(readQuartet(cf, QStringLiteral("Assignment")), &qerr);
     for (int i = 0; i < asn.fixedRecords.size(); ++i) {
-        MppAssignment a = unpackAssignment(asn.fixedRecords.at(i));
+        schedule::Assignment a = unpackAssignment(asn.fixedRecords.at(i));
         for (const auto &ve : asn.varEntries) {
             if (static_cast<int>(ve.itemIndex) != i)
                 continue;
@@ -1629,7 +1629,7 @@ bool DocSerializer::read(const CompoundFile &cf, MppProject &out, QString *error
 
     const StreamQuartet cal = StreamQuartet::decode(readQuartet(cf, QStringLiteral("Calendar")), &qerr);
     for (int i = 0; i < cal.fixedRecords.size(); ++i) {
-        MppCalendar c = unpackCalendar(cal.fixedRecords.at(i));
+        schedule::Calendar c = unpackCalendar(cal.fixedRecords.at(i));
         for (const auto &ve : cal.varEntries) {
             if (static_cast<int>(ve.itemIndex) != i)
                 continue;
@@ -1644,7 +1644,7 @@ bool DocSerializer::read(const CompoundFile &cf, MppProject &out, QString *error
     return true;
 }
 
-bool DocSerializer::write(const MppProject &in, CompoundFile &cf, QString *error) const
+bool DocSerializer::write(const schedule::Project &in, CompoundFile &cf, QString *error) const
 {
     Q_UNUSED(error);
     cf.addStream({ QStringLiteral("Project"), QStringLiteral("Props") },
@@ -1653,7 +1653,7 @@ bool DocSerializer::write(const MppProject &in, CompoundFile &cf, QString *error
     StreamQuartet tasks;
     tasks.recordSize = kTaskRecordSize;
     for (int i = 0; i < in.tasks.size(); ++i) {
-        const MppTask &t = in.tasks.at(i);
+        const schedule::Task &t = in.tasks.at(i);
         tasks.fixedRecords.append(packTask(t));
         if (!t.name.isEmpty())
             tasks.varEntries.append({ static_cast<quint32>(i), kFieldName,
@@ -1677,7 +1677,7 @@ bool DocSerializer::write(const MppProject &in, CompoundFile &cf, QString *error
     StreamQuartet res;
     res.recordSize = kResourceRecordSize;
     for (int i = 0; i < in.resources.size(); ++i) {
-        const MppResource &r = in.resources.at(i);
+        const schedule::Resource &r = in.resources.at(i);
         res.fixedRecords.append(packResource(r));
         if (!r.name.isEmpty())
             res.varEntries.append({ static_cast<quint32>(i), kFieldName,
@@ -1703,7 +1703,7 @@ bool DocSerializer::write(const MppProject &in, CompoundFile &cf, QString *error
     StreamQuartet asn;
     asn.recordSize = kAssignmentRecordSize;
     for (int i = 0; i < in.assignments.size(); ++i) {
-        const MppAssignment &a = in.assignments.at(i);
+        const schedule::Assignment &a = in.assignments.at(i);
         asn.fixedRecords.append(packAssignment(a));
         if (!a.notes.isEmpty())
             asn.varEntries.append({ static_cast<quint32>(i), kFieldNotes,
@@ -1718,14 +1718,14 @@ bool DocSerializer::write(const MppProject &in, CompoundFile &cf, QString *error
 
     StreamQuartet rel;
     rel.recordSize = kRelationRecordSize;
-    for (const MppRelation &r : in.relations)
+    for (const schedule::Relation &r : in.relations)
         rel.fixedRecords.append(packRelation(r));
     writeQuartet(cf, QStringLiteral("Relation"), rel.encode());
 
     StreamQuartet cal;
     cal.recordSize = kCalendarRecordSize;
     for (int i = 0; i < in.calendars.size(); ++i) {
-        const MppCalendar &c = in.calendars.at(i);
+        const schedule::Calendar &c = in.calendars.at(i);
         cal.fixedRecords.append(packCalendar(c));
         if (!c.name.isEmpty())
             cal.varEntries.append({ static_cast<quint32>(i), kFieldName,

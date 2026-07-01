@@ -1,18 +1,20 @@
 // Copyright (C) 2026 Paul McKinney
 // SPDX-License-Identifier: GPL-3.0-only
 
-#ifndef MPPBASELINE_H
-#define MPPBASELINE_H
+#ifndef SCHEDULE_BASELINE_H
+#define SCHEDULE_BASELINE_H
 
-#include "mppio_export.h"
+#include "scheduleio_export.h"
 
 #include <QDateTime>
+
+namespace schedule {
 
 // One saved baseline snapshot of an entity (task/resource/assignment). Microsoft
 // Project keeps a current baseline (number 0) plus up to ten saved baselines
 // (numbers 1..10). Fields not applicable to an entity stay at their defaults
 // (e.g. resources have no baseline start/finish). Value type for round-tripping.
-class MPPIO_EXPORT MppBaseline
+class SCHEDULEIO_EXPORT Baseline
 {
 public:
     int number = 0;                // 0 = current baseline, 1..10 = saved baselines
@@ -22,8 +24,10 @@ public:
     QDateTime finish;              // baseline finish (invalid if not set)
     qint64 durationMillis = 0;     // baseline duration, normalised to milliseconds
 
-    bool operator==(const MppBaseline &o) const;
-    bool operator!=(const MppBaseline &o) const { return !(*this == o); }
+    bool operator==(const Baseline &o) const;
+    bool operator!=(const Baseline &o) const { return !(*this == o); }
 };
 
-#endif // MPPBASELINE_H
+} // namespace schedule
+
+#endif // SCHEDULE_BASELINE_H

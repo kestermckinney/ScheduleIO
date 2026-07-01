@@ -1,13 +1,13 @@
-# MppIO
+# ScheduleIO
 
-**MppIO** is a cross-platform (Windows, macOS, Linux) C++ library, built with **Qt 6**, that reads
+**ScheduleIO** is a cross-platform (Windows, macOS, Linux) C++ library, built with **Qt 6**, that reads
 Microsoft Project `.mpp` files into Qt data structures so you can inspect and manipulate a project
 schedule in code. It is built as a **dynamically loaded** shared library and has no dependency on an
 installed copy of Microsoft Project.
 
-The `.mpp` format is undocumented; MppIO decodes it directly — the OLE2 compound-document container,
+The `.mpp` format is undocumented; ScheduleIO decodes it directly — the OLE2 compound-document container,
 the per-entity record streams, and the field maps that tie them together — and exposes the result as
-a plain, copyable object model (`MppProject` and its child types).
+a plain, copyable object model (`schedule::Project` and its child types).
 
 The library also includes [`XmlIO`](API/XmlIO.md), which reads **and writes** Microsoft Project
 compatible XML (the MSPDI `.xml` format) over the very same object model. So you can read a binary

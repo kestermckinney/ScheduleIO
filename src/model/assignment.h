@@ -1,17 +1,19 @@
 // Copyright (C) 2026 Paul McKinney
 // SPDX-License-Identifier: GPL-3.0-only
 
-#ifndef MPPASSIGNMENT_H
-#define MPPASSIGNMENT_H
+#ifndef SCHEDULE_ASSIGNMENT_H
+#define SCHEDULE_ASSIGNMENT_H
 
-#include "mppio_export.h"
-#include "model/mppbaseline.h"
-#include "model/mppcustomfield.h"
+#include "scheduleio_export.h"
+#include "model/baseline.h"
+#include "model/customfield.h"
 
 #include <QList>
 
+namespace schedule {
+
 // Links a resource to a task (entity type 0xc / "Assignment").
-class MPPIO_EXPORT MppAssignment
+class SCHEDULEIO_EXPORT Assignment
 {
 public:
     int uniqueId = 0;
@@ -27,11 +29,13 @@ public:
     double remainingCost = 0.0;
     double costVariance = 0.0;
 
-    QList<MppBaseline> baselines;        // assignment baselines: cost/work/start/finish
-    QList<MppCustomField> customFields;
+    QList<Baseline> baselines;        // assignment baselines: cost/work/start/finish
+    QList<CustomField> customFields;
 
-    bool operator==(const MppAssignment &o) const;
-    bool operator!=(const MppAssignment &o) const { return !(*this == o); }
+    bool operator==(const Assignment &o) const;
+    bool operator!=(const Assignment &o) const { return !(*this == o); }
 };
 
-#endif // MPPASSIGNMENT_H
+} // namespace schedule
+
+#endif // SCHEDULE_ASSIGNMENT_H

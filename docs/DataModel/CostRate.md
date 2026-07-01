@@ -1,14 +1,14 @@
-# MppCostRate
+# schedule::CostRate
 
 One time-phased entry of a resource cost-rate table. Value type; copyable and equality-comparable.
 
 ```cpp
-#include "src/model/mppcostrate.h"
+#include "src/model/costrate.h"
 ```
 
 Microsoft Project gives each resource up to five cost-rate tables (**A–E**, `table` 0–4). Each table
 holds a list of entries; an entry's rates apply over a date range, so a resource whose rate changes
-over time has several entries in the same table. [`MppResource::costRates`](MppResource.md) is the
+over time has several entries in the same table. [`schedule::Resource::costRates`](Resource.md) is the
 flat list of all such entries across all tables for that resource.
 
 ## Members
@@ -36,8 +36,8 @@ flat list of all such entries across all tables for that resource.
 ## Example
 
 ```cpp
-for (const MppResource &r : project.resources) {
-    for (const MppCostRate &cr : r.costRates) {
+for (const schedule::Resource &r : project.resources) {
+    for (const schedule::CostRate &cr : r.costRates) {
         if (cr.table == 0 && !cr.endDate.isValid())   // table A, current rate
             qInfo() << r.name << "rate" << cr.standardRate
                     << "per-unit" << cr.standardRateUnit;

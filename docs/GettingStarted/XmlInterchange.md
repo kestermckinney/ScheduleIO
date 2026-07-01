@@ -3,7 +3,7 @@
 Alongside the binary-`.mpp` reader ([`MppIO`](../API/MppIO.md)), the library provides
 [`XmlIO`](../API/XmlIO.md) for **Microsoft Project compatible XML** — the MSPDI format Microsoft
 Project exports and imports as `.xml`. Both classes populate the same
-[`MppProject`](../DataModel/MppProject.md), so they compose directly.
+[`schedule::Project`](../DataModel/Project.md), so they compose directly.
 
 ```cpp
 #include "xmlio.h"
@@ -21,12 +21,12 @@ if (!io.open("Schedule.xml")) {
     return;
 }
 
-const MppProject &project = io.project();
+const schedule::Project &project = io.project();
 qInfo() << "Title:" << project.title;
 qInfo() << "Tasks:" << project.tasks.size();
 ```
 
-The resulting `MppProject` is identical in shape to one produced by `MppIO`, so everything in
+The resulting `schedule::Project` is identical in shape to one produced by `MppIO`, so everything in
 [Basic Usage](BasicUsage.md) — iterating tasks, joining assignments, reading baselines, custom
 fields, and notes — applies unchanged.
 
@@ -36,7 +36,7 @@ Set a project, then `save()`. The output is a standard MSPDI document that Micro
 open:
 
 ```cpp
-MppProject project = buildProject();   // or one you read earlier
+schedule::Project project = buildProject();   // or one you read earlier
 
 XmlIO io;
 io.setProject(project);
@@ -92,7 +92,7 @@ if (in.open("Schedule.xml"))
 ## Round-tripping
 
 `XmlIO` is a lossless reader/writer for the modelled fields: reading a document, writing it, and
-reading it again yields an identical `MppProject`. This is verified against real Microsoft Project
+reading it again yields an identical `schedule::Project`. This is verified against real Microsoft Project
 exports in the test suite (`tst_xml_roundtrip`), and a second test (`tst_xml_mpp_crosscheck`) loads
 the same project both ways — `.mpp` via `MppIO` and `.xml` via `XmlIO` — and confirms they agree.
 

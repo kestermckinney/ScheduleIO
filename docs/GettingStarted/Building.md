@@ -1,6 +1,6 @@
 # Building
 
-MppIO is a CMake project that targets **Qt 6** (Qt 5 is accepted as a fallback) and **C++17**.
+ScheduleIO is a CMake project that targets **Qt 6** (Qt 5 is accepted as a fallback) and **C++17**.
 
 ## Prerequisites
 
@@ -14,7 +14,7 @@ MppIO is a CMake project that targets **Qt 6** (Qt 5 is accepted as a fallback) 
 ## Configure and build
 
 ```sh
-cmake -S . -B build -DMPPIO_BUILD_TESTS=ON
+cmake -S . -B build -DSCHEDULEIO_BUILD_TESTS=ON
 cmake --build build
 ```
 
@@ -24,7 +24,7 @@ On Windows, build from a Qt/MSVC environment (for example a Qt Creator kit, or a
 ```sh
 cmake -S . -B build -G Ninja \
     -DCMAKE_PREFIX_PATH=C:/Qt/6.10.0/msvc2022_64 \
-    -DMPPIO_BUILD_TESTS=ON
+    -DSCHEDULEIO_BUILD_TESTS=ON
 cmake --build build
 ```
 
@@ -32,15 +32,15 @@ cmake --build build
 
 | Option | Default | Purpose |
 | :--- | :--- | :--- |
-| `MPPIO_BUILD_TESTS` | `ON` | Build the QtTest suite and register it with CTest. |
-| `MPPIO_ORACLE_MSPROJECT` | `OFF` | Reserved for the optional Windows-only writer-acceptance oracle. |
+| `SCHEDULEIO_BUILD_TESTS` | `ON` | Build the QtTest suite and register it with CTest. |
+| `SCHEDULEIO_ORACLE_MSPROJECT` | `OFF` | Reserved for the optional Windows-only writer-acceptance oracle. |
 
 ## Targets
 
 | Target | Type | Description |
 | :--- | :--- | :--- |
-| `MppIO` | `SHARED` library | The library itself (`MppIO.dll` / `libMppIO.so` / `libMppIO.dylib`). |
-| `mppio_objects` | `OBJECT` library | Internal — all sources compiled once; the shared library and the unit tests both consume it. |
+| `ScheduleIO` | `SHARED` library | The library itself (`ScheduleIO.dll` / `libScheduleIO.so` / `libScheduleIO.dylib`). |
+| `scheduleio_objects` | `OBJECT` library | Internal — all sources compiled once; the shared library and the unit tests both consume it. |
 
 ## Running the tests
 
@@ -52,19 +52,19 @@ run with no external data; the Layer 3 oracle tests use real `.mpp` + `.xml` fix
 ctest --test-dir build --output-on-failure
 ```
 
-Make sure the Qt runtime and the built `MppIO` shared library are on the library search path when
+Make sure the Qt runtime and the built `ScheduleIO` shared library are on the library search path when
 running the tests (on Windows, add the Qt `bin` directory and the build directory to `PATH`).
 
-## Linking against MppIO
+## Linking against ScheduleIO
 
 If you build with CMake, add the library subdirectory and link the target:
 
 ```cmake
-add_subdirectory(MppIO)            # or add_subdirectory(../MppIO MppIO)
-target_link_libraries(your_app PRIVATE MppIO)
+add_subdirectory(ScheduleIO)       # or add_subdirectory(../ScheduleIO ScheduleIO)
+target_link_libraries(your_app PRIVATE ScheduleIO)
 ```
 
-The `MppIO` target exports its include directory, so `#include "mppio.h"` resolves automatically.
-Genuine downstream consumers that link the shared library import its symbols via the `MPPIO_DLL`
+The `ScheduleIO` target exports its include directory, so `#include "mppio.h"` resolves automatically.
+Genuine downstream consumers that link the shared library import its symbols via the `SCHEDULEIO_DLL`
 interface definition. If you prefer to load the library at run time instead of linking it, see
 [Dynamic Loading](DynamicLoading.md).

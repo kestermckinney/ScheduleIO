@@ -10,8 +10,8 @@
 #include <QTest>
 #include <QXmlStreamReader>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 // Layer 3 oracle: cost values (a plain currency double in the binary) decoded for
@@ -74,7 +74,7 @@ void TstCostOracle::costMatchesXml_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
         const QString xml = QDir(dir).filePath(QFileInfo(f).completeBaseName() + QStringLiteral(".xml"));
         if (QFile::exists(xml))
@@ -86,7 +86,7 @@ static bool money(double a, double b) { return qAbs(a - b) < 0.05; }
 
 void TstCostOracle::costMatchesXml()
 {
-    if (QDir(QStringLiteral(MPPIO_FIXTURE_DIR))
+    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
             .entryList({ QStringLiteral("*.mpp") }, QDir::Files).isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
 
@@ -99,10 +99,10 @@ void TstCostOracle::costMatchesXml()
     QHash<int, XmlCost> xTasks, xRes, xAssn;
     parse(xml, xTasks, xRes, xAssn);
 
-    QHash<int, MppTask> tasks;
-    for (const MppTask &t : io.project().tasks) tasks.insert(t.uniqueId, t);
-    QHash<int, MppResource> res;
-    for (const MppResource &r : io.project().resources) res.insert(r.uniqueId, r);
+    QHash<int, schedule::Task> tasks;
+    for (const schedule::Task &t : io.project().tasks) tasks.insert(t.uniqueId, t);
+    QHash<int, schedule::Resource> res;
+    for (const schedule::Resource &r : io.project().resources) res.insert(r.uniqueId, r);
 
     // --- Tasks: Cost (+ FixedCost / ActualCost / RemainingCost where present) ---
     int n = 0, costOk = 0, fixedOk = 0, fixedN = 0, actOk = 0, actN = 0, remOk = 0, remN = 0;
@@ -140,8 +140,8 @@ void TstCostOracle::costMatchesXml()
     }
 
     // --- Assignments: Cost (match by uniqueId) ---
-    QHash<int, MppAssignment> assn;
-    for (const MppAssignment &a : io.project().assignments) assn.insert(a.uniqueId, a);
+    QHash<int, schedule::Assignment> assn;
+    for (const schedule::Assignment &a : io.project().assignments) assn.insert(a.uniqueId, a);
     int an = 0, aCostOk = 0;
     for (auto it = xAssn.constBegin(); it != xAssn.constEnd(); ++it) {
         if (!it->costSeen) continue;

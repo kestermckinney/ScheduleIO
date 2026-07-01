@@ -1,10 +1,10 @@
-# MppResource
+# schedule::Resource
 
 A resource (a person, piece of equipment, or material that work is assigned to). Value type;
 copyable and equality-comparable.
 
 ```cpp
-#include "src/model/mppresource.h"
+#include "src/model/resource.h"
 ```
 
 ## Members
@@ -21,17 +21,17 @@ copyable and equality-comparable.
 | `actualCost` | `double` | Cost incurred so far. |
 | `remainingCost` | `double` | Cost still to be incurred. |
 | `costVariance` | `double` | Cost minus baseline cost. |
-| `baselines` | `QList<MppBaseline>` | Saved baselines (cost and work only; see [`MppBaseline`](MppBaseline.md)). |
-| `customFields` | `QList<MppCustomField>` | Populated custom/extended fields (see [`MppCustomField`](MppCustomField.md)). |
-| `costRates` | `QList<MppCostRate>` | Cost-rate tables A–E with time-phased rates (see [`MppCostRate`](MppCostRate.md)). |
+| `baselines` | `QList<schedule::Baseline>` | Saved baselines (cost and work only; see [`schedule::Baseline`](Baseline.md)). |
+| `customFields` | `QList<schedule::CustomField>` | Populated custom/extended fields (see [`schedule::CustomField`](CustomField.md)). |
+| `costRates` | `QList<schedule::CostRate>` | Cost-rate tables A–E with time-phased rates (see [`schedule::CostRate`](CostRate.md)). |
 
 ## Notes
 
-* Resources are linked to tasks through [`MppAssignment`](MppAssignment.md), not directly.
-* A resource may also have a *resource calendar* — an [`MppCalendar`](MppCalendar.md) whose name is
+* Resources are linked to tasks through [`schedule::Assignment`](Assignment.md), not directly.
+* A resource may also have a *resource calendar* — a [`schedule::Calendar`](Calendar.md) whose name is
   the resource's name and whose `baseCalendarUniqueId` points at a base calendar.
 * Resource **cost rates** (standard rate, overtime rate, cost-per-use) live in Microsoft Project's
-  cost-rate tables and are decoded into `costRates` (see [`MppCostRate`](MppCostRate.md)).
+  cost-rate tables and are decoded into `costRates` (see [`schedule::CostRate`](CostRate.md)).
 * **`cost`** is the resource's stored cost where present; for resources whose cost Microsoft Project
   computes from rate tables, MppIO rolls it up from the resource's assignment costs so it matches the
   exported value.
@@ -39,7 +39,7 @@ copyable and equality-comparable.
 ## Example
 
 ```cpp
-for (const MppResource &r : project.resources)
+for (const schedule::Resource &r : project.resources)
     qInfo() << r.id << r.name << "(" << r.initials << ")"
             << "max" << int(r.maxUnits * 100) << "%";
 ```

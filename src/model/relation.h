@@ -1,14 +1,16 @@
 // Copyright (C) 2026 Paul McKinney
 // SPDX-License-Identifier: GPL-3.0-only
 
-#ifndef MPPRELATION_H
-#define MPPRELATION_H
+#ifndef SCHEDULE_RELATION_H
+#define SCHEDULE_RELATION_H
 
-#include "mppio_export.h"
+#include "scheduleio_export.h"
+
+namespace schedule {
 
 // A task dependency (predecessor link), from the TBkndCons storage. The
 // successor task depends on the predecessor task.
-class MPPIO_EXPORT MppRelation
+class SCHEDULEIO_EXPORT Relation
 {
 public:
     enum Type {
@@ -24,8 +26,10 @@ public:
     int type = FinishToStart;
     qint64 lagMillis = 0;
 
-    bool operator==(const MppRelation &o) const;
-    bool operator!=(const MppRelation &o) const { return !(*this == o); }
+    bool operator==(const Relation &o) const;
+    bool operator!=(const Relation &o) const { return !(*this == o); }
 };
 
-#endif // MPPRELATION_H
+} // namespace schedule
+
+#endif // SCHEDULE_RELATION_H

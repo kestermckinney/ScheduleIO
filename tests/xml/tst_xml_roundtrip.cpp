@@ -8,13 +8,13 @@
 #include <QFileInfo>
 #include <QTest>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 // XmlIO must be a faithful reader/writer of the MSPDI model: parsing an XML
 // document, writing it back out, and parsing it again must yield an identical
-// MppProject. This proves the writer emits everything the reader reads (i.e. the
+// schedule::Project. This proves the writer emits everything the reader reads (i.e. the
 // round trip is lossless for the modelled fields) on real MS Project exports.
 class TstXmlRoundtrip : public QObject
 {
@@ -29,14 +29,14 @@ void TstXmlRoundtrip::synthetic()
 {
     // A small hand-built project exercises every modelled entity without needing
     // any fixture present, so the round trip is always covered.
-    MppProject p;
-    p.formatVersion = MppProject::FormatVersion::Mpp14;
+    schedule::Project p;
+    p.formatVersion = schedule::Project::FormatVersion::Mpp14;
     p.title = QStringLiteral("Round & Trip <\"test\">");
     p.author = QStringLiteral("Tester");
     p.startDate = QDateTime(QDate(2026, 1, 5), QTime(8, 0));
     p.finishDate = QDateTime(QDate(2026, 2, 27), QTime(17, 0));
 
-    MppTask summary;
+    schedule::Task summary;
     summary.uniqueId = 1;
     summary.id = 1;
     summary.outlineLevel = 1;
@@ -46,7 +46,7 @@ void TstXmlRoundtrip::synthetic()
     summary.finish = p.finishDate;
     summary.durationMillis = 40LL * 3600 * 1000;
 
-    MppTask task;
+    schedule::Task task;
     task.uniqueId = 2;
     task.id = 2;
     task.outlineLevel = 2;
@@ -65,7 +65,7 @@ void TstXmlRoundtrip::synthetic()
     task.actualCost = 600.0;
     task.remainingCost = 634.5;
 
-    MppBaseline base;
+    schedule::Baseline base;
     base.number = 0;
     base.cost = 1200.0;
     base.workMillis = 16LL * 3600 * 1000;
@@ -74,7 +74,7 @@ void TstXmlRoundtrip::synthetic()
     base.durationMillis = task.durationMillis;
     task.baselines.append(base);
 
-    MppCustomField textField;
+    schedule::CustomField textField;
     textField.fieldId = 0x0B400033;   // task Text1
     textField.name = QStringLiteral("Text1");
     textField.value = QStringLiteral("custom value");
@@ -82,21 +82,21 @@ void TstXmlRoundtrip::synthetic()
 
     p.tasks << summary << task;
 
-    MppRelation rel;
+    schedule::Relation rel;
     rel.predecessorTaskUid = 1;
     rel.successorTaskUid = 2;
-    rel.type = MppRelation::FinishToStart;
+    rel.type = schedule::Relation::FinishToStart;
     rel.lagMillis = 60LL * 60 * 1000;   // 1h, a whole number of tenth-minutes
     p.relations.append(rel);
 
-    MppResource res;
+    schedule::Resource res;
     res.uniqueId = 1;
     res.id = 1;
     res.name = QStringLiteral("Alice");
     res.initials = QStringLiteral("A");
     res.maxUnits = 1.0;
     res.cost = 600.0;
-    MppCostRate cr;
+    schedule::CostRate cr;
     cr.table = 0;
     cr.startDate = p.startDate;
     cr.standardRate = 75.0;
@@ -104,7 +104,7 @@ void TstXmlRoundtrip::synthetic()
     res.costRates.append(cr);
     p.resources.append(res);
 
-    MppAssignment asn;
+    schedule::Assignment asn;
     asn.uniqueId = 1;
     asn.taskUniqueId = 2;
     asn.resourceUniqueId = 1;
@@ -113,20 +113,20 @@ void TstXmlRoundtrip::synthetic()
     asn.cost = 600.0;
     p.assignments.append(asn);
 
-    MppCalendar cal;
+    schedule::Calendar cal;
     cal.uniqueId = 1;
     cal.name = QStringLiteral("Standard");
     cal.baseCalendarUniqueId = -1;
     cal.workingDayMask = 0x1F;   // Mon..Fri
     for (int i = 0; i < 7; ++i) {
-        QList<MppTimeRange> day;
+        QList<schedule::TimeRange> day;
         if (i < 5) {
             day.append({ QTime(8, 0), QTime(12, 0) });
             day.append({ QTime(13, 0), QTime(17, 0) });
         }
         cal.workingTimes.append(day);
     }
-    MppCalendarException ex;
+    schedule::CalendarException ex;
     ex.fromDate = QDate(2026, 12, 25);
     ex.toDate = QDate(2026, 12, 25);
     ex.name = QStringLiteral("Christmas");
@@ -154,7 +154,7 @@ void TstXmlRoundtrip::synthetic()
 void TstXmlRoundtrip::fixtures_data()
 {
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.xml") }, QDir::Files))
         QTest::newRow(qPrintable(f)) << QDir(dir).filePath(f);
 }

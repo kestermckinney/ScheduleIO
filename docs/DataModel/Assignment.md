@@ -1,9 +1,9 @@
-# MppAssignment
+# schedule::Assignment
 
 Links a resource to a task. Value type; copyable and equality-comparable.
 
 ```cpp
-#include "src/model/mppassignment.h"
+#include "src/model/assignment.h"
 ```
 
 ## Members
@@ -11,8 +11,8 @@ Links a resource to a task. Value type; copyable and equality-comparable.
 | Member | Type | Description |
 | :--- | :--- | :--- |
 | `uniqueId` | `int` | The assignment's own unique id. |
-| `taskUniqueId` | `int` | Unique id of the assigned [`MppTask`](MppTask.md). |
-| `resourceUniqueId` | `int` | Unique id of the assigned [`MppResource`](MppResource.md). |
+| `taskUniqueId` | `int` | Unique id of the assigned [`schedule::Task`](Task.md). |
+| `resourceUniqueId` | `int` | Unique id of the assigned [`schedule::Resource`](Resource.md). |
 | `units` | `double` | Assigned units, as a ratio. `1.0` == 100%. |
 | `workMillis` | `qint64` | Assigned work, in milliseconds. |
 | `notes` | `QString` | The assignment's notes as raw RTF source (empty if none). |
@@ -20,22 +20,22 @@ Links a resource to a task. Value type; copyable and equality-comparable.
 | `actualCost` | `double` | Cost incurred so far. |
 | `remainingCost` | `double` | Cost still to be incurred. |
 | `costVariance` | `double` | Cost minus baseline cost. |
-| `baselines` | `QList<MppBaseline>` | Saved baselines (cost, work, start, finish; see [`MppBaseline`](MppBaseline.md)). |
-| `customFields` | `QList<MppCustomField>` | Populated custom/extended fields (see [`MppCustomField`](MppCustomField.md)). |
+| `baselines` | `QList<schedule::Baseline>` | Saved baselines (cost, work, start, finish; see [`schedule::Baseline`](Baseline.md)). |
+| `customFields` | `QList<schedule::CustomField>` | Populated custom/extended fields (see [`schedule::CustomField`](CustomField.md)). |
 
 ## Resolving the links
 
 An assignment references its task and resource by unique id. Join them with lookups:
 
 ```cpp
-QHash<int, const MppTask*>     taskById;
-QHash<int, const MppResource*> resById;
-for (const MppTask &t : project.tasks)     taskById.insert(t.uniqueId, &t);
-for (const MppResource &r : project.resources) resById.insert(r.uniqueId, &r);
+QHash<int, const schedule::Task*>     taskById;
+QHash<int, const schedule::Resource*> resById;
+for (const schedule::Task &t : project.tasks)     taskById.insert(t.uniqueId, &t);
+for (const schedule::Resource &r : project.resources) resById.insert(r.uniqueId, &r);
 
-for (const MppAssignment &a : project.assignments) {
-    const MppTask     *t = taskById.value(a.taskUniqueId);
-    const MppResource *r = resById.value(a.resourceUniqueId);
+for (const schedule::Assignment &a : project.assignments) {
+    const schedule::Task     *t = taskById.value(a.taskUniqueId);
+    const schedule::Resource *r = resById.value(a.resourceUniqueId);
     if (t && r)
         qInfo() << r->name << "->" << t->name
                 << "units" << a.units

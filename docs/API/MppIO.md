@@ -1,7 +1,7 @@
 # MppIO Class
 
 `MppIO` is the public facade for the library. It reads a Microsoft Project `.mpp` file into an
-[`MppProject`](../DataModel/MppProject.md) and gives access to the result.
+[`schedule::Project`](../DataModel/Project.md) and gives access to the result.
 
 ```cpp
 #include "mppio.h"
@@ -13,7 +13,7 @@ The class is non-copyable (`Q_DISABLE_COPY`). Create one per file you want to re
 
 ### `MppIO()` / `~MppIO()`
 
-Construct and destroy an instance. A fresh instance holds an empty `MppProject`.
+Construct and destroy an instance. A fresh instance holds an empty `schedule::Project`.
 
 ---
 
@@ -62,20 +62,20 @@ failure.
 
 ---
 
-### `const MppProject &project() const`
+### `const schedule::Project &project() const`
 
 Return a reference to the current in-memory project — the result of the most recent successful
 `open()` / `openFromData()`, or whatever was set with `setProject()`.
 
 ```cpp
-const MppProject &p = io.project();
-for (const MppTask &t : p.tasks)
+const schedule::Project &p = io.project();
+for (const schedule::Task &t : p.tasks)
     use(t);
 ```
 
 ---
 
-### `void setProject(const MppProject &project)`
+### `void setProject(const schedule::Project &project)`
 
 Replace the current in-memory project. Useful before `save()` / `saveToData()`, or to manipulate a
 project the host constructed itself.
@@ -94,8 +94,8 @@ For run-time loading, the library also exports an `extern "C"` factory. See
 
 ```cpp
 extern "C" {
-    MppIO      *mppio_create();
-    void        mppio_destroy(MppIO *io);
-    const char *mppio_version();
+    MppIO      *scheduleio_create();
+    void        scheduleio_destroy(MppIO *io);
+    const char *scheduleio_version();
 }
 ```

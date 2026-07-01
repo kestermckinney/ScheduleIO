@@ -11,8 +11,8 @@
 class Mpp12Serializer : public DocSerializer
 {
 public:
-    MppProject::FormatVersion version() const override
-    { return MppProject::FormatVersion::Mpp12; }
+    schedule::Project::FormatVersion version() const override
+    { return schedule::Project::FormatVersion::Mpp12; }
 };
 
 #endif // MPP12SERIALIZER_H

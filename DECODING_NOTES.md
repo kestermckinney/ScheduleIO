@@ -194,7 +194,7 @@ its Var2Data key; the high word selects the entity (task `0x0B40`, resource `0x0
   tables, which we don't decode). Where `cost`/`actualCost`/`remainingCost` read 0, `readRealMpp`
   rolls them up from the resource's assignment costs, matching the exported resource cost (Has Macros
   67/67 after rollup).
-- **Custom fields** → `MppCustomField{fieldId, name, value}` where `fieldId = (high<<16)|index`,
+- **Custom fields** → `schedule::CustomField{fieldId, name, value}` where `fieldId = (high<<16)|index`,
   which equals the MSPDI `<FieldID>` exactly (e.g. `188743731 = 0x0B400033`, index 51 = Text1). The
   value type follows the slot kind (Text/Outline Code→QString, Number→double, Cost→currency double,
   Date/Start/Finish→QDateTime, Duration→qint64 ms, Flag→bool). Oracle: 577/577 and 248/248 custom
@@ -212,7 +212,7 @@ Notes are a **var-data** field: var key **15** (task), **20** (resource), **71**
 MPXJ `MPP*Field.NOTES` index. Unlike names, MPXJ reads NOTES with `Var2Data.getString` (not
 `getUnicodeString`), i.e. an **8-bit (Latin1), NUL-terminated** string — the bytes are the **raw RTF
 source** (`{\rtf1...}`). `readNotesRtf` in `docserializer.cpp` returns it verbatim into
-`MppTask/MppResource/MppAssignment::notes` (no RTF stripping). Scaffold round-trips it as a
+`schedule::Task/schedule::Resource/schedule::Assignment::notes` (no RTF stripping). Scaffold round-trips it as a
 `kFieldNotes` var entry. `tst_notes_oracle` validates task + resource notes against the Average
 Project fixture (the XML stores plain text, so it checks each XML note line is recovered inside the
 decoded RTF — 2/2 task, 2/2 resource). Assignment notes use the same decoder but no fixture has them
@@ -230,7 +230,7 @@ weeks ×40 using default 480/2400 min) — fixtures are all per-hour so the stor
 XML rate. End-date heuristics (MPXJ): `>= 2049-12-31 23:59` ⇒ open-ended; minute on a 5-min boundary
 ⇒ step back 1 min; entries with non-zero seconds are noise and skipped. Entries are sorted by end
 date, each start = previous end + 1 min. `parseCostRateTable` in docserializer →
-`MppResource::costRates` (`MppCostRate{table,startDate,endDate,standardRate,standardRateUnit,
+`schedule::Resource::costRates` (`schedule::CostRate{table,startDate,endDate,standardRate,standardRateUnit,
 overtimeRate,overtimeRateUnit,costPerUse}`). Validated: current rate 43/43 (Example) and 63/63 (Has
 Macros), and the full per-resource standard-rate sets. Scaffold round-trips as `kFieldCostRates`.
 
@@ -245,8 +245,8 @@ minutes×10 (tenths-of-minute since midnight); duration short = tenths-of-minute
 Exceptions: `count u16@420`, then 92-byte blocks (+4): `fromDate days@0`, `toDate days@2` (epoch
 **1983-12-31**, like the fixed-data timestamps — NOT 1984-01-01); `periodCount u16@14`
 (0 ⇒ non-working); periods `start@20+p*2`, `dur@32+p*4`; `nameLen i32@88` (round up to ×4);
-UTF-16 name@92. `parseCalendarData` → `MppCalendar.workingTimes` (7 lists, Monday..Sunday) +
-`exceptions` (`MppCalendarException`). **GOTCHA:** calendar FixedData meta offsets are NOT in storage
+UTF-16 name@92. `parseCalendarData` → `schedule::Calendar.workingTimes` (7 lists, Monday..Sunday) +
+`exceptions` (`schedule::CalendarException`). **GOTCHA:** calendar FixedData meta offsets are NOT in storage
 order, so calendars use `readVarSizedBlocks` (block end = next-higher offset, MPXJ FixedData
 semantics) instead of `readFixedBlocks` — otherwise out-of-order calendars (e.g. a newly added one)
 are silently dropped. Validated: weekday hours 70/70 (Average), 259/259, 392/392; exceptions 2/2

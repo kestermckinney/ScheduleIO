@@ -1,9 +1,11 @@
 // Copyright (C) 2026 Paul McKinney
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include "model/mppresource.h"
+#include "model/resource.h"
 
-bool MppResource::operator==(const MppResource &o) const
+namespace schedule {
+
+bool Resource::operator==(const Resource &o) const
 {
     return uniqueId == o.uniqueId
         && id == o.id
@@ -19,3 +21,5 @@ bool MppResource::operator==(const MppResource &o) const
         && customFields == o.customFields
         && costRates == o.costRates;
 }
+
+} // namespace schedule

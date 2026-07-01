@@ -1,9 +1,9 @@
-# MppCalendar
+# schedule::Calendar
 
 A working-time calendar. Value type; copyable and equality-comparable.
 
 ```cpp
-#include "src/model/mppcalendar.h"
+#include "src/model/calendar.h"
 ```
 
 ## Members
@@ -14,8 +14,8 @@ A working-time calendar. Value type; copyable and equality-comparable.
 | `name` | `QString` | Calendar name. For a base calendar this is its own name (e.g. *Standard*); for a resource calendar it is the linked resource's name. |
 | `baseCalendarUniqueId` | `int` | Unique id of the base calendar this one derives from, or `-1` if this is itself a base calendar. |
 | `workingDayMask` | `quint8` | Bitmask of working days. |
-| `workingTimes` | `QList<QList<MppTimeRange>>` | Working-time periods per weekday: 7 entries, index 0 = Monday … 6 = Sunday (empty entry = a non-working day). |
-| `exceptions` | `QList<MppCalendarException>` | Date-range overrides of the normal week (holidays, one-off working days). |
+| `workingTimes` | `QList<QList<schedule::TimeRange>>` | Working-time periods per weekday: 7 entries, index 0 = Monday … 6 = Sunday (empty entry = a non-working day). |
+| `exceptions` | `QList<schedule::CalendarException>` | Date-range overrides of the normal week (holidays, one-off working days). |
 
 ## Working-day mask
 
@@ -34,11 +34,11 @@ A working-time calendar. Value type; copyable and equality-comparable.
 A standard Monday–Friday calendar is therefore `0x1F`.
 
 ```cpp
-auto isWorking = [](const MppCalendar &c, int mondayBasedDay) {
+auto isWorking = [](const schedule::Calendar &c, int mondayBasedDay) {
     return (c.workingDayMask >> mondayBasedDay) & 1;
 };
 
-for (const MppCalendar &c : project.calendars) {
+for (const schedule::Calendar &c : project.calendars) {
     QString days;
     for (int d = 0; d < 7; ++d) days += isWorking(c, d) ? "W" : "-";
     qInfo().noquote() << c.name << days
@@ -48,7 +48,7 @@ for (const MppCalendar &c : project.calendars) {
 
 ## Working hours
 
-`workingTimes` holds the periods worked on each weekday. `MppTimeRange` is a single period:
+`workingTimes` holds the periods worked on each weekday. `schedule::TimeRange` is a single period:
 
 | Member | Type | Description |
 | :--- | :--- | :--- |
@@ -58,13 +58,13 @@ for (const MppCalendar &c : project.calendars) {
 ```cpp
 static const char *kDays[7] = { "Mon","Tue","Wed","Thu","Fri","Sat","Sun" };
 for (int d = 0; d < cal.workingTimes.size(); ++d)
-    for (const MppTimeRange &p : cal.workingTimes.at(d))
+    for (const schedule::TimeRange &p : cal.workingTimes.at(d))
         qInfo() << kDays[d] << p.start.toString("HH:mm") << "-" << p.end.toString("HH:mm");
 ```
 
 ## Exceptions
 
-`MppCalendarException` is a date-range override (a holiday, or a one-off working day):
+`schedule::CalendarException` is a date-range override (a holiday, or a one-off working day):
 
 | Member | Type | Description |
 | :--- | :--- | :--- |
@@ -72,7 +72,7 @@ for (int d = 0; d < cal.workingTimes.size(); ++d)
 | `toDate` | `QDate` | Last day the exception applies. |
 | `name` | `QString` | Exception name (e.g. *Company Holiday*). |
 | `working` | `bool` | `true` if the days are working with `workingTimes`; `false` for a day off. |
-| `workingTimes` | `QList<MppTimeRange>` | The special working periods when `working` is `true`. |
+| `workingTimes` | `QList<schedule::TimeRange>` | The special working periods when `working` is `true`. |
 
 ## Notes
 

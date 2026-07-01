@@ -39,42 +39,42 @@ int main(int argc, char **argv)
     XmlIO b;
     if (!b.openFromData(written)) { out << "open B failed: " << b.errorString() << "\n"; return 1; }
 
-    const MppProject &pa = a.project();
-    const MppProject &pb = b.project();
+    const schedule::Project &pa = a.project();
+    const schedule::Project &pb = b.project();
     out << "tasks " << pa.tasks.size() << "/" << pb.tasks.size()
         << " res " << pa.resources.size() << "/" << pb.resources.size()
         << " asn " << pa.assignments.size() << "/" << pb.assignments.size()
         << " cal " << pa.calendars.size() << "/" << pb.calendars.size()
         << " rel " << pa.relations.size() << "/" << pb.relations.size() << "\n";
 
-    diffList("task", pa.tasks, pb.tasks, [](const MppTask &t) {
+    diffList("task", pa.tasks, pb.tasks, [](const schedule::Task &t) {
         return QStringLiteral("uid=%1 name=%2 cf=%3 base=%4").arg(t.uniqueId).arg(t.name)
             .arg(t.customFields.size()).arg(t.baselines.size());
     });
-    diffList("resource", pa.resources, pb.resources, [](const MppResource &r) {
+    diffList("resource", pa.resources, pb.resources, [](const schedule::Resource &r) {
         return QStringLiteral("uid=%1 name=%2 cf=%3 rates=%4").arg(r.uniqueId).arg(r.name)
             .arg(r.customFields.size()).arg(r.costRates.size());
     });
-    diffList("assignment", pa.assignments, pb.assignments, [](const MppAssignment &x) {
+    diffList("assignment", pa.assignments, pb.assignments, [](const schedule::Assignment &x) {
         return QStringLiteral("uid=%1 cf=%2").arg(x.uniqueId).arg(x.customFields.size());
     });
-    diffList("calendar", pa.calendars, pb.calendars, [](const MppCalendar &c) {
+    diffList("calendar", pa.calendars, pb.calendars, [](const schedule::Calendar &c) {
         return QStringLiteral("uid=%1 name=%2 ex=%3").arg(c.uniqueId).arg(c.name).arg(c.exceptions.size());
     });
-    diffList("relation", pa.relations, pb.relations, [](const MppRelation &r) {
+    diffList("relation", pa.relations, pb.relations, [](const schedule::Relation &r) {
         return QStringLiteral("p=%1 s=%2 t=%3 lag=%4").arg(r.predecessorTaskUid)
             .arg(r.successorTaskUid).arg(r.type).arg(r.lagMillis);
     });
 
     // Drill into custom fields of the first differing task.
     for (int i = 0; i < pa.tasks.size() && i < pb.tasks.size(); ++i) {
-        const MppTask &ta = pa.tasks[i];
-        const MppTask &tb = pb.tasks[i];
+        const schedule::Task &ta = pa.tasks[i];
+        const schedule::Task &tb = pb.tasks[i];
         if (ta == tb) continue;
         out << "first diff task uid=" << ta.uniqueId << "\n";
         for (int j = 0; j < ta.customFields.size() && j < tb.customFields.size(); ++j) {
-            const MppCustomField &ca = ta.customFields[j];
-            const MppCustomField &cb = tb.customFields[j];
+            const schedule::CustomField &ca = ta.customFields[j];
+            const schedule::CustomField &cb = tb.customFields[j];
             if (!(ca == cb))
                 out << "  cf id=" << ca.fieldId << " name=" << ca.name
                     << " va=[" << ca.value.toString() << "](" << ca.value.typeName() << ")"

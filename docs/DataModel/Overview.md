@@ -1,22 +1,22 @@
 # Data Model Overview
 
-When you read a file, MppIO fills in a single [`MppProject`](MppProject.md) object. Everything else
+When you read a file, MppIO fills in a single [`schedule::Project`](Project.md) object. Everything else
 hangs off it as `QList`s of value types.
 
 ```
-MppProject
+schedule::Project
 ├── title, author, startDate, finishDate, formatVersion
-├── tasks        : QList<MppTask>
-├── resources    : QList<MppResource>
-├── assignments  : QList<MppAssignment>
-├── relations    : QList<MppRelation>
-└── calendars    : QList<MppCalendar>
+├── tasks        : QList<schedule::Task>
+├── resources    : QList<schedule::Resource>
+├── assignments  : QList<schedule::Assignment>
+├── relations    : QList<schedule::Relation>
+└── calendars    : QList<schedule::Calendar>
 ```
 
 ## Design principles
 
-**Plain value types.** Every model class — `MppProject`, `MppTask`, `MppResource`,
-`MppAssignment`, `MppRelation`, `MppCalendar` — is a copyable struct-like type with public data
+**Plain value types.** Every model class — `schedule::Project`, `schedule::Task`, `schedule::Resource`,
+`schedule::Assignment`, `schedule::Relation`, `schedule::Calendar` — is a copyable struct-like type with public data
 members and an `operator==`. There are no getters/setters, no ownership semantics, and no Qt object
 parent/child relationships. You can copy them freely, store them in containers, and compare whole
 models for equality.
@@ -26,10 +26,10 @@ integer **unique ids**:
 
 | From | Field | Refers to |
 | :--- | :--- | :--- |
-| `MppAssignment` | `taskUniqueId` | an `MppTask.uniqueId` |
-| `MppAssignment` | `resourceUniqueId` | an `MppResource.uniqueId` |
-| `MppRelation` | `predecessorTaskUid`, `successorTaskUid` | `MppTask.uniqueId` |
-| `MppCalendar` | `baseCalendarUniqueId` | another `MppCalendar.uniqueId` |
+| `schedule::Assignment` | `taskUniqueId` | a `schedule::Task.uniqueId` |
+| `schedule::Assignment` | `resourceUniqueId` | a `schedule::Resource.uniqueId` |
+| `schedule::Relation` | `predecessorTaskUid`, `successorTaskUid` | `schedule::Task.uniqueId` |
+| `schedule::Calendar` | `baseCalendarUniqueId` | another `schedule::Calendar.uniqueId` |
 
 Build a `QHash<int, …>` keyed on `uniqueId` when you need fast lookups (see
 [Basic Usage](../GettingStarted/BasicUsage.md)).
@@ -50,9 +50,9 @@ outline level deeper.
 
 ## Per-type reference
 
-* [MppProject](MppProject.md)
-* [MppTask](MppTask.md)
-* [MppResource](MppResource.md)
-* [MppAssignment](MppAssignment.md)
-* [MppRelation](MppRelation.md)
-* [MppCalendar](MppCalendar.md)
+* [schedule::Project](Project.md)
+* [schedule::Task](Task.md)
+* [schedule::Resource](Resource.md)
+* [schedule::Assignment](Assignment.md)
+* [schedule::Relation](Relation.md)
+* [schedule::Calendar](Calendar.md)

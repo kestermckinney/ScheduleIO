@@ -1,10 +1,10 @@
-# MppRelation
+# schedule::Relation
 
 A task dependency (predecessor link). The *successor* task depends on the *predecessor* task. Value
 type; copyable and equality-comparable.
 
 ```cpp
-#include "src/model/mpprelation.h"
+#include "src/model/relation.h"
 ```
 
 ## Members
@@ -12,9 +12,9 @@ type; copyable and equality-comparable.
 | Member | Type | Description |
 | :--- | :--- | :--- |
 | `uniqueId` | `int` | The relation's own unique id. |
-| `predecessorTaskUid` | `int` | Unique id of the predecessor [`MppTask`](MppTask.md). |
+| `predecessorTaskUid` | `int` | Unique id of the predecessor [`schedule::Task`](Task.md). |
 | `successorTaskUid` | `int` | Unique id of the successor task. |
-| `type` | `int` | Link type — see `MppRelation::Type` below. |
+| `type` | `int` | Link type — see `schedule::Relation::Type` below. |
 | `lagMillis` | `qint64` | Lag/lead between the tasks, in milliseconds. |
 
 ## Type
@@ -39,10 +39,10 @@ enum Type {
 ## Example
 
 ```cpp
-for (const MppRelation &link : project.relations) {
-    const char *kind = link.type == MppRelation::FinishToStart ? "FS"
-                     : link.type == MppRelation::StartToStart  ? "SS"
-                     : link.type == MppRelation::FinishToFinish ? "FF" : "SF";
+for (const schedule::Relation &link : project.relations) {
+    const char *kind = link.type == schedule::Relation::FinishToStart ? "FS"
+                     : link.type == schedule::Relation::StartToStart  ? "SS"
+                     : link.type == schedule::Relation::FinishToFinish ? "FF" : "SF";
     qInfo() << "task" << link.successorTaskUid
             << "after task" << link.predecessorTaskUid << kind;
 }

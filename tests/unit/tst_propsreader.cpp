@@ -9,8 +9,8 @@
 #include <QTest>
 #include <QtEndian>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 class TstPropsReader : public QObject
@@ -63,14 +63,14 @@ void TstPropsReader::rejectsTooShort()
 void TstPropsReader::readsEntityNameListFromFixtures_data()
 {
     QTest::addColumn<QString>("path");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files))
         QTest::newRow(qPrintable(f)) << QDir(dir).filePath(f);
 }
 
 void TstPropsReader::readsEntityNameListFromFixtures()
 {
-    if (QDir(QStringLiteral(MPPIO_FIXTURE_DIR))
+    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
             .entryList({ QStringLiteral("*.mpp") }, QDir::Files)
             .isEmpty())
         QSKIP("no .mpp fixtures present");

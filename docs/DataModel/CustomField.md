@@ -1,18 +1,18 @@
-# MppCustomField
+# schedule::CustomField
 
 One custom ("extended") field value on a task, resource, or assignment. Value type; copyable and
 equality-comparable.
 
 ```cpp
-#include "src/model/mppcustomfield.h"
+#include "src/model/customfield.h"
 ```
 
 Microsoft Project exposes a large, fixed set of custom slots per entity — `Text1`–`Text30`,
 `Number1`–`Number20`, `Cost1`–`Cost10`, `Date1`–`Date10`, `Duration1`–`Duration10`,
 `Start1`–`Start10`, `Finish1`–`Finish10`, `Flag1`–`Flag20` and `Outline Code1`–`Outline Code10`.
 Rather than ~150 explicit members, MppIO returns only the slots that are actually populated as a
-`QList<MppCustomField>` on each [`MppTask`](MppTask.md), [`MppResource`](MppResource.md) and
-[`MppAssignment`](MppAssignment.md).
+`QList<schedule::CustomField>` on each [`schedule::Task`](Task.md), [`schedule::Resource`](Resource.md) and
+[`schedule::Assignment`](Assignment.md).
 
 ## Members
 
@@ -38,8 +38,8 @@ The `value` holds the natural Qt type for each kind of slot:
 ## Example
 
 ```cpp
-for (const MppTask &t : project.tasks) {
-    for (const MppCustomField &c : t.customFields) {
+for (const schedule::Task &t : project.tasks) {
+    for (const schedule::CustomField &c : t.customFields) {
         if (c.name == QLatin1String("Text1"))
             qInfo() << t.name << "Text1 =" << c.value.toString();
         else

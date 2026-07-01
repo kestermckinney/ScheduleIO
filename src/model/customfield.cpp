@@ -1,11 +1,15 @@
 // Copyright (C) 2026 Paul McKinney
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include "model/mppcustomfield.h"
+#include "model/customfield.h"
 
-bool MppCustomField::operator==(const MppCustomField &o) const
+namespace schedule {
+
+bool CustomField::operator==(const CustomField &o) const
 {
     return fieldId == o.fieldId
         && name == o.name
         && value == o.value;
 }
+
+} // namespace schedule

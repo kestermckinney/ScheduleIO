@@ -1,4 +1,4 @@
-site_name: MppIO Documentation
+site_name: ScheduleIO Documentation
 
 theme:
   name: readthedocs
@@ -16,15 +16,15 @@ nav:
     - 'XmlIO Class': API/XmlIO.md
   - 'Data Model':
     - 'Overview': DataModel/Overview.md
-    - 'MppProject': DataModel/MppProject.md
-    - 'MppTask': DataModel/MppTask.md
-    - 'MppResource': DataModel/MppResource.md
-    - 'MppAssignment': DataModel/MppAssignment.md
-    - 'MppRelation': DataModel/MppRelation.md
-    - 'MppCalendar': DataModel/MppCalendar.md
-    - 'MppBaseline': DataModel/MppBaseline.md
-    - 'MppCustomField': DataModel/MppCustomField.md
-    - 'MppCostRate': DataModel/MppCostRate.md
+    - 'Project': DataModel/Project.md
+    - 'Task': DataModel/Task.md
+    - 'Resource': DataModel/Resource.md
+    - 'Assignment': DataModel/Assignment.md
+    - 'Relation': DataModel/Relation.md
+    - 'Calendar': DataModel/Calendar.md
+    - 'Baseline': DataModel/Baseline.md
+    - 'CustomField': DataModel/CustomField.md
+    - 'CostRate': DataModel/CostRate.md
   - 'Reference':
     - 'Field Coverage': Reference/FieldCoverage.md
     - 'File Format Notes': Reference/FileFormat.md

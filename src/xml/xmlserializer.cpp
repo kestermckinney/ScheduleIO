@@ -172,9 +172,9 @@ QString customValueToString(const QVariant &v)
 
 // =========================== reading ========================================
 
-MppBaseline parseBaseline(QXmlStreamReader &r)
+schedule::Baseline parseBaseline(QXmlStreamReader &r)
 {
-    MppBaseline b;
+    schedule::Baseline b;
     while (r.readNextStartElement()) {
         const QStringView n = r.name();
         if (n == u"Number")
@@ -195,9 +195,9 @@ MppBaseline parseBaseline(QXmlStreamReader &r)
     return b;
 }
 
-void parsePredecessorLink(QXmlStreamReader &r, int successorUid, QList<MppRelation> &out)
+void parsePredecessorLink(QXmlStreamReader &r, int successorUid, QList<schedule::Relation> &out)
 {
-    MppRelation rel;
+    schedule::Relation rel;
     rel.successorTaskUid = successorUid;
     while (r.readNextStartElement()) {
         const QStringView n = r.name();
@@ -213,7 +213,7 @@ void parsePredecessorLink(QXmlStreamReader &r, int successorUid, QList<MppRelati
     out.append(rel);
 }
 
-void parseExtendedAttribute(QXmlStreamReader &r, QList<MppCustomField> &out)
+void parseExtendedAttribute(QXmlStreamReader &r, QList<schedule::CustomField> &out)
 {
     int fieldId = 0;
     QString raw;
@@ -231,7 +231,7 @@ void parseExtendedAttribute(QXmlStreamReader &r, QList<MppCustomField> &out)
     if (fieldId == 0 || !haveValue)
         return;
     const MppFieldIds::CustomFieldDef *def = customFieldDef(fieldId);
-    MppCustomField cf;
+    schedule::CustomField cf;
     cf.fieldId = fieldId;
     cf.name = def ? QString::fromLatin1(def->name) : QString();
     cf.value = customValueFromString(def, raw);
@@ -239,9 +239,9 @@ void parseExtendedAttribute(QXmlStreamReader &r, QList<MppCustomField> &out)
         out.append(cf);
 }
 
-MppTask parseTask(QXmlStreamReader &r, QList<MppRelation> &relations)
+schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relations)
 {
-    MppTask t;
+    schedule::Task t;
     while (r.readNextStartElement()) {
         const QStringView n = r.name();
         if (n == u"UID")
@@ -292,9 +292,9 @@ MppTask parseTask(QXmlStreamReader &r, QList<MppRelation> &relations)
     return t;
 }
 
-MppCostRate parseRate(QXmlStreamReader &r)
+schedule::CostRate parseRate(QXmlStreamReader &r)
 {
-    MppCostRate cr;
+    schedule::CostRate cr;
     while (r.readNextStartElement()) {
         const QStringView n = r.name();
         if (n == u"RateTable")
@@ -319,9 +319,9 @@ MppCostRate parseRate(QXmlStreamReader &r)
     return cr;
 }
 
-MppResource parseResource(QXmlStreamReader &r)
+schedule::Resource parseResource(QXmlStreamReader &r)
 {
-    MppResource res;
+    schedule::Resource res;
     while (r.readNextStartElement()) {
         const QStringView n = r.name();
         if (n == u"UID")
@@ -361,9 +361,9 @@ MppResource parseResource(QXmlStreamReader &r)
     return res;
 }
 
-MppAssignment parseAssignment(QXmlStreamReader &r)
+schedule::Assignment parseAssignment(QXmlStreamReader &r)
 {
-    MppAssignment a;
+    schedule::Assignment a;
     while (r.readNextStartElement()) {
         const QStringView n = r.name();
         if (n == u"UID")
@@ -396,12 +396,12 @@ MppAssignment parseAssignment(QXmlStreamReader &r)
     return a;
 }
 
-QList<MppTimeRange> parseWorkingTimes(QXmlStreamReader &r)
+QList<schedule::TimeRange> parseWorkingTimes(QXmlStreamReader &r)
 {
-    QList<MppTimeRange> times;
+    QList<schedule::TimeRange> times;
     while (r.readNextStartElement()) {
         if (r.name() == u"WorkingTime") {
-            MppTimeRange range;
+            schedule::TimeRange range;
             while (r.readNextStartElement()) {
                 const QStringView n = r.name();
                 if (n == u"FromTime")
@@ -419,11 +419,11 @@ QList<MppTimeRange> parseWorkingTimes(QXmlStreamReader &r)
     return times;
 }
 
-void parseWeekDay(QXmlStreamReader &r, MppCalendar &cal)
+void parseWeekDay(QXmlStreamReader &r, schedule::Calendar &cal)
 {
     int dayType = -1;
     bool working = false;
-    QList<MppTimeRange> times;
+    QList<schedule::TimeRange> times;
     QDate fromDate, toDate;   // only used for legacy (DayType 0) exceptions
     while (r.readNextStartElement()) {
         const QStringView n = r.name();
@@ -453,7 +453,7 @@ void parseWeekDay(QXmlStreamReader &r, MppCalendar &cal)
             cal.workingDayMask |= static_cast<quint8>(1u << index);
         cal.workingTimes[index] = times;
     } else if (dayType == 0 && fromDate.isValid()) {
-        MppCalendarException ex;
+        schedule::CalendarException ex;
         ex.fromDate = fromDate;
         ex.toDate = toDate.isValid() ? toDate : fromDate;
         ex.working = working;
@@ -462,9 +462,9 @@ void parseWeekDay(QXmlStreamReader &r, MppCalendar &cal)
     }
 }
 
-void parseException(QXmlStreamReader &r, MppCalendar &cal)
+void parseException(QXmlStreamReader &r, schedule::Calendar &cal)
 {
-    MppCalendarException ex;
+    schedule::CalendarException ex;
     while (r.readNextStartElement()) {
         const QStringView n = r.name();
         if (n == u"Name")
@@ -493,12 +493,12 @@ void parseException(QXmlStreamReader &r, MppCalendar &cal)
     }
 }
 
-MppCalendar parseCalendar(QXmlStreamReader &r)
+schedule::Calendar parseCalendar(QXmlStreamReader &r)
 {
-    MppCalendar cal;
+    schedule::Calendar cal;
     cal.workingTimes.clear();
     for (int i = 0; i < 7; ++i)
-        cal.workingTimes.append(QList<MppTimeRange>());
+        cal.workingTimes.append(QList<schedule::TimeRange>());
     while (r.readNextStartElement()) {
         const QStringView n = r.name();
         if (n == u"UID")
@@ -527,15 +527,15 @@ MppCalendar parseCalendar(QXmlStreamReader &r)
     return cal;
 }
 
-MppProject::FormatVersion versionFromSaveVersion(int sv)
+schedule::Project::FormatVersion versionFromSaveVersion(int sv)
 {
     switch (sv) {
     case 12:
-        return MppProject::FormatVersion::Mpp12;
+        return schedule::Project::FormatVersion::Mpp12;
     case 14:
-        return MppProject::FormatVersion::Mpp14;
+        return schedule::Project::FormatVersion::Mpp14;
     default:
-        return MppProject::FormatVersion::Unknown;
+        return schedule::Project::FormatVersion::Unknown;
     }
 }
 
@@ -546,7 +546,7 @@ void writeText(QXmlStreamWriter &w, const char *name, const QString &value)
     w.writeTextElement(QString::fromLatin1(name), value);
 }
 
-void writeBaseline(QXmlStreamWriter &w, const MppBaseline &b)
+void writeBaseline(QXmlStreamWriter &w, const schedule::Baseline &b)
 {
     w.writeStartElement(QStringLiteral("Baseline"));
     writeText(w, "Number", QString::number(b.number));
@@ -560,9 +560,9 @@ void writeBaseline(QXmlStreamWriter &w, const MppBaseline &b)
     w.writeEndElement();
 }
 
-void writeExtendedAttributes(QXmlStreamWriter &w, const QList<MppCustomField> &fields)
+void writeExtendedAttributes(QXmlStreamWriter &w, const QList<schedule::CustomField> &fields)
 {
-    for (const MppCustomField &cf : fields) {
+    for (const schedule::CustomField &cf : fields) {
         w.writeStartElement(QStringLiteral("ExtendedAttribute"));
         writeText(w, "FieldID", QString::number(cf.fieldId));
         writeText(w, "Value", customValueToString(cf.value));
@@ -570,10 +570,10 @@ void writeExtendedAttributes(QXmlStreamWriter &w, const QList<MppCustomField> &f
     }
 }
 
-void writeWorkingTimes(QXmlStreamWriter &w, const QList<MppTimeRange> &times)
+void writeWorkingTimes(QXmlStreamWriter &w, const QList<schedule::TimeRange> &times)
 {
     w.writeStartElement(QStringLiteral("WorkingTimes"));
-    for (const MppTimeRange &t : times) {
+    for (const schedule::TimeRange &t : times) {
         w.writeStartElement(QStringLiteral("WorkingTime"));
         writeText(w, "FromTime", formatTime(t.start));
         writeText(w, "ToTime", formatTime(t.end));
@@ -582,7 +582,7 @@ void writeWorkingTimes(QXmlStreamWriter &w, const QList<MppTimeRange> &times)
     w.writeEndElement();
 }
 
-void writeCalendar(QXmlStreamWriter &w, const MppCalendar &cal)
+void writeCalendar(QXmlStreamWriter &w, const schedule::Calendar &cal)
 {
     w.writeStartElement(QStringLiteral("Calendar"));
     writeText(w, "UID", QString::number(cal.uniqueId));
@@ -605,7 +605,7 @@ void writeCalendar(QXmlStreamWriter &w, const MppCalendar &cal)
 
     if (!cal.exceptions.isEmpty()) {
         w.writeStartElement(QStringLiteral("Exceptions"));
-        for (const MppCalendarException &ex : cal.exceptions) {
+        for (const schedule::CalendarException &ex : cal.exceptions) {
             w.writeStartElement(QStringLiteral("Exception"));
             w.writeStartElement(QStringLiteral("TimePeriod"));
             writeText(w, "FromDate", formatDateTime(QDateTime(ex.fromDate, QTime(0, 0))));
@@ -623,7 +623,7 @@ void writeCalendar(QXmlStreamWriter &w, const MppCalendar &cal)
     w.writeEndElement();
 }
 
-void writeTask(QXmlStreamWriter &w, const MppTask &t, const QMultiHash<int, const MppRelation *> &linksBySucc)
+void writeTask(QXmlStreamWriter &w, const schedule::Task &t, const QMultiHash<int, const schedule::Relation *> &linksBySucc)
 {
     w.writeStartElement(QStringLiteral("Task"));
     writeText(w, "UID", QString::number(t.uniqueId));
@@ -650,13 +650,13 @@ void writeTask(QXmlStreamWriter &w, const MppTask &t, const QMultiHash<int, cons
     writeText(w, "RemainingCost", formatNumber(t.remainingCost));
     if (!t.notes.isEmpty())
         writeText(w, "Notes", t.notes);
-    for (const MppBaseline &b : t.baselines)
+    for (const schedule::Baseline &b : t.baselines)
         writeBaseline(w, b);
     // Predecessor links live on the successor task in MSPDI.
-    const QList<const MppRelation *> links = linksBySucc.values(t.uniqueId);
+    const QList<const schedule::Relation *> links = linksBySucc.values(t.uniqueId);
     // values() reverses insertion order; restore document order.
     for (auto it = links.crbegin(); it != links.crend(); ++it) {
-        const MppRelation *rel = *it;
+        const schedule::Relation *rel = *it;
         w.writeStartElement(QStringLiteral("PredecessorLink"));
         writeText(w, "PredecessorUID", QString::number(rel->predecessorTaskUid));
         writeText(w, "Type", QString::number(rel->type));
@@ -667,7 +667,7 @@ void writeTask(QXmlStreamWriter &w, const MppTask &t, const QMultiHash<int, cons
     w.writeEndElement();
 }
 
-void writeResource(QXmlStreamWriter &w, const MppResource &res)
+void writeResource(QXmlStreamWriter &w, const schedule::Resource &res)
 {
     w.writeStartElement(QStringLiteral("Resource"));
     writeText(w, "UID", QString::number(res.uniqueId));
@@ -683,11 +683,11 @@ void writeResource(QXmlStreamWriter &w, const MppResource &res)
     writeText(w, "CostVariance", formatNumber(res.costVariance));
     if (!res.notes.isEmpty())
         writeText(w, "Notes", res.notes);
-    for (const MppBaseline &b : res.baselines)
+    for (const schedule::Baseline &b : res.baselines)
         writeBaseline(w, b);
     if (!res.costRates.isEmpty()) {
         w.writeStartElement(QStringLiteral("Rates"));
-        for (const MppCostRate &cr : res.costRates) {
+        for (const schedule::CostRate &cr : res.costRates) {
             w.writeStartElement(QStringLiteral("Rate"));
             if (cr.startDate.isValid())
                 writeText(w, "RatesFrom", formatDateTime(cr.startDate));
@@ -707,7 +707,7 @@ void writeResource(QXmlStreamWriter &w, const MppResource &res)
     w.writeEndElement();
 }
 
-void writeAssignment(QXmlStreamWriter &w, const MppAssignment &a)
+void writeAssignment(QXmlStreamWriter &w, const schedule::Assignment &a)
 {
     w.writeStartElement(QStringLiteral("Assignment"));
     writeText(w, "UID", QString::number(a.uniqueId));
@@ -721,7 +721,7 @@ void writeAssignment(QXmlStreamWriter &w, const MppAssignment &a)
     writeText(w, "CostVariance", formatNumber(a.costVariance));
     if (!a.notes.isEmpty())
         writeText(w, "Notes", a.notes);
-    for (const MppBaseline &b : a.baselines)
+    for (const schedule::Baseline &b : a.baselines)
         writeBaseline(w, b);
     writeExtendedAttributes(w, a.customFields);
     w.writeEndElement();
@@ -730,23 +730,23 @@ void writeAssignment(QXmlStreamWriter &w, const MppAssignment &a)
 // Emit a project-level <ExtendedAttributes> block describing every custom field
 // that appears on any entity, so Microsoft Project can associate the values on
 // import. (The reader ignores this block; entity values carry the data.)
-void writeExtendedAttributeDefs(QXmlStreamWriter &w, const MppProject &p)
+void writeExtendedAttributeDefs(QXmlStreamWriter &w, const schedule::Project &p)
 {
     QHash<int, QString> defs;   // fieldId -> name, in first-seen order via a list
     QList<int> order;
-    auto collect = [&](const QList<MppCustomField> &fields) {
-        for (const MppCustomField &cf : fields) {
+    auto collect = [&](const QList<schedule::CustomField> &fields) {
+        for (const schedule::CustomField &cf : fields) {
             if (!defs.contains(cf.fieldId)) {
                 defs.insert(cf.fieldId, cf.name);
                 order.append(cf.fieldId);
             }
         }
     };
-    for (const MppTask &t : p.tasks)
+    for (const schedule::Task &t : p.tasks)
         collect(t.customFields);
-    for (const MppResource &r : p.resources)
+    for (const schedule::Resource &r : p.resources)
         collect(r.customFields);
-    for (const MppAssignment &a : p.assignments)
+    for (const schedule::Assignment &a : p.assignments)
         collect(a.customFields);
     if (order.isEmpty())
         return;
@@ -765,9 +765,9 @@ void writeExtendedAttributeDefs(QXmlStreamWriter &w, const MppProject &p)
 
 namespace XmlSerializer {
 
-bool read(const QByteArray &xml, MppProject &out, QString *error)
+bool read(const QByteArray &xml, schedule::Project &out, QString *error)
 {
-    out = MppProject();
+    out = schedule::Project();
     QXmlStreamReader r(xml);
 
     if (!r.readNextStartElement()) {
@@ -836,7 +836,7 @@ bool read(const QByteArray &xml, MppProject &out, QString *error)
     return true;
 }
 
-QByteArray write(const MppProject &in, QString *error)
+QByteArray write(const schedule::Project &in, QString *error)
 {
     Q_UNUSED(error);
     QByteArray bytes;
@@ -848,7 +848,7 @@ QByteArray write(const MppProject &in, QString *error)
     w.writeStartElement(QStringLiteral("Project"));
     w.writeDefaultNamespace(kMspdiNs);
 
-    const int sv = in.formatVersion == MppProject::FormatVersion::Unknown
+    const int sv = in.formatVersion == schedule::Project::FormatVersion::Unknown
         ? 14 : static_cast<int>(in.formatVersion);
     writeText(w, "SaveVersion", QString::number(sv));
     if (!in.title.isEmpty())
@@ -864,28 +864,28 @@ QByteArray write(const MppProject &in, QString *error)
 
     if (!in.calendars.isEmpty()) {
         w.writeStartElement(QStringLiteral("Calendars"));
-        for (const MppCalendar &c : in.calendars)
+        for (const schedule::Calendar &c : in.calendars)
             writeCalendar(w, c);
         w.writeEndElement();
     }
 
     // Index predecessor links by successor so each task can emit its own.
-    QMultiHash<int, const MppRelation *> linksBySucc;
-    for (const MppRelation &rel : in.relations)
+    QMultiHash<int, const schedule::Relation *> linksBySucc;
+    for (const schedule::Relation &rel : in.relations)
         linksBySucc.insert(rel.successorTaskUid, &rel);
 
     w.writeStartElement(QStringLiteral("Tasks"));
-    for (const MppTask &t : in.tasks)
+    for (const schedule::Task &t : in.tasks)
         writeTask(w, t, linksBySucc);
     w.writeEndElement();
 
     w.writeStartElement(QStringLiteral("Resources"));
-    for (const MppResource &res : in.resources)
+    for (const schedule::Resource &res : in.resources)
         writeResource(w, res);
     w.writeEndElement();
 
     w.writeStartElement(QStringLiteral("Assignments"));
-    for (const MppAssignment &a : in.assignments)
+    for (const schedule::Assignment &a : in.assignments)
         writeAssignment(w, a);
     w.writeEndElement();
 

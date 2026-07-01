@@ -1,20 +1,22 @@
 // Copyright (C) 2026 Paul McKinney
 // SPDX-License-Identifier: GPL-3.0-only
 
-#ifndef MPPTASK_H
-#define MPPTASK_H
+#ifndef SCHEDULE_TASK_H
+#define SCHEDULE_TASK_H
 
-#include "mppio_export.h"
-#include "model/mppbaseline.h"
-#include "model/mppcustomfield.h"
+#include "scheduleio_export.h"
+#include "model/baseline.h"
+#include "model/customfield.h"
 
 #include <QDateTime>
 #include <QList>
 #include <QString>
 
+namespace schedule {
+
 // A single task row. Value type: copyable and equality-comparable so that
 // round-trip tests can assert model1 == model2 after read->write->read.
-class MPPIO_EXPORT MppTask
+class SCHEDULEIO_EXPORT Task
 {
 public:
     int uniqueId = 0;       // stable identity across edits (Task UID)
@@ -41,11 +43,13 @@ public:
 
     // Saved baselines (number 0 = current baseline, 1..10 = saved), present only
     // when the file stores them. Custom ("extended") field values that are set.
-    QList<MppBaseline> baselines;
-    QList<MppCustomField> customFields;
+    QList<Baseline> baselines;
+    QList<CustomField> customFields;
 
-    bool operator==(const MppTask &o) const;
-    bool operator!=(const MppTask &o) const { return !(*this == o); }
+    bool operator==(const Task &o) const;
+    bool operator!=(const Task &o) const { return !(*this == o); }
 };
 
-#endif // MPPTASK_H
+} // namespace schedule
+
+#endif // SCHEDULE_TASK_H

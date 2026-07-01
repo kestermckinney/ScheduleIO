@@ -11,14 +11,14 @@
 #include <QTest>
 #include <QXmlStreamReader>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 // Layer 3 oracle: custom ("extended") task fields decoded from var/fixed data must
 // agree with the per-task <ExtendedAttribute> values in the MS Project XML export.
 // The XML <FieldID> equals the binary field id (high word entity | low word index),
-// which is exactly MppCustomField::fieldId, so we match on that.
+// which is exactly schedule::CustomField::fieldId, so we match on that.
 class TstCustomOracle : public QObject
 {
     Q_OBJECT
@@ -75,7 +75,7 @@ void TstCustomOracle::customMatchesXml_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
         const QString xml = QDir(dir).filePath(QFileInfo(f).completeBaseName() + QStringLiteral(".xml"));
         if (QFile::exists(xml))
@@ -113,7 +113,7 @@ static bool valueMatches(const QVariant &v, const QString &xml)
 
 void TstCustomOracle::customMatchesXml()
 {
-    if (QDir(QStringLiteral(MPPIO_FIXTURE_DIR))
+    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
             .entryList({ QStringLiteral("*.mpp") }, QDir::Files).isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
 
@@ -132,8 +132,8 @@ void TstCustomOracle::customMatchesXml()
 
     // Decoded: uid -> (fieldId -> value)
     QHash<int, QHash<int, QVariant>> decoded;
-    for (const MppTask &t : io.project().tasks)
-        for (const MppCustomField &c : t.customFields)
+    for (const schedule::Task &t : io.project().tasks)
+        for (const schedule::CustomField &c : t.customFields)
             decoded[t.uniqueId].insert(c.fieldId, c.value);
 
     int n = 0, present = 0, ok = 0;

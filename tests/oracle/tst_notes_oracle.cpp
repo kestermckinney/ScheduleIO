@@ -11,8 +11,8 @@
 #include <QTest>
 #include <QXmlStreamReader>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 // Layer 3 oracle: task and resource notes. MppIO stores the *raw RTF* source while
@@ -60,7 +60,7 @@ void TstNotesOracle::notesMatchXml_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
         const QString xml = QDir(dir).filePath(QFileInfo(f).completeBaseName() + QStringLiteral(".xml"));
         if (QFile::exists(xml))
@@ -82,7 +82,7 @@ static bool rtfContainsPlain(const QString &rtf, const QString &plain)
 
 void TstNotesOracle::notesMatchXml()
 {
-    if (QDir(QStringLiteral(MPPIO_FIXTURE_DIR))
+    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
             .entryList({ QStringLiteral("*.mpp") }, QDir::Files).isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
 
@@ -98,8 +98,8 @@ void TstNotesOracle::notesMatchXml()
     QVERIFY2(io.open(mpp), qPrintable(io.errorString()));
 
     QHash<int, QString> tNotes, rNotes;
-    for (const MppTask &t : io.project().tasks)     tNotes.insert(t.uniqueId, t.notes);
-    for (const MppResource &r : io.project().resources) rNotes.insert(r.uniqueId, r.notes);
+    for (const schedule::Task &t : io.project().tasks)     tNotes.insert(t.uniqueId, t.notes);
+    for (const schedule::Resource &r : io.project().resources) rNotes.insert(r.uniqueId, r.notes);
 
     int tN = 0, tOk = 0, rN = 0, rOk = 0;
     for (auto it = xTasks.constBegin(); it != xTasks.constEnd(); ++it) {

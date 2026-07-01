@@ -8,7 +8,7 @@
 #include <QFile>
 
 struct XmlIO::Private {
-    MppProject project;
+    schedule::Project project;
     QString error;
 };
 
@@ -28,7 +28,7 @@ bool XmlIO::open(const QString &path)
 bool XmlIO::openFromData(const QByteArray &bytes)
 {
     d->error.clear();
-    MppProject parsed;
+    schedule::Project parsed;
     if (!XmlSerializer::read(bytes, parsed, &d->error))
         return false;
     d->project = parsed;
@@ -57,8 +57,8 @@ QByteArray XmlIO::saveToData()
     return XmlSerializer::write(d->project, &d->error);
 }
 
-const MppProject &XmlIO::project() const { return d->project; }
-void XmlIO::setProject(const MppProject &project) { d->project = project; }
+const schedule::Project &XmlIO::project() const { return d->project; }
+void XmlIO::setProject(const schedule::Project &project) { d->project = project; }
 QString XmlIO::errorString() const { return d->error; }
 
 // ---- C factory --------------------------------------------------------------

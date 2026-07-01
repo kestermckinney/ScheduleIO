@@ -4,7 +4,7 @@
 #ifndef DOCSERIALIZER_H
 #define DOCSERIALIZER_H
 
-#include "model/mppproject.h"
+#include "model/project.h"
 
 #include <QString>
 #include <memory>
@@ -26,13 +26,13 @@ public:
     virtual ~DocSerializer() = default;
 
     // Inspect the container and decide which format it is.
-    static MppProject::FormatVersion detectVersion(const CompoundFile &cf);
-    static std::unique_ptr<DocSerializer> create(MppProject::FormatVersion v);
+    static schedule::Project::FormatVersion detectVersion(const CompoundFile &cf);
+    static std::unique_ptr<DocSerializer> create(schedule::Project::FormatVersion v);
 
-    virtual MppProject::FormatVersion version() const = 0;
+    virtual schedule::Project::FormatVersion version() const = 0;
 
-    bool read(const CompoundFile &cf, MppProject &out, QString *error) const;
-    bool write(const MppProject &in, CompoundFile &cf, QString *error) const;
+    bool read(const CompoundFile &cf, schedule::Project &out, QString *error) const;
+    bool write(const schedule::Project &in, CompoundFile &cf, QString *error) const;
 };
 
 #endif // DOCSERIALIZER_H

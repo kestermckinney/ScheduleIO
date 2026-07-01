@@ -1,15 +1,15 @@
-# MppBaseline
+# schedule::Baseline
 
 One saved baseline snapshot of a task, resource, or assignment. Value type; copyable and
 equality-comparable.
 
 ```cpp
-#include "src/model/mppbaseline.h"
+#include "src/model/baseline.h"
 ```
 
 Microsoft Project stores a *current* baseline (number `0`) plus up to ten saved baselines
-(numbers `1`–`10`). Each [`MppTask`](MppTask.md), [`MppResource`](MppResource.md) and
-[`MppAssignment`](MppAssignment.md) carries a `QList<MppBaseline>` holding only the baselines that
+(numbers `1`–`10`). Each [`schedule::Task`](Task.md), [`schedule::Resource`](Resource.md) and
+[`schedule::Assignment`](Assignment.md) carries a `QList<schedule::Baseline>` holding only the baselines that
 are actually saved in the file.
 
 ## Members
@@ -33,8 +33,8 @@ are actually saved in the file.
 ## Example
 
 ```cpp
-for (const MppTask &t : project.tasks) {
-    for (const MppBaseline &b : t.baselines) {
+for (const schedule::Task &t : project.tasks) {
+    for (const schedule::Baseline &b : t.baselines) {
         qInfo().noquote() << t.name << "baseline" << b.number
                           << "cost" << b.cost
                           << "start" << b.start.toString(Qt::ISODate)

@@ -1,7 +1,7 @@
 # Basic Usage
 
 The entry point is the [`MppIO`](../API/MppIO.md) class. You open a file, then read the populated
-[`MppProject`](../DataModel/MppProject.md) it produces.
+[`schedule::Project`](../DataModel/Project.md) it produces.
 
 ## Opening a file
 
@@ -15,7 +15,7 @@ if (!io.open("Schedule.mpp")) {
     return;
 }
 
-const MppProject &project = io.project();
+const schedule::Project &project = io.project();
 qInfo() << "Title:"  << project.title;
 qInfo() << "Author:" << project.author;
 qInfo() << "Tasks:"  << project.tasks.size();
@@ -27,10 +27,10 @@ why.
 
 ## Iterating tasks
 
-Every collection on `MppProject` is a `QList` of value types, so ordinary range-for works:
+Every collection on `schedule::Project` is a `QList` of value types, so ordinary range-for works:
 
 ```cpp
-for (const MppTask &task : project.tasks) {
+for (const schedule::Task &task : project.tasks) {
     qInfo().noquote()
         << task.wbs.leftJustified(8)
         << task.name
@@ -60,12 +60,12 @@ Tasks, resources, and assignments are linked by **unique id**. Build a lookup if
 them:
 
 ```cpp
-QHash<int, const MppResource*> byId;
-for (const MppResource &r : project.resources)
+QHash<int, const schedule::Resource*> byId;
+for (const schedule::Resource &r : project.resources)
     byId.insert(r.uniqueId, &r);
 
-for (const MppAssignment &a : project.assignments) {
-    const MppResource *res = byId.value(a.resourceUniqueId);
+for (const schedule::Assignment &a : project.assignments) {
+    const schedule::Resource *res = byId.value(a.resourceUniqueId);
     qInfo() << "Task" << a.taskUniqueId
             << "<-" << (res ? res->name : QStringLiteral("?"))
             << "units" << a.units;
@@ -74,11 +74,11 @@ for (const MppAssignment &a : project.assignments) {
 
 ## Predecessor links
 
-Schedule dependencies are in `project.relations`. Each [`MppRelation`](../DataModel/MppRelation.md)
+Schedule dependencies are in `project.relations`. Each [`schedule::Relation`](../DataModel/Relation.md)
 names a predecessor and a successor task by unique id, plus the link type:
 
 ```cpp
-for (const MppRelation &link : project.relations) {
+for (const schedule::Relation &link : project.relations) {
     qInfo() << "Task" << link.successorTaskUid
             << "depends on task" << link.predecessorTaskUid
             << "type" << link.type;
@@ -90,25 +90,25 @@ for (const MppRelation &link : project.relations) {
 Each task carries cost values, any saved baselines, and the populated custom ("extended") fields:
 
 ```cpp
-for (const MppTask &task : project.tasks) {
+for (const schedule::Task &task : project.tasks) {
     qInfo() << task.name << "cost" << task.cost
             << "fixed" << task.fixedCost
             << "variance" << task.costVariance;
 
     // Saved baselines (number 0 = current baseline, 1..10 = saved baselines).
-    for (const MppBaseline &b : task.baselines)
+    for (const schedule::Baseline &b : task.baselines)
         qInfo() << "   baseline" << b.number
                 << "cost" << b.cost
                 << "start" << b.start.toString(Qt::ISODate);
 
     // Only the custom slots that are actually set are present.
-    for (const MppCustomField &c : task.customFields)
+    for (const schedule::CustomField &c : task.customFields)
         qInfo() << "   " << c.name << "=" << c.value;
 }
 ```
 
 Resources and assignments expose the same `cost`, `baselines` and `customFields` members. See
-[`MppBaseline`](../DataModel/MppBaseline.md) and [`MppCustomField`](../DataModel/MppCustomField.md)
+[`schedule::Baseline`](../DataModel/Baseline.md) and [`schedule::CustomField`](../DataModel/CustomField.md)
 for the field details and value types.
 
 Tasks, resources, and assignments also carry a `notes` field. It holds the **raw RTF source** of

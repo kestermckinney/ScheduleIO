@@ -6,8 +6,8 @@
 #include <QDir>
 #include <QTest>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 class TstSemanticRoundtrip : public QObject
@@ -20,19 +20,19 @@ private slots:
     void realFixtures();
 
 private:
-    static MppProject makeSampleProject();
+    static schedule::Project makeSampleProject();
 };
 
-MppProject TstSemanticRoundtrip::makeSampleProject()
+schedule::Project TstSemanticRoundtrip::makeSampleProject()
 {
-    MppProject p;
-    p.formatVersion = MppProject::FormatVersion::Mpp14;
+    schedule::Project p;
+    p.formatVersion = schedule::Project::FormatVersion::Mpp14;
     p.title = QStringLiteral("Scaffold Plan");
     p.author = QStringLiteral("Paul");
     p.startDate = QDateTime(QDate(2026, 1, 2), QTime(8, 0), Qt::UTC);
     p.finishDate = QDateTime(QDate(2026, 3, 31), QTime(17, 0), Qt::UTC);
 
-    MppTask t1;
+    schedule::Task t1;
     t1.uniqueId = 1; t1.id = 1; t1.outlineLevel = 1;
     t1.name = QStringLiteral("Design");
     t1.start = QDateTime(QDate(2026, 1, 2), QTime(9, 0), Qt::UTC);
@@ -40,13 +40,13 @@ MppProject TstSemanticRoundtrip::makeSampleProject()
     t1.durationMillis = qint64(8) * 3600 * 1000;   // divisible by the duration unit
     t1.percentComplete = 0.5;
     t1.notes = QStringLiteral("{\\rtf1\\ansi Design note — keep it raw.}");
-    MppTask t2;
+    schedule::Task t2;
     t2.uniqueId = 2; t2.id = 2; t2.outlineLevel = 1;
     t2.name = QStringLiteral("Implement — 実装");
     t2.milestone = true;
     p.tasks = { t1, t2 };
 
-    MppResource r;
+    schedule::Resource r;
     r.uniqueId = 1; r.id = 1; r.name = QStringLiteral("Alice"); r.initials = QStringLiteral("A");
     r.maxUnits = 0.5;
     p.resources = { r };
@@ -56,7 +56,7 @@ MppProject TstSemanticRoundtrip::makeSampleProject()
 
 void TstSemanticRoundtrip::syntheticRoundTrip()
 {
-    const MppProject original = makeSampleProject();
+    const schedule::Project original = makeSampleProject();
 
     MppIO writer;
     writer.setProject(original);
@@ -87,7 +87,7 @@ void TstSemanticRoundtrip::writerIsDeterministic()
 void TstSemanticRoundtrip::realFixtures_data()
 {
     QTest::addColumn<QString>("path");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     const QStringList mpps = QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files);
     for (const QString &f : mpps)
         QTest::newRow(qPrintable(f)) << QDir(dir).filePath(f);
@@ -97,7 +97,7 @@ void TstSemanticRoundtrip::realFixtures()
 {
     // With no fixtures present this slot is still invoked once with no data row;
     // skip cleanly before touching QFETCH.
-    if (QDir(QStringLiteral(MPPIO_FIXTURE_DIR))
+    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
             .entryList({ QStringLiteral("*.mpp") }, QDir::Files)
             .isEmpty())
         QSKIP("no .mpp fixtures present yet (add real files under tests/fixtures)");
@@ -110,7 +110,7 @@ void TstSemanticRoundtrip::realFixtures()
                                          "(expected until the MPP field mapping is filled in)")
                              .arg(reader.errorString())));
 
-    const MppProject m1 = reader.project();
+    const schedule::Project m1 = reader.project();
     MppIO writer;
     writer.setProject(m1);
     const QByteArray bytes = writer.saveToData();

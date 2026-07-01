@@ -13,8 +13,8 @@
 
 #include <algorithm>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 // Layer 3 oracle: calendar working hours (per weekday) and exceptions decoded from
@@ -87,7 +87,7 @@ void TstCalendarOracle::calendarsMatchXml_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
         const QString xml = QDir(dir).filePath(QFileInfo(f).completeBaseName() + QStringLiteral(".xml"));
         if (QFile::exists(xml))
@@ -95,17 +95,17 @@ void TstCalendarOracle::calendarsMatchXml_data()
     }
 }
 
-static QList<TstCalendarOracle::Range> toRanges(const QList<MppTimeRange> &in)
+static QList<TstCalendarOracle::Range> toRanges(const QList<schedule::TimeRange> &in)
 {
     QList<TstCalendarOracle::Range> out;
-    for (const MppTimeRange &r : in) out.append({ r.start, r.end });
+    for (const schedule::TimeRange &r : in) out.append({ r.start, r.end });
     std::sort(out.begin(), out.end());
     return out;
 }
 
 void TstCalendarOracle::calendarsMatchXml()
 {
-    if (QDir(QStringLiteral(MPPIO_FIXTURE_DIR))
+    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
             .entryList({ QStringLiteral("*.mpp") }, QDir::Files).isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
 
@@ -118,8 +118,8 @@ void TstCalendarOracle::calendarsMatchXml()
 
     MppIO io;
     QVERIFY2(io.open(mpp), qPrintable(io.errorString()));
-    QHash<QString, MppCalendar> decoded;
-    for (const MppCalendar &c : io.project().calendars)
+    QHash<QString, schedule::Calendar> decoded;
+    for (const schedule::Calendar &c : io.project().calendars)
         if (!decoded.contains(c.name))
             decoded.insert(c.name, c);
 
@@ -138,13 +138,13 @@ void TstCalendarOracle::calendarsMatchXml()
     }
 
     // --- exceptions: each XML exception recovered (matched by name) ---
-    QList<MppCalendarException> decExc;
-    for (const MppCalendar &c : io.project().calendars)
+    QList<schedule::CalendarException> decExc;
+    for (const schedule::Calendar &c : io.project().calendars)
         decExc.append(c.exceptions);
     int exN = 0, exOk = 0;
     for (const XmlExc &xe : xmlExcs) {
         ++exN;
-        for (const MppCalendarException &de : decExc) {
+        for (const schedule::CalendarException &de : decExc) {
             if (de.name == xe.name && de.working == xe.working
                 && (!xe.from.isValid() || de.fromDate == xe.from)
                 && toRanges(de.workingTimes) == [&]{ QList<Range> r = xe.times; std::sort(r.begin(), r.end()); return r; }()) {

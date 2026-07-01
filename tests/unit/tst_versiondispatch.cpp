@@ -7,7 +7,7 @@
 #include <QTest>
 #include <QtEndian>
 
-using FormatVersion = MppProject::FormatVersion;
+using FormatVersion = schedule::Project::FormatVersion;
 
 class TstVersionDispatch : public QObject
 {

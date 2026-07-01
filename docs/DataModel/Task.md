@@ -1,9 +1,9 @@
-# MppTask
+# schedule::Task
 
 A single task (a row in the Gantt chart). Value type; copyable and equality-comparable.
 
 ```cpp
-#include "src/model/mpptask.h"
+#include "src/model/task.h"
 ```
 
 ## Members
@@ -29,8 +29,8 @@ A single task (a row in the Gantt chart). Value type; copyable and equality-comp
 | `actualCost` | `double` | Cost incurred so far. |
 | `remainingCost` | `double` | Cost still to be incurred. |
 | `costVariance` | `double` | Cost minus baseline cost. |
-| `baselines` | `QList<MppBaseline>` | Saved baselines (see [`MppBaseline`](MppBaseline.md)); empty if none saved. |
-| `customFields` | `QList<MppCustomField>` | Populated custom/extended fields (see [`MppCustomField`](MppCustomField.md)). |
+| `baselines` | `QList<schedule::Baseline>` | Saved baselines (see [`schedule::Baseline`](Baseline.md)); empty if none saved. |
+| `customFields` | `QList<schedule::CustomField>` | Populated custom/extended fields (see [`schedule::CustomField`](CustomField.md)). |
 
 ## Notes
 
@@ -51,7 +51,7 @@ A single task (a row in the Gantt chart). Value type; copyable and equality-comp
 ## Example
 
 ```cpp
-for (const MppTask &t : project.tasks) {
+for (const schedule::Task &t : project.tasks) {
     const QString indent(t.outlineLevel * 2, ' ');
     qInfo().noquote() << t.wbs << indent + t.name
                       << int(t.percentComplete * 100) << "%";

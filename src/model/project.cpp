@@ -1,9 +1,11 @@
 // Copyright (C) 2026 Paul McKinney
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include "model/mppproject.h"
+#include "model/project.h"
 
-bool MppProject::operator==(const MppProject &o) const
+namespace schedule {
+
+bool Project::operator==(const Project &o) const
 {
     return formatVersion == o.formatVersion
         && title == o.title
@@ -16,3 +18,5 @@ bool MppProject::operator==(const MppProject &o) const
         && calendars == o.calendars
         && relations == o.relations;
 }
+
+} // namespace schedule

@@ -1,7 +1,7 @@
 <!-- Copyright (C) 2026 Paul McKinney -->
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 
-# MppIO
+# ScheduleIO
 
 A cross-platform (Windows / macOS / Linux) Qt6 C++ library that reads Microsoft
 Project `.mpp` files into Qt data structures for manipulation. It also reads **and
@@ -11,7 +11,7 @@ Microsoft Project can open. Built as a **dynamically loaded** shared library.
 
 ## Status
 
-Scaffold. The full pipeline (`open` → `MppProject` → `save`) works end to end on
+Scaffold. The full pipeline (`open` → `schedule::Project` → `save`) works end to end on
 a self-consistent encoding, and the lower layers are real:
 
 - **`src/ole/compoundfile`** — a working [MS-CFB] (OLE2 compound document)
@@ -28,7 +28,7 @@ layouts inside the quartet streams. That seam is marked in
 ## Build
 
 ```sh
-cmake -S . -B build -DMPPIO_BUILD_TESTS=ON
+cmake -S . -B build -DSCHEDULEIO_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
@@ -44,7 +44,7 @@ real `.mpp` + `.xml` fixture pairs are added under `tests/fixtures/`.
 
 ## Documentation
 
-Programmer documentation (usage, the `MppIO` API, and the data model) is written with
+Programmer documentation (usage, the `MppIO` / `XmlIO` API, and the data model) is written with
 [MkDocs](https://www.mkdocs.org/) under `docs/`, and is configured for Read the Docs
 (`.readthedocs.yaml`).
 

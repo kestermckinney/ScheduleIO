@@ -1,11 +1,13 @@
 // Copyright (C) 2026 Paul McKinney
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include "model/mppassignment.h"
+#include "model/assignment.h"
 
 #include <QtGlobal>
 
-bool MppAssignment::operator==(const MppAssignment &o) const
+namespace schedule {
+
+bool Assignment::operator==(const Assignment &o) const
 {
     return uniqueId == o.uniqueId
         && taskUniqueId == o.taskUniqueId
@@ -20,3 +22,5 @@ bool MppAssignment::operator==(const MppAssignment &o) const
         && baselines == o.baselines
         && customFields == o.customFields;
 }
+
+} // namespace schedule

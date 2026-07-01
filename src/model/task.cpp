@@ -1,9 +1,11 @@
 // Copyright (C) 2026 Paul McKinney
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include "model/mpptask.h"
+#include "model/task.h"
 
-bool MppTask::operator==(const MppTask &o) const
+namespace schedule {
+
+bool Task::operator==(const Task &o) const
 {
     return uniqueId == o.uniqueId
         && id == o.id
@@ -27,3 +29,5 @@ bool MppTask::operator==(const MppTask &o) const
         && baselines == o.baselines
         && customFields == o.customFields;
 }
+
+} // namespace schedule

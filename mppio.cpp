@@ -9,7 +9,7 @@
 #include <QFile>
 
 struct MppIO::Private {
-    MppProject project;
+    schedule::Project project;
     QString error;
 };
 
@@ -36,14 +36,14 @@ bool MppIO::openFromData(const QByteArray &bytes)
         return false;
     }
 
-    const MppProject::FormatVersion v = DocSerializer::detectVersion(cf);
+    const schedule::Project::FormatVersion v = DocSerializer::detectVersion(cf);
     auto ser = DocSerializer::create(v);
     if (!ser) {
         d->error = QStringLiteral("unsupported or unrecognised .mpp format version");
         return false;
     }
 
-    MppProject parsed;
+    schedule::Project parsed;
     if (!ser->read(cf, parsed, &d->error))
         return false;
 
@@ -71,9 +71,9 @@ QByteArray MppIO::saveToData()
 {
     d->error.clear();
 
-    MppProject::FormatVersion v = d->project.formatVersion;
-    if (v == MppProject::FormatVersion::Unknown)
-        v = MppProject::FormatVersion::Mpp14;   // sensible default for new files
+    schedule::Project::FormatVersion v = d->project.formatVersion;
+    if (v == schedule::Project::FormatVersion::Unknown)
+        v = schedule::Project::FormatVersion::Mpp14;   // sensible default for new files
 
     auto ser = DocSerializer::create(v);
     if (!ser) {
@@ -87,13 +87,13 @@ QByteArray MppIO::saveToData()
     return cf.toByteArray();
 }
 
-const MppProject &MppIO::project() const { return d->project; }
-void MppIO::setProject(const MppProject &project) { d->project = project; }
+const schedule::Project &MppIO::project() const { return d->project; }
+void MppIO::setProject(const schedule::Project &project) { d->project = project; }
 QString MppIO::errorString() const { return d->error; }
 
 // ---- C factory --------------------------------------------------------------
 extern "C" {
-MppIO *mppio_create() { return new MppIO(); }
-void   mppio_destroy(MppIO *io) { delete io; }
-const char *mppio_version() { return "0.1.0"; }
+MppIO *scheduleio_create() { return new MppIO(); }
+void   scheduleio_destroy(MppIO *io) { delete io; }
+const char *scheduleio_version() { return "0.1.0"; }
 }

@@ -13,8 +13,8 @@
 
 #include <algorithm>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 // Layer 3 oracle: resource cost-rate tables decoded from var data must agree with
@@ -68,7 +68,7 @@ void TstCostRateOracle::costRatesMatchXml_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
         const QString xml = QDir(dir).filePath(QFileInfo(f).completeBaseName() + QStringLiteral(".xml"));
         if (QFile::exists(xml))
@@ -87,11 +87,11 @@ static double xmlCurrentRate(QList<TstCostRateOracle::XmlRate> rates)
     }
     return best;
 }
-static double decodedCurrentRate(const QList<MppCostRate> &rates)
+static double decodedCurrentRate(const QList<schedule::CostRate> &rates)
 {
     double openRate = 0.0; bool haveOpen = false;
     double latest = 0.0; QDateTime latestEnd;
-    for (const MppCostRate &r : rates) {
+    for (const schedule::CostRate &r : rates) {
         if (r.table != 0) continue;
         if (!r.endDate.isValid()) { openRate = r.standardRate; haveOpen = true; }
         else if (!latestEnd.isValid() || r.endDate > latestEnd) { latestEnd = r.endDate; latest = r.standardRate; }
@@ -101,7 +101,7 @@ static double decodedCurrentRate(const QList<MppCostRate> &rates)
 
 void TstCostRateOracle::costRatesMatchXml()
 {
-    if (QDir(QStringLiteral(MPPIO_FIXTURE_DIR))
+    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
             .entryList({ QStringLiteral("*.mpp") }, QDir::Files).isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
 
@@ -118,8 +118,8 @@ void TstCostRateOracle::costRatesMatchXml()
 
     MppIO io;
     QVERIFY2(io.open(mpp), qPrintable(io.errorString()));
-    QHash<int, QList<MppCostRate>> decoded;
-    for (const MppResource &r : io.project().resources)
+    QHash<int, QList<schedule::CostRate>> decoded;
+    for (const schedule::Resource &r : io.project().resources)
         decoded.insert(r.uniqueId, r.costRates);
 
     // (a) current standard rate per resource with a non-zero XML current rate.
@@ -137,7 +137,7 @@ void TstCostRateOracle::costRatesMatchXml()
 
         QList<double> xs, ds;
         for (const auto &r : it.value()) if (r.table == 0 && r.standard != 0.0) xs << r.standard;
-        for (const MppCostRate &r : decoded.value(it.key())) if (r.table == 0 && r.standardRate != 0.0) ds << r.standardRate;
+        for (const schedule::CostRate &r : decoded.value(it.key())) if (r.table == 0 && r.standardRate != 0.0) ds << r.standardRate;
         if (!xs.isEmpty()) {
             std::sort(xs.begin(), xs.end());
             std::sort(ds.begin(), ds.end());

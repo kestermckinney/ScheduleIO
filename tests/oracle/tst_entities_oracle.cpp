@@ -11,8 +11,8 @@
 #include <QTest>
 #include <QXmlStreamReader>
 
-#ifndef MPPIO_FIXTURE_DIR
-#define MPPIO_FIXTURE_DIR ""
+#ifndef SCHEDULEIO_FIXTURE_DIR
+#define SCHEDULEIO_FIXTURE_DIR ""
 #endif
 
 // Layer 3 oracle: resources and assignments decoded from the binary .mpp must
@@ -29,7 +29,7 @@ void TstEntitiesOracle::entitiesMatchXml_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(MPPIO_FIXTURE_DIR);
+    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
     for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
         const QString xml = QDir(dir).filePath(QFileInfo(f).completeBaseName() + QStringLiteral(".xml"));
         if (QFile::exists(xml))
@@ -39,7 +39,7 @@ void TstEntitiesOracle::entitiesMatchXml_data()
 
 void TstEntitiesOracle::entitiesMatchXml()
 {
-    if (QDir(QStringLiteral(MPPIO_FIXTURE_DIR))
+    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
             .entryList({ QStringLiteral("*.mpp") }, QDir::Files).isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
 
@@ -123,11 +123,11 @@ void TstEntitiesOracle::entitiesMatchXml()
 
     MppIO io;
     QVERIFY2(io.open(mpp), qPrintable(io.errorString()));
-    const MppProject &p = io.project();
+    const schedule::Project &p = io.project();
 
     // --- resources: every named XML resource recovered with the right name ---
     QHash<int, QString> decResName;
-    for (const MppResource &r : p.resources)
+    for (const schedule::Resource &r : p.resources)
         decResName.insert(r.uniqueId, r.name);
     int resFound = 0;
     for (auto it = xmlResName.constBegin(); it != xmlResName.constEnd(); ++it)
@@ -136,7 +136,7 @@ void TstEntitiesOracle::entitiesMatchXml()
 
     // --- assignments: every XML (task,resource) link present in decoded ---
     QSet<QPair<int, int>> decAssign;
-    for (const MppAssignment &a : p.assignments)
+    for (const schedule::Assignment &a : p.assignments)
         decAssign.insert({ a.taskUniqueId, a.resourceUniqueId });
     int assignFound = 0;
     for (const auto &pr : xmlAssign)
@@ -146,7 +146,7 @@ void TstEntitiesOracle::entitiesMatchXml()
     // --- predecessor links: every XML (pred,succ) present in decoded ---
     QSet<QPair<int, int>> decLinks;
     QHash<QPair<int, int>, qint64> decLinkLag;
-    for (const MppRelation &r : p.relations) {
+    for (const schedule::Relation &r : p.relations) {
         decLinks.insert({ r.predecessorTaskUid, r.successorTaskUid });
         decLinkLag.insert({ r.predecessorTaskUid, r.successorTaskUid }, r.lagMillis);
     }
@@ -163,7 +163,7 @@ void TstEntitiesOracle::entitiesMatchXml()
     // --- calendars: every XML calendar name recovered (matched by name set,
     // since calendar unique ids can differ from the export) ---
     QSet<QString> decCalNames;
-    for (const MppCalendar &c : p.calendars)
+    for (const schedule::Calendar &c : p.calendars)
         if (!c.name.isEmpty())
             decCalNames.insert(c.name);
     QSet<QString> xmlCalNames;
@@ -187,7 +187,7 @@ void TstEntitiesOracle::entitiesMatchXml()
 
     // resource max units
     QHash<int, double> decResUnits;
-    for (const MppResource &r : p.resources)
+    for (const schedule::Resource &r : p.resources)
         decResUnits.insert(r.uniqueId, r.maxUnits);
     int unitsOk = 0, unitsTotal = 0;
     for (auto it = xmlResUnits.constBegin(); it != xmlResUnits.constEnd(); ++it) {
@@ -212,7 +212,7 @@ void TstEntitiesOracle::entitiesMatchXml()
 
     // Calendar working-day masks (only for XML calendars that list working days).
     QHash<int, int> decCalMask;
-    for (const MppCalendar &c : p.calendars)
+    for (const schedule::Calendar &c : p.calendars)
         decCalMask.insert(c.uniqueId, int(c.workingDayMask));
     int maskOk = 0, maskTotal = 0;
     for (auto it = xmlCalMask.constBegin(); it != xmlCalMask.constEnd(); ++it) {
