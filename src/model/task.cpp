@@ -5,6 +5,12 @@
 
 namespace schedule {
 
+bool EarnedValue::operator==(const EarnedValue &o) const
+{
+    return pv == o.pv && ev == o.ev && ac == o.ac && cv == o.cv && sv == o.sv
+        && cpi == o.cpi && spi == o.spi && eac == o.eac && tcpi == o.tcpi;
+}
+
 bool Task::operator==(const Task &o) const
 {
     return uniqueId == o.uniqueId
@@ -26,6 +32,11 @@ bool Task::operator==(const Task &o) const
         && actualCost == o.actualCost
         && remainingCost == o.remainingCost
         && costVariance == o.costVariance
+        && actualStart == o.actualStart
+        && actualFinish == o.actualFinish
+        && actualDurationMillis == o.actualDurationMillis
+        && actualWorkMillis == o.actualWorkMillis
+        && evm == o.evm
         && baselines == o.baselines
         && customFields == o.customFields;
 }

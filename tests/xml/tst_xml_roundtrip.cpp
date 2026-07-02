@@ -35,6 +35,7 @@ void TstXmlRoundtrip::synthetic()
     p.author = QStringLiteral("Tester");
     p.startDate = QDateTime(QDate(2026, 1, 5), QTime(8, 0));
     p.finishDate = QDateTime(QDate(2026, 2, 27), QTime(17, 0));
+    p.statusDate = QDateTime(QDate(2026, 1, 30), QTime(17, 0));
 
     schedule::Task summary;
     summary.uniqueId = 1;
@@ -64,6 +65,19 @@ void TstXmlRoundtrip::synthetic()
     task.fixedCost = 100.0;
     task.actualCost = 600.0;
     task.remainingCost = 634.5;
+    task.actualStart = task.start;
+    task.actualFinish = QDateTime(QDate(2026, 1, 9), QTime(17, 0));
+    task.actualDurationMillis = 16LL * 3600 * 1000;
+    task.actualWorkMillis = 8LL * 3600 * 1000;
+    task.evm.pv = 1000.0;
+    task.evm.ev = 617.25;
+    task.evm.ac = 600.0;
+    task.evm.cv = 17.25;
+    task.evm.sv = -382.75;
+    task.evm.cpi = 1.02875;
+    task.evm.spi = 0.61725;
+    task.evm.eac = 1200.0;
+    task.evm.tcpi = 0.97;
 
     schedule::Baseline base;
     base.number = 0;

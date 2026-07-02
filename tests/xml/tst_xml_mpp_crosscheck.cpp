@@ -55,6 +55,13 @@ void TstXmlMppCrosscheck::interop()
     const schedule::Project &fromMpp = bin.project();
     const schedule::Project &fromXml = text.project();
 
+    // Project status date: the .mpp binary props key (STATUS_DATE = 0x02400045) and the
+    // MSPDI <StatusDate> element must decode to the same day.
+    if (fromXml.statusDate.isValid()) {
+        QVERIFY2(fromMpp.statusDate.isValid(), "status date missing from the .mpp decode");
+        QCOMPARE(fromMpp.statusDate.date(), fromXml.statusDate.date());
+    }
+
     // Both decoders populate the same model type -- prove interop on task names.
     QHash<int, QString> mppNames;
     for (const schedule::Task &t : fromMpp.tasks)

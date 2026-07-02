@@ -53,6 +53,30 @@ struct BaselineSet {
     quint16 duration;
 };
 
+// Task "actuals": the recorded start/finish/duration/work (as opposed to the
+// scheduled values). Indices are FIELD_ARRAY positions from MPXJ MPPTaskField.
+struct TaskActualFields {
+    quint16 start;      // ACTUAL_START = 41
+    quint16 finish;     // ACTUAL_FINISH = 42
+    quint16 duration;   // ACTUAL_DURATION = 28 (u32 tenths-of-minute)
+    quint16 work;       // ACTUAL_WORK = 2 (double, thousandths-of-minute)
+};
+
+// Task earned-value (PMI/EVM) fields Microsoft Project stores per task. All are
+// 8-byte doubles: PV/EV/AC/CV/SV/EAC in the project currency, CPI/SPI/TCPI unitless.
+// (BAC = baseline-0 cost and VAC = BAC-EAC are derived, not stored, so not listed.)
+struct TaskEvmFields {
+    quint16 bcwp;   // Earned Value (EV)  = 11
+    quint16 bcws;   // Planned Value (PV) = 12
+    quint16 acwp;   // Actual Cost (AC)   = 120
+    quint16 cv;     // Cost Variance      = 83
+    quint16 sv;     // Schedule Variance  = 13
+    quint16 cpi;    // Cost Perf. Index   = 537
+    quint16 spi;    // Schedule Perf. Idx = 538
+    quint16 eac;    // Estimate at Compl. = 541
+    quint16 tcpi;   // To-Complete PI     = 542
+};
+
 // High words identifying each entity's fields within a field map / var data.
 constexpr quint16 kTaskHigh = 0x0B40;
 constexpr quint16 kResourceHigh = 0x0C40;
@@ -62,6 +86,8 @@ constexpr quint16 kAssignmentHigh = 0x0F40;
 constexpr int kBaselineCount = 11;
 
 extern const CostFields taskCost;
+extern const TaskActualFields taskActual;
+extern const TaskEvmFields taskEvm;
 extern const BaselineSet taskBaselines[kBaselineCount];
 const QVector<CustomFieldDef> &taskCustomFields();
 

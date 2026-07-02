@@ -278,6 +278,32 @@ schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relatio
             t.actualCost = r.readElementText().toDouble();
         else if (n == u"RemainingCost")
             t.remainingCost = r.readElementText().toDouble();
+        else if (n == u"ActualStart")
+            t.actualStart = parseDateTime(r.readElementText());
+        else if (n == u"ActualFinish")
+            t.actualFinish = parseDateTime(r.readElementText());
+        else if (n == u"ActualDuration")
+            t.actualDurationMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"ActualWork")
+            t.actualWorkMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"BCWS")   // Planned Value (PV)
+            t.evm.pv = r.readElementText().toDouble();
+        else if (n == u"BCWP")   // Earned Value (EV)
+            t.evm.ev = r.readElementText().toDouble();
+        else if (n == u"ACWP")   // Actual Cost (AC)
+            t.evm.ac = r.readElementText().toDouble();
+        else if (n == u"CV")
+            t.evm.cv = r.readElementText().toDouble();
+        else if (n == u"SV")
+            t.evm.sv = r.readElementText().toDouble();
+        else if (n == u"CPI")
+            t.evm.cpi = r.readElementText().toDouble();
+        else if (n == u"SPI")
+            t.evm.spi = r.readElementText().toDouble();
+        else if (n == u"EAC")
+            t.evm.eac = r.readElementText().toDouble();
+        else if (n == u"TCPI")
+            t.evm.tcpi = r.readElementText().toDouble();
         else if (n == u"Notes")
             t.notes = r.readElementText();
         else if (n == u"Baseline")
@@ -648,6 +674,21 @@ void writeTask(QXmlStreamWriter &w, const schedule::Task &t, const QMultiHash<in
     writeText(w, "Cost", formatNumber(t.cost));
     writeText(w, "ActualCost", formatNumber(t.actualCost));
     writeText(w, "RemainingCost", formatNumber(t.remainingCost));
+    if (t.actualStart.isValid())
+        writeText(w, "ActualStart", formatDateTime(t.actualStart));
+    if (t.actualFinish.isValid())
+        writeText(w, "ActualFinish", formatDateTime(t.actualFinish));
+    writeText(w, "ActualDuration", formatIsoDuration(t.actualDurationMillis));
+    writeText(w, "ActualWork", formatIsoDuration(t.actualWorkMillis));
+    writeText(w, "BCWS", formatNumber(t.evm.pv));
+    writeText(w, "BCWP", formatNumber(t.evm.ev));
+    writeText(w, "ACWP", formatNumber(t.evm.ac));
+    writeText(w, "CV", formatNumber(t.evm.cv));
+    writeText(w, "SV", formatNumber(t.evm.sv));
+    writeText(w, "CPI", formatNumber(t.evm.cpi));
+    writeText(w, "SPI", formatNumber(t.evm.spi));
+    writeText(w, "EAC", formatNumber(t.evm.eac));
+    writeText(w, "TCPI", formatNumber(t.evm.tcpi));
     if (!t.notes.isEmpty())
         writeText(w, "Notes", t.notes);
     for (const schedule::Baseline &b : t.baselines)
@@ -794,6 +835,8 @@ bool read(const QByteArray &xml, schedule::Project &out, QString *error)
             out.startDate = parseDateTime(r.readElementText());
         else if (n == u"FinishDate")
             out.finishDate = parseDateTime(r.readElementText());
+        else if (n == u"StatusDate")
+            out.statusDate = parseDateTime(r.readElementText());
         else if (n == u"Calendars") {
             while (r.readNextStartElement()) {
                 if (r.name() == u"Calendar")
@@ -859,6 +902,8 @@ QByteArray write(const schedule::Project &in, QString *error)
         writeText(w, "StartDate", formatDateTime(in.startDate));
     if (in.finishDate.isValid())
         writeText(w, "FinishDate", formatDateTime(in.finishDate));
+    if (in.statusDate.isValid())
+        writeText(w, "StatusDate", formatDateTime(in.statusDate));
 
     writeExtendedAttributeDefs(w, in);
 

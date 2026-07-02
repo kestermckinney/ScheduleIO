@@ -37,6 +37,7 @@ public:
     QString author;
     QDateTime startDate;
     QDateTime finishDate;
+    QDateTime statusDate;   // "as of" date for progress / earned-value calculations
 
     QList<Task> tasks;
     QList<Resource> resources;

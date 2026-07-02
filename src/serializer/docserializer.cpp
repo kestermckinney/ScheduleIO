@@ -34,6 +34,7 @@ constexpr quint16 kFieldBaselines = 10;
 constexpr quint16 kFieldCustom = 11;
 constexpr quint16 kFieldCostRates = 12;
 constexpr quint16 kFieldCalData = 13;   // calendar working times + exceptions
+constexpr quint16 kFieldTaskExtra = 14; // task actuals + earned-value metrics
 
 // ---- fixed-record packing -------------------------------------------------
 // These are the scaffold's own record layouts, NOT the real MPP layouts.
@@ -102,6 +103,44 @@ QList<schedule::Baseline> unpackBaselines(const QByteArray &b)
         out.append(x);
     }
     return out;
+}
+
+// Task actuals + earned-value metrics, in a fixed layout (dates as second-resolution
+// timestamps, durations/work as i64 ms, the nine EVM values as doubles).
+QByteArray packTaskExtra(const schedule::Task &t)
+{
+    using namespace FieldDecoders;
+    QByteArray b;
+    putU32(b, encodeTimestampSeconds(t.actualStart));
+    putU32(b, encodeTimestampSeconds(t.actualFinish));
+    putI64(b, t.actualDurationMillis);
+    putI64(b, t.actualWorkMillis);
+    putDouble(b, t.evm.pv);
+    putDouble(b, t.evm.ev);
+    putDouble(b, t.evm.ac);
+    putDouble(b, t.evm.cv);
+    putDouble(b, t.evm.sv);
+    putDouble(b, t.evm.cpi);
+    putDouble(b, t.evm.spi);
+    putDouble(b, t.evm.eac);
+    putDouble(b, t.evm.tcpi);
+    return b;
+}
+
+void unpackTaskExtra(const QByteArray &b, schedule::Task &t)
+{
+    using namespace FieldDecoders;
+    quint32 s = 0, f = 0;
+    if (readU32(b, 0, &s)) t.actualStart = decodeTimestampSeconds(s);
+    if (readU32(b, 4, &f)) t.actualFinish = decodeTimestampSeconds(f);
+    getI64(b, 8, &t.actualDurationMillis);
+    getI64(b, 16, &t.actualWorkMillis);
+    int o = 24;
+    for (double *p : { &t.evm.pv, &t.evm.ev, &t.evm.ac, &t.evm.cv, &t.evm.sv,
+                       &t.evm.cpi, &t.evm.spi, &t.evm.eac, &t.evm.tcpi }) {
+        readDouble(b, o, p);
+        o += 8;
+    }
 }
 
 // Value tags for a custom field's QVariant.
@@ -466,6 +505,7 @@ QByteArray serializeProps(const schedule::Project &p, FormatVersion v)
     b.append(FieldDecoders::encodeUnicodeString(p.author));
     putU32(b, FieldDecoders::encodeTimestampSeconds(p.startDate));
     putU32(b, FieldDecoders::encodeTimestampSeconds(p.finishDate));
+    putU32(b, FieldDecoders::encodeTimestampSeconds(p.statusDate));
     return b;
 }
 
@@ -482,6 +522,7 @@ void deserializeProps(const QByteArray &b, schedule::Project &p)
     quint32 u = 0;
     if (readU32(b, off, &u)) { p.startDate = decodeTimestampSeconds(u); off += 4; }
     if (readU32(b, off, &u)) { p.finishDate = decodeTimestampSeconds(u); off += 4; }
+    if (readU32(b, off, &u)) { p.statusDate = decodeTimestampSeconds(u); off += 4; }
 }
 
 StreamQuartet::Streams readQuartet(const CompoundFile &cf, const QString &entity)
@@ -787,6 +828,16 @@ struct CostOut {
     double *costVariance = nullptr;
 };
 
+// Optional task-only outputs (actuals + earned value). Left all-null for
+// resources/assignments, which have no such fields.
+struct TaskExtraOut {
+    QDateTime *actualStart = nullptr;
+    QDateTime *actualFinish = nullptr;
+    qint64 *actualDurationMillis = nullptr;
+    qint64 *actualWorkMillis = nullptr;
+    schedule::EarnedValue *evm = nullptr;
+};
+
 void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
                             const QByteArray &b0, const QByteArray &b1,
                             const BkndVarData &var, quint32 uid, quint16 highWord,
@@ -795,7 +846,8 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
                             const QVector<MppFieldIds::CustomFieldDef> &customDefs,
                             const CostOut &costOut,
                             QList<schedule::Baseline> *baselines,
-                            QList<schedule::CustomField> *customFields)
+                            QList<schedule::CustomField> *customFields,
+                            const TaskExtraOut &extra = TaskExtraOut())
 {
     using namespace FieldDecoders;
     using namespace MppFieldIds;
@@ -841,6 +893,29 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
     if (costOut.actualCost)    getDouble(costFields.actualCost, costOut.actualCost);
     if (costOut.remainingCost) getDouble(costFields.remainingCost, costOut.remainingCost);
     if (costOut.costVariance)  getDouble(costFields.costVariance, costOut.costVariance);
+
+    // Task-only: recorded actuals + stored earned-value metrics.
+    if (extra.actualStart) {
+        const QDateTime d = getDate(taskActual.start);
+        if (d.isValid()) *extra.actualStart = d;
+    }
+    if (extra.actualFinish) {
+        const QDateTime d = getDate(taskActual.finish);
+        if (d.isValid()) *extra.actualFinish = d;
+    }
+    if (extra.actualDurationMillis) getDuration(taskActual.duration, extra.actualDurationMillis);
+    if (extra.actualWorkMillis)     getWork(taskActual.work, extra.actualWorkMillis);
+    if (extra.evm) {
+        getDouble(taskEvm.bcwp, &extra.evm->ev);
+        getDouble(taskEvm.bcws, &extra.evm->pv);
+        getDouble(taskEvm.acwp, &extra.evm->ac);
+        getDouble(taskEvm.cv,   &extra.evm->cv);
+        getDouble(taskEvm.sv,   &extra.evm->sv);
+        getDouble(taskEvm.cpi,  &extra.evm->cpi);
+        getDouble(taskEvm.spi,  &extra.evm->spi);
+        getDouble(taskEvm.eac,  &extra.evm->eac);
+        getDouble(taskEvm.tcpi, &extra.evm->tcpi);
+    }
 
     if (baselines) {
         for (int n = 0; n < kBaselineCount; ++n) {
@@ -1433,10 +1508,14 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
             CostOut co;
             co.cost = &t.cost; co.fixedCost = &t.fixedCost; co.actualCost = &t.actualCost;
             co.remainingCost = &t.remainingCost; co.costVariance = &t.costVariance;
+            TaskExtraOut ex;
+            ex.actualStart = &t.actualStart; ex.actualFinish = &t.actualFinish;
+            ex.actualDurationMillis = &t.actualDurationMillis;
+            ex.actualWorkMillis = &t.actualWorkMillis; ex.evm = &t.evm;
             fillCostBaselineCustom(taskLoc, b0, b1, taskVars, uid32, MppFieldIds::kTaskHigh,
                                    MppFieldIds::taskCost, MppFieldIds::taskBaselines,
                                    MppFieldIds::taskCustomFields(), co,
-                                   &t.baselines, &t.customFields);
+                                   &t.baselines, &t.customFields, ex);
             t.notes = readNotesRtf(taskVars, uid32, kTaskNotesKey);
         }
 
@@ -1506,6 +1585,7 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
     };
     out.startDate = projDate(props, 0x02400002u);
     out.finishDate = projDate(props, 0x02400003u);
+    out.statusDate = projDate(props, 0x02400045u);   // PropsKey STATUS_DATE = 37748805
     return true;
 }
 
@@ -1581,6 +1661,7 @@ bool DocSerializer::read(const CompoundFile &cf, schedule::Project &out, QString
                 continue;
             if (ve.fieldType == kFieldBaselines) { t.baselines = unpackBaselines(ve.data); continue; }
             if (ve.fieldType == kFieldCustom)    { t.customFields = unpackCustom(ve.data); continue; }
+            if (ve.fieldType == kFieldTaskExtra) { unpackTaskExtra(ve.data, t); continue; }
             const QString s = QString::fromUtf16(
                 reinterpret_cast<const char16_t *>(ve.data.constData()), ve.data.size() / 2);
             if (ve.fieldType == kFieldName) t.name = s;
@@ -1671,6 +1752,11 @@ bool DocSerializer::write(const schedule::Project &in, CompoundFile &cf, QString
             tasks.varEntries.append({ static_cast<quint32>(i), kFieldBaselines, packBaselines(t.baselines) });
         if (!t.customFields.isEmpty())
             tasks.varEntries.append({ static_cast<quint32>(i), kFieldCustom, packCustom(t.customFields) });
+        const bool hasExtra = t.actualStart.isValid() || t.actualFinish.isValid()
+            || t.actualDurationMillis != 0 || t.actualWorkMillis != 0
+            || t.evm != schedule::EarnedValue();
+        if (hasExtra)
+            tasks.varEntries.append({ static_cast<quint32>(i), kFieldTaskExtra, packTaskExtra(t) });
     }
     writeQuartet(cf, QStringLiteral("Task"), tasks.encode());
 

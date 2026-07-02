@@ -12,6 +12,7 @@ bool Project::operator==(const Project &o) const
         && author == o.author
         && startDate == o.startDate
         && finishDate == o.finishDate
+        && statusDate == o.statusDate
         && tasks == o.tasks
         && resources == o.resources
         && assignments == o.assignments
