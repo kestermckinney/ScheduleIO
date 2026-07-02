@@ -87,6 +87,32 @@ void TstXmlMppCrosscheck::interop()
     }
     QVERIFY2(total > 0, "no task UIDs in common between .mpp and .xml");
     QCOMPARE(matched, total);
+
+    // Task Information fields: the .mpp decode (bit flags + field-map fields) must
+    // agree with the XML export per shared task UID.
+    QHash<int, const schedule::Task *> mppByUid;
+    for (const schedule::Task &t : fromMpp.tasks)
+        mppByUid.insert(t.uniqueId, &t);
+    int fieldChecks = 0;
+    for (const schedule::Task &x : fromXml.tasks) {
+        const schedule::Task *m = mppByUid.value(x.uniqueId, nullptr);
+        if (!m)
+            continue;
+        ++fieldChecks;
+        QVERIFY2(m->manual == x.manual,
+                 qPrintable(QStringLiteral("uid %1 manual: mpp=%2 xml=%3")
+                                .arg(x.uniqueId).arg(m->manual).arg(x.manual)));
+        QVERIFY2(m->effortDriven == x.effortDriven,
+                 qPrintable(QStringLiteral("uid %1 effortDriven: mpp=%2 xml=%3")
+                                .arg(x.uniqueId).arg(m->effortDriven).arg(x.effortDriven)));
+        QVERIFY2(m->taskType == x.taskType,
+                 qPrintable(QStringLiteral("uid %1 taskType: mpp=%2 xml=%3")
+                                .arg(x.uniqueId).arg(m->taskType).arg(x.taskType)));
+        QVERIFY2(m->priority == x.priority,
+                 qPrintable(QStringLiteral("uid %1 priority: mpp=%2 xml=%3")
+                                .arg(x.uniqueId).arg(m->priority).arg(x.priority)));
+    }
+    QVERIFY2(fieldChecks > 0, "no shared task UIDs for the task-info field check");
 }
 
 QTEST_MAIN(TstXmlMppCrosscheck)

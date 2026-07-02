@@ -62,6 +62,15 @@ struct TaskActualFields {
     quint16 work;       // ACTUAL_WORK = 2 (double, thousandths-of-minute)
 };
 
+// Task Information fields resolved through the field map. (Manual mode and
+// effort-driven are NOT here -- they are FixedMeta/Fixed2Meta bit flags, read
+// directly in the task loop.) Indices are MPXJ MPPTaskField FIELD_ARRAY positions.
+struct TaskInfoFields {
+    quint16 priority;   // PRIORITY = 25 (u16, 0..1000)
+    quint16 taskType;   // TYPE = 128 (u16: 0 Fixed Units / 1 Fixed Duration / 2 Fixed Work)
+    quint16 deadline;   // DEADLINE = 437 (MPP timestamp)
+};
+
 // Task earned-value (PMI/EVM) fields Microsoft Project stores per task. All are
 // 8-byte doubles: PV/EV/AC/CV/SV/EAC in the project currency, CPI/SPI/TCPI unitless.
 // (BAC = baseline-0 cost and VAC = BAC-EAC are derived, not stored, so not listed.)
@@ -88,6 +97,7 @@ constexpr int kBaselineCount = 11;
 extern const CostFields taskCost;
 extern const TaskActualFields taskActual;
 extern const TaskEvmFields taskEvm;
+extern const TaskInfoFields taskInfo;
 extern const BaselineSet taskBaselines[kBaselineCount];
 const QVector<CustomFieldDef> &taskCustomFields();
 

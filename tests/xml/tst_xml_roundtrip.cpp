@@ -59,6 +59,11 @@ void TstXmlRoundtrip::synthetic()
     task.milestone = false;
     task.constraintType = 4;
     task.constraintDate = p.startDate;
+    task.manual = true;
+    task.effortDriven = true;
+    task.taskType = 2;   // Fixed Work
+    task.priority = 750;
+    task.deadline = QDateTime(QDate(2026, 2, 20), QTime(17, 0));
     task.wbs = QStringLiteral("1.1");
     task.notes = QStringLiteral("{\\rtf1 line one}");
     task.cost = 1234.5;

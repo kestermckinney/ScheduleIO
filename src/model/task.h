@@ -54,6 +54,13 @@ public:
     QString wbs;
     QString notes;   // raw RTF source of the task's notes (empty if none)
 
+    // Scheduling behaviour (Task Information dialog fields).
+    bool manual = false;         // manually scheduled (vs auto scheduled)
+    bool effortDriven = false;   // effort-driven (work fixed as resources change)
+    int taskType = 0;            // 0 = Fixed Units, 1 = Fixed Duration, 2 = Fixed Work
+    int priority = 500;          // 0..1000, 500 = normal
+    QDateTime deadline;          // invalid when no deadline is set
+
     // Recorded actuals (invalid/zero until the task has progress).
     QDateTime actualStart;
     QDateTime actualFinish;

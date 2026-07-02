@@ -105,8 +105,9 @@ QList<schedule::Baseline> unpackBaselines(const QByteArray &b)
     return out;
 }
 
-// Task actuals + earned-value metrics, in a fixed layout (dates as second-resolution
-// timestamps, durations/work as i64 ms, the nine EVM values as doubles).
+// Task actuals + earned-value metrics + task-info fields, in a fixed layout
+// (dates as second-resolution timestamps, durations/work as i64 ms, the nine
+// EVM values as doubles, then manual/effortDriven/taskType/priority/deadline).
 QByteArray packTaskExtra(const schedule::Task &t)
 {
     using namespace FieldDecoders;
@@ -124,6 +125,11 @@ QByteArray packTaskExtra(const schedule::Task &t)
     putDouble(b, t.evm.spi);
     putDouble(b, t.evm.eac);
     putDouble(b, t.evm.tcpi);
+    putU8(b, t.manual ? 1 : 0);
+    putU8(b, t.effortDriven ? 1 : 0);
+    putU16(b, static_cast<quint16>(t.taskType));
+    putU32(b, static_cast<quint32>(t.priority));
+    putU32(b, encodeTimestampSeconds(t.deadline));
     return b;
 }
 
@@ -141,6 +147,18 @@ void unpackTaskExtra(const QByteArray &b, schedule::Task &t)
         readDouble(b, o, p);
         o += 8;
     }
+    if (o + 1 < b.size()) {
+        t.manual = b.at(o) != 0;
+        t.effortDriven = b.at(o + 1) != 0;
+    }
+    o += 2;
+    quint16 u16v = 0;
+    if (readU16(b, o, &u16v)) t.taskType = static_cast<int>(u16v);
+    o += 2;
+    quint32 u32v = 0;
+    if (readU32(b, o, &u32v)) t.priority = static_cast<int>(u32v);
+    o += 4;
+    if (readU32(b, o, &u32v)) t.deadline = decodeTimestampSeconds(u32v);
 }
 
 // Value tags for a custom field's QVariant.
@@ -828,14 +846,17 @@ struct CostOut {
     double *costVariance = nullptr;
 };
 
-// Optional task-only outputs (actuals + earned value). Left all-null for
-// resources/assignments, which have no such fields.
+// Optional task-only outputs (actuals + earned value + task-info fields). Left
+// all-null for resources/assignments, which have no such fields.
 struct TaskExtraOut {
     QDateTime *actualStart = nullptr;
     QDateTime *actualFinish = nullptr;
     qint64 *actualDurationMillis = nullptr;
     qint64 *actualWorkMillis = nullptr;
     schedule::EarnedValue *evm = nullptr;
+    int *priority = nullptr;       // PRIORITY (u16, 0..1000)
+    int *taskType = nullptr;       // TYPE (u16, 0/1/2)
+    QDateTime *deadline = nullptr; // DEADLINE (MPP timestamp)
 };
 
 void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
@@ -915,6 +936,19 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
         getDouble(taskEvm.spi,  &extra.evm->spi);
         getDouble(taskEvm.eac,  &extra.evm->eac);
         getDouble(taskEvm.tcpi, &extra.evm->tcpi);
+    }
+    auto getU16 = [&](quint16 idx, int *outv) -> bool {
+        QByteArray src; int off = 0; quint16 u = 0;
+        if (!locate(idx, src, off) || !readU16(src, off, &u))
+            return false;
+        *outv = static_cast<int>(u);
+        return true;
+    };
+    if (extra.priority) getU16(taskInfo.priority, extra.priority);
+    if (extra.taskType) getU16(taskInfo.taskType, extra.taskType);
+    if (extra.deadline) {
+        const QDateTime d = getDate(taskInfo.deadline);
+        if (d.isValid()) *extra.deadline = d;
     }
 
     if (baselines) {
@@ -1503,6 +1537,18 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
             if (FieldDecoders::readU32(fixedMeta, 16 + loop * 47 + 10, &metaFlags))
                 t.milestone = (metaFlags & 0x02u) != 0;
 
+            // EFFORT_DRIVEN is a bit flag in the same FixedMeta item: int at meta
+            // offset 13, mask 0x08 (Project 2013/2016; 2010 used offset 11, 0x10).
+            if (FieldDecoders::readU32(fixedMeta, 16 + loop * 47 + 13, &metaFlags))
+                t.effortDriven = (metaFlags & 0x08u) != 0;
+
+            // TASK_MODE (manually scheduled) is a bit flag in the per-task
+            // Fixed2Meta item: int at offset 8, mask 0x80 (Project 2013/2016;
+            // 2010 used mask 0x08). MPXJ *_TASK_META_DATA2_BIT_FLAGS.
+            if (item2 > 0
+                && FieldDecoders::readU32(meta2, 16 + loop * item2 + 8, &metaFlags))
+                t.manual = (metaFlags & 0x80u) != 0;
+
             // Cost scalars, baselines (0..10) and custom fields.
             const QByteArray b1 = (loop < blocks1.size()) ? blocks1.at(loop) : QByteArray();
             CostOut co;
@@ -1512,6 +1558,8 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
             ex.actualStart = &t.actualStart; ex.actualFinish = &t.actualFinish;
             ex.actualDurationMillis = &t.actualDurationMillis;
             ex.actualWorkMillis = &t.actualWorkMillis; ex.evm = &t.evm;
+            ex.priority = &t.priority; ex.taskType = &t.taskType;
+            ex.deadline = &t.deadline;
             fillCostBaselineCustom(taskLoc, b0, b1, taskVars, uid32, MppFieldIds::kTaskHigh,
                                    MppFieldIds::taskCost, MppFieldIds::taskBaselines,
                                    MppFieldIds::taskCustomFields(), co,
@@ -1754,7 +1802,9 @@ bool DocSerializer::write(const schedule::Project &in, CompoundFile &cf, QString
             tasks.varEntries.append({ static_cast<quint32>(i), kFieldCustom, packCustom(t.customFields) });
         const bool hasExtra = t.actualStart.isValid() || t.actualFinish.isValid()
             || t.actualDurationMillis != 0 || t.actualWorkMillis != 0
-            || t.evm != schedule::EarnedValue();
+            || t.evm != schedule::EarnedValue()
+            || t.manual || t.effortDriven || t.taskType != 0 || t.priority != 500
+            || t.deadline.isValid();
         if (hasExtra)
             tasks.varEntries.append({ static_cast<quint32>(i), kFieldTaskExtra, packTaskExtra(t) });
     }

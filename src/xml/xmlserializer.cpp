@@ -266,6 +266,16 @@ schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relatio
             t.milestone = r.readElementText().toInt() != 0;
         else if (n == u"Summary")
             t.summary = r.readElementText().toInt() != 0;
+        else if (n == u"Manual")
+            t.manual = r.readElementText().toInt() != 0;
+        else if (n == u"EffortDriven")
+            t.effortDriven = r.readElementText().toInt() != 0;
+        else if (n == u"Type")   // task type: 0 Fixed Units / 1 Fixed Duration / 2 Fixed Work
+            t.taskType = r.readElementText().toInt();
+        else if (n == u"Priority")
+            t.priority = r.readElementText().toInt();
+        else if (n == u"Deadline")
+            t.deadline = parseDateTime(r.readElementText());
         else if (n == u"ConstraintType")
             t.constraintType = r.readElementText().toInt();
         else if (n == u"ConstraintDate")
@@ -667,6 +677,12 @@ void writeTask(QXmlStreamWriter &w, const schedule::Task &t, const QMultiHash<in
     writeText(w, "PercentComplete", QString::number(qRound(t.percentComplete * 100.0)));
     writeText(w, "Milestone", t.milestone ? QStringLiteral("1") : QStringLiteral("0"));
     writeText(w, "Summary", t.summary ? QStringLiteral("1") : QStringLiteral("0"));
+    writeText(w, "Manual", t.manual ? QStringLiteral("1") : QStringLiteral("0"));
+    writeText(w, "EffortDriven", t.effortDriven ? QStringLiteral("1") : QStringLiteral("0"));
+    writeText(w, "Type", QString::number(t.taskType));
+    writeText(w, "Priority", QString::number(t.priority));
+    if (t.deadline.isValid())
+        writeText(w, "Deadline", formatDateTime(t.deadline));
     writeText(w, "ConstraintType", QString::number(t.constraintType));
     if (t.constraintDate.isValid())
         writeText(w, "ConstraintDate", formatDateTime(t.constraintDate));
