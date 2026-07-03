@@ -31,9 +31,15 @@ quint32   encodeTimestampSeconds(const QDateTime &dt);
 // Returns an invalid QDateTime for the "no date" sentinels. UTC for stability.
 QDateTime decodeMppTimestamp(const QByteArray &block, int offset);
 
+// Inverse of decodeMppTimestamp, packed as one u32: low u16 = time in tenths of
+// a minute, high u16 = days since 1983-12-31. Invalid dates encode as 0xFFFFFFFF
+// (the "no date" sentinel decodeMppTimestamp recognises).
+quint32 encodeMppTimestamp(const QDateTime &dt);
+
 // A 4-byte timestamp stored as a count of tenths of a minute since the epoch
 // (MPXJ getTimestampFromTenths) — used by the cost-rate tables. UTC for stability.
 QDateTime decodeTimestampTenths(const QByteArray &d, int offset);
+qint32    encodeTimestampTenths(const QDateTime &dt);
 
 // Durations are stored as tenths of a minute. We normalise to milliseconds in
 // the model so callers never deal with raw units.
@@ -53,6 +59,7 @@ bool readDouble(const QByteArray &d, int off, double *out);
 // Work/effort is stored as a double in thousandths of a minute (so 8h == 480000);
 // normalise to milliseconds. (Confirmed vs the XML oracle: value * 60 == ms.)
 qint64 decodeWorkDouble(double thousandthsOfMinute);
+double encodeWorkDouble(qint64 millis);
 
 // 16-byte GUID <-> QUuid.
 QUuid  decodeGuid(const QByteArray &bytes16);

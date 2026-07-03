@@ -55,6 +55,14 @@ QVector<BkndVarData::Entry> BkndVarData::stringsForType(quint16 type) const
     return out;
 }
 
+bool BkndVarData::hasEntriesFor(quint32 uniqueId) const
+{
+    for (const Record &r : m_records)
+        if (r.uniqueId == uniqueId)
+            return true;
+    return false;
+}
+
 QByteArray BkndVarData::blobFor(quint32 uniqueId, quint16 type) const
 {
     const uchar *v = reinterpret_cast<const uchar *>(m_var2.constData());

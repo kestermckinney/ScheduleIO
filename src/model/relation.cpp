@@ -11,7 +11,8 @@ bool Relation::operator==(const Relation &o) const
         && predecessorTaskUid == o.predecessorTaskUid
         && successorTaskUid == o.successorTaskUid
         && type == o.type
-        && lagMillis == o.lagMillis;
+        && lagMillis == o.lagMillis
+        && lagFormat == o.lagFormat;
 }
 
 } // namespace schedule

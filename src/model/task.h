@@ -46,6 +46,7 @@ public:
     QDateTime start;
     QDateTime finish;
     qint64 durationMillis = 0;   // duration normalised to milliseconds
+    int durationFormat = 7;      // display unit for the duration (Duration::Unit, 7 = days)
     double percentComplete = 0.0;
     bool milestone = false;
     bool summary = false;
@@ -60,6 +61,16 @@ public:
     int taskType = 0;            // 0 = Fixed Units, 1 = Fixed Duration, 2 = Fixed Work
     int priority = 500;          // 0..1000, 500 = normal
     QDateTime deadline;          // invalid when no deadline is set
+    int calendarUniqueId = -1;   // task calendar; -1 = use the project calendar
+
+    // Critical-path results (Scheduler::computeSlack): the latest dates the
+    // task can run without moving the project finish, the slack margins, and
+    // whether the task is on the critical path (total slack <= 0).
+    QDateTime lateStart;
+    QDateTime lateFinish;
+    qint64 totalSlackMillis = 0;
+    qint64 freeSlackMillis = 0;
+    bool critical = false;
 
     // Recorded actuals (invalid/zero until the task has progress).
     QDateTime actualStart;

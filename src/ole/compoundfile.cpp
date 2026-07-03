@@ -347,6 +347,20 @@ void CompoundFile::addStream(const QStringList &path, const QByteArray &data)
     m_nodes[leaf].isStorage = false;
 }
 
+void CompoundFile::addStorage(const QStringList &path)
+{
+    if (path.isEmpty())
+        return;
+    if (m_root < 0) {
+        m_root = 0;
+        m_nodes.push_back(Node{ QStringLiteral("Root Entry"), true, {}, {} });
+        m_valid = true;
+    }
+    int cur = m_root;
+    for (const QString &part : path)
+        cur = ensureChild(cur, part, true);
+}
+
 QByteArray CompoundFile::toByteArray() const
 {
     if (m_root < 0)

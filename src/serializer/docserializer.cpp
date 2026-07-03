@@ -4,12 +4,15 @@
 #include "serializer/docserializer.h"
 #include "serializer/mpp12serializer.h"
 #include "serializer/mpp14serializer.h"
+#include "serializer/mpp14writer.h"
 
 #include "codec/bkndvardata.h"
 #include "codec/fielddecoders.h"
+#include "codec/fieldmap.h"
 #include "codec/mppfieldids.h"
 #include "codec/propsreader.h"
 #include "codec/streamquartet.h"
+#include "model/duration.h"
 #include "ole/compoundfile.h"
 
 #include <QHash>
@@ -382,9 +385,10 @@ QByteArray packTask(const schedule::Task &t)
     putDouble(r, t.actualCost);
     putDouble(r, t.remainingCost);
     putDouble(r, t.costVariance);
-    return r;   // 74 bytes
+    putU16(r, static_cast<quint16>(t.durationFormat));
+    return r;   // 76 bytes
 }
-constexpr int kTaskRecordSize = 74;
+constexpr int kTaskRecordSize = 76;
 
 schedule::Task unpackTask(const QByteArray &r)
 {
@@ -408,6 +412,9 @@ schedule::Task unpackTask(const QByteArray &r)
     readDouble(r, 50, &t.actualCost);
     readDouble(r, 58, &t.remainingCost);
     readDouble(r, 66, &t.costVariance);
+    quint16 df = 0;
+    if (readU16(r, 74, &df))
+        t.durationFormat = static_cast<int>(df);
     return t;
 }
 
@@ -479,9 +486,10 @@ QByteArray packRelation(const schedule::Relation &r)
     putU32(b, static_cast<quint32>(r.successorTaskUid));
     putU32(b, static_cast<quint32>(r.type));
     putI32(b, FieldDecoders::encodeDurationTenthMinutes(r.lagMillis));
-    return b;   // 20 bytes
+    putU16(b, static_cast<quint16>(r.lagFormat));
+    return b;   // 22 bytes
 }
-constexpr int kRelationRecordSize = 20;
+constexpr int kRelationRecordSize = 22;
 
 schedule::Relation unpackRelation(const QByteArray &b)
 {
@@ -492,6 +500,9 @@ schedule::Relation unpackRelation(const QByteArray &b)
     FieldDecoders::readU32(b, 8, &u);  r.successorTaskUid = static_cast<int>(u);
     FieldDecoders::readU32(b, 12, &u); r.type = static_cast<int>(u);
     FieldDecoders::readI32(b, 16, &i); r.lagMillis = FieldDecoders::decodeDurationTenthMinutes(i);
+    quint16 lf = 0;
+    if (FieldDecoders::readU16(b, 20, &lf))
+        r.lagFormat = static_cast<int>(lf);
     return r;
 }
 
@@ -658,38 +669,10 @@ QVector<QByteArray> readFixedBlocks(const QByteArray &meta, const QByteArray &da
     return blocks;
 }
 
-// Generic: map field index -> block-0 fixed-data offset for an entity field map
-// (28-byte entries), keeping only entries whose high word matches the entity
-// (task 0x0B40, resource 0x0C40, assignment 0x0F40) and that live in block 0.
-QHash<quint16, int> block0FixedOffsets(const QByteArray &fm, quint16 highWord)
-{
-    using namespace FieldDecoders;
-    QHash<quint16, int> out;
-    int lastOffset = 0, blockIndex = 0;
-    for (int i = 0; i + 28 <= fm.size(); i += 28) {
-        quint32 typeValue = 0;
-        quint16 dataBlockOffset = 0, category = 0;
-        readU32(fm, i + 12, &typeValue);
-        readU16(fm, i + 4, &dataBlockOffset);
-        readU16(fm, i + 20, &category);
-        const bool fixed = (category != 0x0B && category != 0x64 && dataBlockOffset != 0xFFFF);
-        if (!fixed)
-            continue;
-        if (dataBlockOffset < lastOffset)
-            ++blockIndex;
-        lastOffset = dataBlockOffset;
-        if (blockIndex == 0 && (typeValue >> 16) == highWord)
-            out.insert(static_cast<quint16>(typeValue & 0xFFFF), dataBlockOffset);
-    }
-    return out;
-}
-
-// Fetch an entity field map from the project Props (primary key, else fallback).
-QByteArray fieldMapBytes(const PropsReader &props, quint32 key1, quint32 key2)
-{
-    QByteArray b = props.value(key1);
-    return b.isEmpty() ? props.value(key2) : b;
-}
+// Field-map helpers (block0FixedOffsets, entityFieldLocations, fieldMapBytes)
+// live in codec/fieldmap.{h,cpp} now, shared with the MPP14 writer.
+using FieldMap::block0FixedOffsets;
+using FieldMap::fieldMapBytes;
 
 // Var-data keys for the NOTES field per entity (MPXJ MPP*Field NOTES index).
 constexpr quint16 kTaskNotesKey = 15;
@@ -785,54 +768,8 @@ QList<schedule::CostRate> parseCostRateTable(const QByteArray &blob, int table)
     return out;
 }
 
-// Where a field's value lives for an entity. A field can be in FixedData/Fixed2Data
-// (block 0/1 at a byte offset) or in Var2Data (var == true, keyed by the field
-// index). Fixed is preferred when both are present.
-struct EntityFieldLoc {
-    int block = -1;     // fixed block index (0 = FixedData, 1 = Fixed2Data), else -1
-    int offset = -1;    // byte offset within that fixed block
-    bool var = false;   // also/only present as variable-length data
-};
-
-// Parse a field map (28-byte entries) into per-index locations for one entity
-// (high word: task 0x0B40, resource 0x0C40, assignment 0x0F40). The fixed-block
-// index is tracked across ALL fixed entries exactly like block0FixedOffsets (it
-// increments when an offset steps backwards), so block 0/1 stay aligned with
-// FixedData/Fixed2Data. Keeps the first fixed offset seen per index.
-QHash<quint16, EntityFieldLoc> entityFieldLocations(const QByteArray &fm, quint16 highWord)
-{
-    using namespace FieldDecoders;
-    QHash<quint16, EntityFieldLoc> out;
-    int lastOffset = 0, blockIndex = 0;
-    for (int i = 0; i + 28 <= fm.size(); i += 28) {
-        quint32 typeValue = 0;
-        quint16 dataBlockOffset = 0, category = 0;
-        readU32(fm, i + 12, &typeValue);
-        readU16(fm, i + 4, &dataBlockOffset);
-        readU16(fm, i + 20, &category);
-        const bool meta = (category == 0x0B || category == 0x64);
-        const bool fixed = (!meta && dataBlockOffset != 0xFFFF);
-        int thisBlock = 0;
-        if (fixed) {
-            if (dataBlockOffset < lastOffset)
-                ++blockIndex;
-            lastOffset = dataBlockOffset;
-            thisBlock = blockIndex;
-        }
-        if ((typeValue >> 16) != highWord)
-            continue;
-        EntityFieldLoc &L = out[static_cast<quint16>(typeValue & 0xFFFF)];
-        if (fixed) {
-            if (L.block < 0) {
-                L.block = thisBlock;
-                L.offset = dataBlockOffset;
-            }
-        } else if (!meta) {
-            L.var = true;
-        }
-    }
-    return out;
-}
+using FieldMap::EntityFieldLoc;
+using FieldMap::entityFieldLocations;
 
 // Decode cost scalars, baselines and custom fields for one entity instance, using
 // the field-map locations. Fields default to absent (kAbsent) where the entity
@@ -1100,6 +1037,11 @@ void readRealAssignments(const CompoundFile &cf, schedule::Project &out, const P
     const QHash<quint16, EntityFieldLoc> loc = entityFieldLocations(fm, MppFieldIds::kAssignmentHigh);
     const int uidOff = off.value(0, -1), taskOff = off.value(1, -1), resOff = off.value(2, -1),
               unitsOff = off.value(7, -1), workOff = off.value(8, -1);
+    // Scheduling fields (indices pinned against the fixtures' XML exports):
+    // 10 = actual work, 12 = remaining work, 20 = start, 21 = finish, 25 = delay.
+    const int actualWorkOff = off.value(10, -1), remainingWorkOff = off.value(12, -1),
+              startOff = off.value(20, -1), finishOff = off.value(21, -1),
+              delayOff = off.value(25, -1);
     if (taskOff < 0 || resOff < 0)
         return;
 
@@ -1107,11 +1049,16 @@ void readRealAssignments(const CompoundFile &cf, schedule::Project &out, const P
     av.parse(cf.readStream({ kDataStorage, assn, QStringLiteral("VarMeta") }),
              cf.readStream({ kDataStorage, assn, QStringLiteral("Var2Data") }));
 
+    const QByteArray meta = cf.readStream({ kDataStorage, assn, QStringLiteral("FixedMeta") });
     const QVector<QByteArray> blocks = readFixedBlocks(
-        cf.readStream({ kDataStorage, assn, QStringLiteral("FixedMeta") }),
-        cf.readStream({ kDataStorage, assn, QStringLiteral("FixedData") }), 34);
+        meta, cf.readStream({ kDataStorage, assn, QStringLiteral("FixedData") }), 34);
     QSet<int> seen;
-    for (const QByteArray &b : blocks) {
+    for (int loop = 0; loop < blocks.size(); ++loop) {
+        const QByteArray &b = blocks.at(loop);
+        // MPXJ ResourceAssignmentFactory: a row is dead when the first byte of
+        // its FixedMeta item is non-zero (deleted assignments stay in the file).
+        if (16 + loop * 34 < meta.size() && meta.at(16 + loop * 34) != 0)
+            continue;
         quint32 taskUid = 0, resUid = 0;
         if (!FieldDecoders::readU32(b, taskOff, &taskUid)
             || !FieldDecoders::readU32(b, resOff, &resUid))
@@ -1122,14 +1069,33 @@ void readRealAssignments(const CompoundFile &cf, schedule::Project &out, const P
             a.uniqueId = int(v32);
         if (seen.contains(a.uniqueId))
             continue;
+        // MPXJ also requires the unique id to appear in the assignment VarMeta;
+        // rows without any var entries are leftovers Project no longer shows.
+        if (!av.hasEntriesFor(quint32(a.uniqueId)))
+            continue;
         seen.insert(a.uniqueId);
         a.taskUniqueId = int(taskUid);
         a.resourceUniqueId = int(resUid);
         if (unitsOff >= 0)
-            a.units = readDoubleLE(b, unitsOff);          // units (1.0 == 100%)
+            a.units = readDoubleLE(b, unitsOff) / 10000.0;   // hundredths of a percent
+        // Work doubles are thousandths of a minute (decodeWorkDouble), the same
+        // encoding as every other work field. (An earlier read used the tenth-of-
+        // a-minute duration decode, inflating work 100x vs the XML oracle.)
         if (workOff >= 0)
-            a.workMillis = FieldDecoders::decodeDurationTenthMinutes(
-                static_cast<qint32>(readDoubleLE(b, workOff)));   // work as tenths-of-minute
+            a.workMillis = FieldDecoders::decodeWorkDouble(readDoubleLE(b, workOff));
+        if (actualWorkOff >= 0)
+            a.actualWorkMillis = FieldDecoders::decodeWorkDouble(readDoubleLE(b, actualWorkOff));
+        if (remainingWorkOff >= 0)
+            a.remainingWorkMillis
+                = FieldDecoders::decodeWorkDouble(readDoubleLE(b, remainingWorkOff));
+        if (startOff >= 0)
+            a.start = FieldDecoders::decodeMppTimestamp(b, startOff);
+        if (finishOff >= 0)
+            a.finish = FieldDecoders::decodeMppTimestamp(b, finishOff);
+        quint32 delayRaw = 0;
+        if (delayOff >= 0 && FieldDecoders::readU32(b, delayOff, &delayRaw))
+            a.delayMillis = FieldDecoders::decodeDurationTenthMinutes(
+                static_cast<qint32>(delayRaw));
 
         CostOut co;
         co.cost = &a.cost; co.actualCost = &a.actualCost;
@@ -1189,6 +1155,9 @@ void readRealRelations(const CompoundFile &cf, schedule::Project &out)
         qint32 lagRaw = 0;
         if (FieldDecoders::readI32(rec, 14, &lagRaw))
             r.lagMillis = FieldDecoders::decodeDurationTenthMinutes(lagRaw);
+        quint16 lagUnits = 0;
+        if (FieldDecoders::readU16(rec, 18, &lagUnits))
+            r.lagFormat = schedule::Duration::normalizeUnit(int(lagUnits));
         out.relations.append(r);
     }
 }
@@ -1501,11 +1470,26 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
             return b0Off >= 0 ? FieldDecoders::decodeMppTimestamp(b0, b0Off) : QDateTime();
         };
 
-        QSet<int> filled;   // first full block per unique id wins (matches MPXJ)
+        // MPXJ createTaskMap semantics: a FixedMeta item whose flags word has
+        // bit 0x02 marks a DELETED row (Project keeps deleted tasks in the
+        // file); live rows must also hold >75% of the block-0 record. A task
+        // that never gets a live row (name-only ghost) is dropped afterwards.
+        int maxFixed0 = 0;
+        for (auto it = taskLoc.constBegin(); it != taskLoc.constEnd(); ++it)
+            if (it->block == 0)
+                maxFixed0 = qMax(maxFixed0, it->offset + 2);
+
+        QSet<int> filled;   // first full LIVE block per unique id wins (matches MPXJ)
         for (int loop = 0; loop < blocks0.size(); ++loop) {
             const QByteArray &b0 = blocks0.at(loop);
             if (b0.size() < needed)
                 continue;   // skip null/partial task blocks
+            quint32 itemFlags = 0;
+            FieldDecoders::readU32(fixedMeta, 16 + loop * 47, &itemFlags);
+            if (itemFlags & 0x02u)
+                continue;   // deleted row
+            if (maxFixed0 > 0 && (b0.size() * 100) / maxFixed0 <= 75)
+                continue;   // truncated leftover row (MPXJ 75% heuristic)
             quint32 uid32 = 0;
             FieldDecoders::readU32(b0, off.uniqueId, &uid32);
             const auto it = pos.constFind(int(uid32));
@@ -1566,6 +1550,13 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
                                    &t.baselines, &t.customFields, ex);
             t.notes = readNotesRtf(taskVars, uid32, kTaskNotesKey);
         }
+
+        // Drop tasks that never received a live FixedData row: their names
+        // survive in Var2Data but the row is deleted (or gone), so MS Project
+        // and MPXJ do not show them.
+        for (int i = out.tasks.size() - 1; i >= 0; --i)
+            if (!filled.contains(out.tasks.at(i).uniqueId))
+                out.tasks.removeAt(i);
 
         // SUMMARY is derived from the outline hierarchy: a task is a summary if
         // a following task (in ID order) sits one outline level deeper, or if it
@@ -1775,6 +1766,11 @@ bool DocSerializer::read(const CompoundFile &cf, schedule::Project &out, QString
 
 bool DocSerializer::write(const schedule::Project &in, CompoundFile &cf, QString *error) const
 {
+    // MPP.14 writes the real Microsoft Project format (template-based; see
+    // mpp14writer.cpp). MPP.12 still uses the scaffold's own container below.
+    if (version() == FormatVersion::Mpp14)
+        return writeMpp14(in, cf, error);
+
     Q_UNUSED(error);
     cf.addStream({ QStringLiteral("Project"), QStringLiteral("Props") },
                  serializeProps(in, version()));

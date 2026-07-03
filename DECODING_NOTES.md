@@ -253,6 +253,75 @@ are silently dropped. Validated: weekday hours 70/70 (Average), 259/259, 392/392
 (Average's "Company Picknick" non-working + "Super Fun Day" working). Scaffold round-trips as
 `kFieldCalData`.
 
+## Writing real MPP14 (DONE — `src/serializer/mpp14writer.cpp`)
+
+`MppIO::save()` / `saveToData()` now emit the **real MPP.14 format** (Project
+2010-2021), not the scaffold container. Strategy: an empty project saved by
+Project 16 is embedded as a template (`src/serializer/mpp14template.mpp`, via
+`scheduleio.qrc`); the writer copies its tree verbatim (Props14, `\1CompObj`,
+`   214` views/tables/filters, the authentic `   114/Props` field maps, per-
+entity Props streams) and regenerates the five Bknd entity storages from the
+model, patching `   114/Props` project dates in place and regenerating
+`\5SummaryInformation` (title/author, [MS-OLEPS] with VT_LPWSTR values).
+
+Key writer facts (fixture forensics + WINPROJ decompilation):
+
+- **Headers** (WINPROJ `FUN_1408af414`/`FUN_1408af56c`): FixedMeta/Fixed2Meta =
+  `[0xFADFADBA][4][itemCount][dataStreamSize]`; VarMeta = 24-byte
+  `[0xFADFADBA][0][recordCount][0][0][var2DataSize]`.
+- **VarMeta records** are `[u32 uid][u32 offset][u16 typeLow][u16 typeHigh]` —
+  the "unused" high u16 is the entity high word (0x0B40/0x0C40/0x0F40/0x0D40).
+  All Var2Data blobs are `[u32 byteLen][bytes]`.
+- **Record geometry**: task 202 B (+ 64 B Fixed2 block, GUID at 0, manual dates
+  1283@50/1284@54), resource 172 B, assignment 110 B, relation 20 B (+ 48 B
+  Fixed2 = 3 GUIDs: cons/pred/succ), calendar 12 B. Meta item sizes 47/37/34/10/10;
+  Fixed2Meta item sizes 96/51/53/9/10.
+- **Placeholder rows**: task/resource FixedData start with three 16-byte rows
+  (meta flags 4) — plus a uid-0 stub row for resources; calendars four. Copied
+  verbatim from the template.
+- Fields are placed via the **template's own field maps** using the same
+  `FieldMap::entityFieldLocations` the reader uses, so writer and reader agree
+  by construction (fixed block 0/1 at the mapped offset, else a var blob).
+- Meta **bit flags**: milestone = meta item byte 10 & 0x02, effort-driven =
+  byte 13 & 0x08, manual = Fixed2Meta item byte 8 & 0x80 (Project 2013/2016).
+- **Baselines**: cost/work/duration blobs are written even when zero — the
+  reader (and MPXJ) treat blob presence as "baseline exists".
+- **MPXJ gotcha**: an assignment row is dropped unless its uid appears in the
+  assignment VarMeta, so every assignment gets a CREATED (index 634) var entry.
+- **Calendar exception blocks** carry a recurrence header MPXJ requires:
+  occurrences u16@4 = 1, recurrence type u16@72 = 1 (daily × freq 1 == a plain
+  one-off range).
+- Entity GUIDs are deterministic v5 UUIDs of the uid, so re-saving the same
+  model is byte-identical (`writerIsDeterministic`).
+
+Validated: `tst_semantic_roundtrip` — synthetic model and all four fixtures
+survive read → save → read with full model equality, and **MPXJ 13.12 reads the
+written files** (Average: 30/30 tasks, 22/22 assignments; Example Template:
+92/92, 79/79; title/dates/milestones/outline/costs/links correct).
+`tests/probe/resave.exe <in.mpp> <out.mpp>` re-saves a file for external checks.
+
+### Deleted-row flags (DONE — reader mirrors MPXJ)
+
+MS Project keeps deleted rows in the file. The reader now filters like MPXJ:
+- **Tasks** (MPXJ `createTaskMap`): a FixedMeta item whose flags u32 has bit
+  **0x02** is a deleted row; live rows must also hold >75% of the block-0
+  record size. Tasks whose names survive in Var2Data but that have no live
+  FixedData row ("name-only ghosts") are dropped after the fill pass.
+- **Assignments** (MPXJ `ResourceAssignmentFactory`): a row is dead when the
+  **first byte** of its FixedMeta item is non-zero, or when its unique id has
+  no VarMeta entries at all (`BkndVarData::hasEntriesFor`).
+- Resources/calendars need no flag check (MPXJ filters only by row size).
+
+Validated: reader counts now equal MPXJ's on the originals — Has Macros 83
+tasks (was 292) and 65 assignments (was 652), Example Template 92/79, Average
+30, Empty 1 — and the resaved files keep those counts in MPXJ.
+
+Known limits: unknown var entries (e.g. task types 173/174/179, 1379/1380) and
+`   214` view edits made after the template are not preserved on resave.
+MPP.12 write still uses the old scaffold container. Acceptance by Microsoft
+Project itself is untested on this machine (no MS Project COM registration);
+MPXJ is the strongest available oracle.
+
 ### Next fields
 
 - Calendar work weeks (alternate working-week ranges); only the default week's hours are read.

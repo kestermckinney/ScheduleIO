@@ -4,6 +4,7 @@
 #include "xml/xmlserializer.h"
 
 #include "codec/mppfieldids.h"
+#include "model/duration.h"
 
 #include <QDateTime>
 #include <QHash>
@@ -207,6 +208,8 @@ void parsePredecessorLink(QXmlStreamReader &r, int successorUid, QList<schedule:
             rel.type = r.readElementText().toInt();
         else if (n == u"LinkLag")
             rel.lagMillis = r.readElementText().toLongLong() * 6000;   // tenths of a min -> ms
+        else if (n == u"LagFormat")
+            rel.lagFormat = schedule::Duration::normalizeUnit(r.readElementText().toInt());
         else
             r.skipCurrentElement();
     }
@@ -260,6 +263,8 @@ schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relatio
             t.finish = parseDateTime(r.readElementText());
         else if (n == u"Duration")
             t.durationMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"DurationFormat")
+            t.durationFormat = schedule::Duration::normalizeUnit(r.readElementText().toInt());
         else if (n == u"PercentComplete")
             t.percentComplete = r.readElementText().toDouble() / 100.0;
         else if (n == u"Milestone")
@@ -276,6 +281,18 @@ schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relatio
             t.priority = r.readElementText().toInt();
         else if (n == u"Deadline")
             t.deadline = parseDateTime(r.readElementText());
+        else if (n == u"CalendarUID")
+            t.calendarUniqueId = r.readElementText().toInt();
+        else if (n == u"LateStart")
+            t.lateStart = parseDateTime(r.readElementText());
+        else if (n == u"LateFinish")
+            t.lateFinish = parseDateTime(r.readElementText());
+        else if (n == u"TotalSlack")   // tenths of a minute, like task lag
+            t.totalSlackMillis = r.readElementText().toLongLong() * 6000;
+        else if (n == u"FreeSlack")
+            t.freeSlackMillis = r.readElementText().toLongLong() * 6000;
+        else if (n == u"Critical")
+            t.critical = r.readElementText().toInt() != 0;
         else if (n == u"ConstraintType")
             t.constraintType = r.readElementText().toInt();
         else if (n == u"ConstraintDate")
@@ -370,6 +387,8 @@ schedule::Resource parseResource(QXmlStreamReader &r)
             res.initials = r.readElementText();
         else if (n == u"MaxUnits")
             res.maxUnits = r.readElementText().toDouble();
+        else if (n == u"CalendarUID")
+            res.calendarUniqueId = r.readElementText().toInt();
         else if (n == u"Cost")
             res.cost = r.readElementText().toDouble();
         else if (n == u"ActualCost")
@@ -412,6 +431,18 @@ schedule::Assignment parseAssignment(QXmlStreamReader &r)
             a.units = r.readElementText().toDouble();
         else if (n == u"Work")
             a.workMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"Start")
+            a.start = parseDateTime(r.readElementText());
+        else if (n == u"Finish")
+            a.finish = parseDateTime(r.readElementText());
+        else if (n == u"Delay")   // tenths of a minute, like task lag
+            a.delayMillis = r.readElementText().toLongLong() * 6000;
+        else if (n == u"LevelingDelay")
+            a.levelingDelayMillis = r.readElementText().toLongLong() * 6000;
+        else if (n == u"ActualWork")
+            a.actualWorkMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"RemainingWork")
+            a.remainingWorkMillis = parseIsoDuration(r.readElementText());
         else if (n == u"Cost")
             a.cost = r.readElementText().toDouble();
         else if (n == u"ActualCost")
@@ -674,6 +705,7 @@ void writeTask(QXmlStreamWriter &w, const schedule::Task &t, const QMultiHash<in
     if (t.finish.isValid())
         writeText(w, "Finish", formatDateTime(t.finish));
     writeText(w, "Duration", formatIsoDuration(t.durationMillis));
+    writeText(w, "DurationFormat", QString::number(t.durationFormat));
     writeText(w, "PercentComplete", QString::number(qRound(t.percentComplete * 100.0)));
     writeText(w, "Milestone", t.milestone ? QStringLiteral("1") : QStringLiteral("0"));
     writeText(w, "Summary", t.summary ? QStringLiteral("1") : QStringLiteral("0"));
@@ -683,6 +715,15 @@ void writeTask(QXmlStreamWriter &w, const schedule::Task &t, const QMultiHash<in
     writeText(w, "Priority", QString::number(t.priority));
     if (t.deadline.isValid())
         writeText(w, "Deadline", formatDateTime(t.deadline));
+    if (t.calendarUniqueId >= 0)
+        writeText(w, "CalendarUID", QString::number(t.calendarUniqueId));
+    if (t.lateStart.isValid())
+        writeText(w, "LateStart", formatDateTime(t.lateStart));
+    if (t.lateFinish.isValid())
+        writeText(w, "LateFinish", formatDateTime(t.lateFinish));
+    writeText(w, "FreeSlack", QString::number(t.freeSlackMillis / 6000));
+    writeText(w, "TotalSlack", QString::number(t.totalSlackMillis / 6000));
+    writeText(w, "Critical", t.critical ? QStringLiteral("1") : QStringLiteral("0"));
     writeText(w, "ConstraintType", QString::number(t.constraintType));
     if (t.constraintDate.isValid())
         writeText(w, "ConstraintDate", formatDateTime(t.constraintDate));
@@ -718,6 +759,7 @@ void writeTask(QXmlStreamWriter &w, const schedule::Task &t, const QMultiHash<in
         writeText(w, "PredecessorUID", QString::number(rel->predecessorTaskUid));
         writeText(w, "Type", QString::number(rel->type));
         writeText(w, "LinkLag", QString::number(rel->lagMillis / 6000));
+        writeText(w, "LagFormat", QString::number(rel->lagFormat));
         w.writeEndElement();
     }
     writeExtendedAttributes(w, t.customFields);
@@ -734,6 +776,8 @@ void writeResource(QXmlStreamWriter &w, const schedule::Resource &res)
     if (!res.initials.isEmpty())
         writeText(w, "Initials", res.initials);
     writeText(w, "MaxUnits", formatNumber(res.maxUnits));
+    if (res.calendarUniqueId >= 0)
+        writeText(w, "CalendarUID", QString::number(res.calendarUniqueId));
     writeText(w, "Cost", formatNumber(res.cost));
     writeText(w, "ActualCost", formatNumber(res.actualCost));
     writeText(w, "RemainingCost", formatNumber(res.remainingCost));
@@ -770,14 +814,23 @@ void writeAssignment(QXmlStreamWriter &w, const schedule::Assignment &a)
     writeText(w, "UID", QString::number(a.uniqueId));
     writeText(w, "TaskUID", QString::number(a.taskUniqueId));
     writeText(w, "ResourceUID", QString::number(a.resourceUniqueId));
-    writeText(w, "Units", formatNumber(a.units));
-    writeText(w, "Work", formatIsoDuration(a.workMillis));
-    writeText(w, "Cost", formatNumber(a.cost));
     writeText(w, "ActualCost", formatNumber(a.actualCost));
-    writeText(w, "RemainingCost", formatNumber(a.remainingCost));
+    writeText(w, "ActualWork", formatIsoDuration(a.actualWorkMillis));
+    writeText(w, "Cost", formatNumber(a.cost));
     writeText(w, "CostVariance", formatNumber(a.costVariance));
+    writeText(w, "Delay", QString::number(a.delayMillis / 6000));
+    if (a.finish.isValid())
+        writeText(w, "Finish", formatDateTime(a.finish));
+    writeText(w, "LevelingDelay", QString::number(a.levelingDelayMillis / 6000));
+    writeText(w, "LevelingDelayFormat", QStringLiteral("7"));
     if (!a.notes.isEmpty())
         writeText(w, "Notes", a.notes);
+    writeText(w, "RemainingCost", formatNumber(a.remainingCost));
+    writeText(w, "RemainingWork", formatIsoDuration(a.remainingWorkMillis));
+    if (a.start.isValid())
+        writeText(w, "Start", formatDateTime(a.start));
+    writeText(w, "Units", formatNumber(a.units));
+    writeText(w, "Work", formatIsoDuration(a.workMillis));
     for (const schedule::Baseline &b : a.baselines)
         writeBaseline(w, b);
     writeExtendedAttributes(w, a.customFields);
@@ -853,6 +906,8 @@ bool read(const QByteArray &xml, schedule::Project &out, QString *error)
             out.finishDate = parseDateTime(r.readElementText());
         else if (n == u"StatusDate")
             out.statusDate = parseDateTime(r.readElementText());
+        else if (n == u"CalendarUID")
+            out.calendarUniqueId = r.readElementText().toInt();
         else if (n == u"Calendars") {
             while (r.readNextStartElement()) {
                 if (r.name() == u"Calendar")
@@ -920,6 +975,8 @@ QByteArray write(const schedule::Project &in, QString *error)
         writeText(w, "FinishDate", formatDateTime(in.finishDate));
     if (in.statusDate.isValid())
         writeText(w, "StatusDate", formatDateTime(in.statusDate));
+    if (in.calendarUniqueId >= 0)
+        writeText(w, "CalendarUID", QString::number(in.calendarUniqueId));
 
     writeExtendedAttributeDefs(w, in);
 

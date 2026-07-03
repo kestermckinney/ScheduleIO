@@ -13,6 +13,7 @@ bool Project::operator==(const Project &o) const
         && startDate == o.startDate
         && finishDate == o.finishDate
         && statusDate == o.statusDate
+        && calendarUniqueId == o.calendarUniqueId
         && tasks == o.tasks
         && resources == o.resources
         && assignments == o.assignments

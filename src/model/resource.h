@@ -23,6 +23,7 @@ public:
     QString initials;
     double maxUnits = 1.0;   // 1.0 == 100%
     QString notes;           // raw RTF source of the resource's notes (empty if none)
+    int calendarUniqueId = -1;   // the resource's own calendar; -1 = none recorded
 
     // Cost (in the project's currency unit). Resources have no fixed cost.
     double cost = 0.0;

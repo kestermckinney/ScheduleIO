@@ -26,6 +26,10 @@ scheduleio_add_test(tst_streamquartet   unit/tst_streamquartet.cpp)
 scheduleio_add_test(tst_fielddecoders   unit/tst_fielddecoders.cpp)
 scheduleio_add_test(tst_versiondispatch unit/tst_versiondispatch.cpp)
 scheduleio_add_test(tst_propsreader     unit/tst_propsreader.cpp)
+scheduleio_add_test(tst_duration        unit/tst_duration.cpp)
+scheduleio_add_test(tst_scheduler       unit/tst_scheduler.cpp)
+scheduleio_add_test(tst_workcalendar    unit/tst_workcalendar.cpp)
+scheduleio_add_test(tst_taskscheduling  unit/tst_taskscheduling.cpp)
 
 # Layer 2 - round-trip (synthetic now; fixture-driven cases self-skip if absent)
 scheduleio_add_test(tst_semantic_roundtrip roundtrip/tst_semantic_roundtrip.cpp)
@@ -41,6 +45,7 @@ scheduleio_add_test(tst_custom_oracle oracle/tst_custom_oracle.cpp)
 scheduleio_add_test(tst_notes_oracle oracle/tst_notes_oracle.cpp)
 scheduleio_add_test(tst_costrate_oracle oracle/tst_costrate_oracle.cpp)
 scheduleio_add_test(tst_calendar_oracle oracle/tst_calendar_oracle.cpp)
+scheduleio_add_test(tst_assignment_oracle oracle/tst_assignment_oracle.cpp)
 
 # XmlIO - MS Project compatible XML (MSPDI) read/write over the shared model
 scheduleio_add_test(tst_xml_roundtrip      xml/tst_xml_roundtrip.cpp)
@@ -68,6 +73,14 @@ target_include_directories(dump_dates PRIVATE ${CMAKE_SOURCE_DIR}/src)
 qt_add_executable(dump_fields probe/dump_fields.cpp)
 target_link_libraries(dump_fields PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_fields PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(dump_assn probe/dump_assn.cpp)
+target_link_libraries(dump_assn PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_assn PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(resave probe/resave.cpp)
+target_link_libraries(resave PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(resave PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
 
 qt_add_executable(xml_diff probe/xml_diff.cpp)
 target_link_libraries(xml_diff PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)

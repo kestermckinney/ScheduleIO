@@ -15,11 +15,11 @@ class CompoundFile;
 // subclasses correspond to the WINPROJ serializer classes CPSI12DocSer (.12)
 // and the .14 serializer.
 //
-// SCAFFOLD STATUS: read()/write() implement a self-consistent quartet-based
-// encoding so the whole open/save pipeline and its tests work end to end. The
-// exact on-disk MPP field packing (FixedData record layouts, field type ids)
-// is the reverse-engineering work to be done against the user's real fixtures
-// (plan, Layers 2-3). The seam to fill is marked in docserializer.cpp.
+// read() parses real Microsoft Project files (the "   114" Bknd storages).
+// write() emits the real MPP.14 format for FormatVersion::Mpp14 (template-based
+// writer, mpp14writer.cpp — validated by round-trip tests and by MPXJ reading
+// our output). MPP.12 write still uses the legacy scaffold container, which
+// only this library can read back.
 class DocSerializer
 {
 public:

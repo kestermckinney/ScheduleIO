@@ -20,6 +20,7 @@ bool Task::operator==(const Task &o) const
         && start == o.start
         && finish == o.finish
         && durationMillis == o.durationMillis
+        && durationFormat == o.durationFormat
         && qFuzzyCompare(percentComplete + 1.0, o.percentComplete + 1.0)
         && milestone == o.milestone
         && summary == o.summary
@@ -32,6 +33,12 @@ bool Task::operator==(const Task &o) const
         && taskType == o.taskType
         && priority == o.priority
         && deadline == o.deadline
+        && calendarUniqueId == o.calendarUniqueId
+        && lateStart == o.lateStart
+        && lateFinish == o.lateFinish
+        && totalSlackMillis == o.totalSlackMillis
+        && freeSlackMillis == o.freeSlackMillis
+        && critical == o.critical
         && cost == o.cost
         && fixedCost == o.fixedCost
         && actualCost == o.actualCost

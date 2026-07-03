@@ -52,12 +52,35 @@ QDateTime decodeMppTimestamp(const QByteArray &block, int offset)
         .addSecs(static_cast<qint64>(time) * 6);   // time is tenths of a minute
 }
 
+quint32 encodeMppTimestamp(const QDateTime &dt)
+{
+    if (!dt.isValid())
+        return kNoDate;
+    // MPP timestamps are timezone-less wall-clock time. Use the datetime's own
+    // calendar fields, never a toUTC() conversion: the reader hands wall time
+    // back in a UTC-spec QDateTime (identity either way), but app-created
+    // datetimes carry local spec and a UTC conversion would shift the wall
+    // time by the timezone offset.
+    const qint64 days = QDate(1983, 12, 31).daysTo(dt.date());
+    if (days <= 1 || days >= 0xFFFF)
+        return kNoDate;   // out of the representable range == "no date"
+    const quint32 tenths = static_cast<quint32>(dt.time().msecsSinceStartOfDay() / 6000);
+    return (static_cast<quint32>(days) << 16) | (tenths & 0xFFFF);
+}
+
 QDateTime decodeTimestampTenths(const QByteArray &d, int offset)
 {
     qint32 tenths = 0;
     if (!readI32(d, offset, &tenths))
         return QDateTime();
     return epoch().addSecs(static_cast<qint64>(tenths) * 6);   // 1 tenth-minute == 6 s
+}
+
+qint32 encodeTimestampTenths(const QDateTime &dt)
+{
+    if (!dt.isValid())
+        return 0;
+    return static_cast<qint32>(epoch().secsTo(dt.toUTC()) / 6);
 }
 
 qint64 decodeDurationTenthMinutes(qint32 raw)
@@ -88,6 +111,11 @@ qint64 decodeWorkDouble(double thousandthsOfMinute)
     // Work is stored in 1/1000 of a minute, so value * 60 == milliseconds
     // (e.g. 8h -> 480000 -> 28'800'000 ms). Verified against the XML oracle.
     return llround(thousandthsOfMinute * 60.0);
+}
+
+double encodeWorkDouble(qint64 millis)
+{
+    return static_cast<double>(millis) / 60.0;
 }
 
 double decodePercent(quint16 raw)

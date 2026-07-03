@@ -26,6 +26,7 @@ set(SCHEDULEIO_SOURCES
     src/ole/compoundfile.cpp
     src/codec/streamquartet.cpp
     src/codec/fielddecoders.cpp
+    src/codec/fieldmap.cpp
     src/codec/bkndvardata.cpp
     src/codec/propsreader.cpp
     src/codec/mppfieldids.cpp
@@ -38,9 +39,15 @@ set(SCHEDULEIO_SOURCES
     src/model/baseline.cpp
     src/model/customfield.cpp
     src/model/costrate.cpp
+    src/model/duration.cpp
+    src/model/scheduler.cpp
+    src/model/workcalendar.cpp
+    src/model/taskscheduling.cpp
     src/serializer/docserializer.cpp
     src/serializer/mpp12serializer.cpp
     src/serializer/mpp14serializer.cpp
+    src/serializer/mpp14writer.cpp
+    scheduleio.qrc
 )
 
 set(SCHEDULEIO_HEADERS
@@ -51,6 +58,7 @@ set(SCHEDULEIO_HEADERS
     src/ole/compoundfile.h
     src/codec/streamquartet.h
     src/codec/fielddecoders.h
+    src/codec/fieldmap.h
     src/codec/bkndvardata.h
     src/codec/propsreader.h
     src/codec/mppfieldids.h
@@ -63,9 +71,14 @@ set(SCHEDULEIO_HEADERS
     src/model/baseline.h
     src/model/customfield.h
     src/model/costrate.h
+    src/model/duration.h
+    src/model/scheduler.h
+    src/model/workcalendar.h
+    src/model/taskscheduling.h
     src/serializer/docserializer.h
     src/serializer/mpp12serializer.h
     src/serializer/mpp14serializer.h
+    src/serializer/mpp14writer.h
 )
 
 # Compile every source exactly once into an object library. The shared library

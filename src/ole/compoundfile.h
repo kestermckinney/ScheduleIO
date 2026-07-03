@@ -43,6 +43,10 @@ public:
     // Build a tree for writing. Intermediate storages are created as needed.
     void addStream(const QStringList &path, const QByteArray &data);
 
+    // Create an (empty) storage node; used when mirroring a tree that contains
+    // storages with no streams (e.g. an .mpp's "   214/CVba").
+    void addStorage(const QStringList &path);
+
     // Serialise the current tree to a valid version-3 docfile.
     QByteArray toByteArray() const;
 

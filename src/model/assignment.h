@@ -8,6 +8,7 @@
 #include "model/baseline.h"
 #include "model/customfield.h"
 
+#include <QDateTime>
 #include <QList>
 
 namespace schedule {
@@ -22,6 +23,17 @@ public:
     double units = 1.0;            // assigned units (1.0 == 100%)
     qint64 workMillis = 0;         // assigned work, normalised to milliseconds
     QString notes;                 // raw RTF source of the assignment's notes (empty if none)
+
+    // Scheduled span of the assignment. WINPROJ's invariant is
+    //   assignment start == task start + delay + leveling delay
+    // with the span lying inside the task's span. Invalid dates mean "same as
+    // the task" (common when the file predates these fields being read).
+    QDateTime start;
+    QDateTime finish;
+    qint64 delayMillis = 0;           // assignment delay, in working time
+    qint64 levelingDelayMillis = 0;   // delay added by resource leveling
+    qint64 actualWorkMillis = 0;      // work already done
+    qint64 remainingWorkMillis = 0;   // work still scheduled
 
     // Cost (in the project's currency unit). Assignments have no fixed cost.
     double cost = 0.0;

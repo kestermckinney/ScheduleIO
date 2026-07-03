@@ -24,7 +24,8 @@ public:
     int predecessorTaskUid = 0;
     int successorTaskUid = 0;
     int type = FinishToStart;
-    qint64 lagMillis = 0;
+    qint64 lagMillis = 0;   // lag (or negative lead) normalised to milliseconds
+    int lagFormat = 7;      // display unit for the lag (Duration::Unit, 7 = days)
 
     bool operator==(const Relation &o) const;
     bool operator!=(const Relation &o) const { return !(*this == o); }

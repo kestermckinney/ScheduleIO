@@ -1,0 +1,8 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <!-- Copyright (C) 2026 Paul McKinney -->
+    <!-- SPDX-License-Identifier: GPL-3.0-only -->
+    <qresource prefix="/scheduleio">
+        <file alias="mpp14template.mpp">src/serializer/mpp14template.mpp</file>
+    </qresource>
+</RCC>

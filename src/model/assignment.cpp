@@ -15,6 +15,12 @@ bool Assignment::operator==(const Assignment &o) const
         && qFuzzyCompare(units + 1.0, o.units + 1.0)
         && workMillis == o.workMillis
         && notes == o.notes
+        && start == o.start
+        && finish == o.finish
+        && delayMillis == o.delayMillis
+        && levelingDelayMillis == o.levelingDelayMillis
+        && actualWorkMillis == o.actualWorkMillis
+        && remainingWorkMillis == o.remainingWorkMillis
         && cost == o.cost
         && actualCost == o.actualCost
         && remainingCost == o.remainingCost

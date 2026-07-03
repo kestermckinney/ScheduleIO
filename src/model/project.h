@@ -38,6 +38,7 @@ public:
     QDateTime startDate;
     QDateTime finishDate;
     QDateTime statusDate;   // "as of" date for progress / earned-value calculations
+    int calendarUniqueId = -1;   // the project calendar; -1 = the "Standard" calendar
 
     QList<Task> tasks;
     QList<Resource> resources;

@@ -42,6 +42,10 @@ public:
     // type), or empty if absent. Used for non-string var data (e.g. calendars).
     QByteArray blobFor(quint32 uniqueId, quint16 type) const;
 
+    // Whether any var record exists for the unique id. MPXJ only accepts
+    // assignment rows whose unique id appears in the VarMeta; mirrored here.
+    bool hasEntriesFor(quint32 uniqueId) const;
+
 private:
     struct Record {
         quint32 uniqueId = 0;

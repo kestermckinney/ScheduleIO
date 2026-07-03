@@ -13,6 +13,7 @@ bool Resource::operator==(const Resource &o) const
         && initials == o.initials
         && qFuzzyCompare(maxUnits + 1.0, o.maxUnits + 1.0)
         && notes == o.notes
+        && calendarUniqueId == o.calendarUniqueId
         && cost == o.cost
         && actualCost == o.actualCost
         && remainingCost == o.remainingCost
