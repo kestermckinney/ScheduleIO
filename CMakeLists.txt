@@ -39,6 +39,7 @@ set(SCHEDULEIO_SOURCES
     src/model/baseline.cpp
     src/model/customfield.cpp
     src/model/costrate.cpp
+    src/model/availability.cpp
     src/model/duration.cpp
     src/model/scheduler.cpp
     src/model/workcalendar.cpp
@@ -71,6 +72,7 @@ set(SCHEDULEIO_HEADERS
     src/model/baseline.h
     src/model/customfield.h
     src/model/costrate.h
+    src/model/availability.h
     src/model/duration.h
     src/model/scheduler.h
     src/model/workcalendar.h

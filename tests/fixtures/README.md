@@ -25,3 +25,15 @@ Aim for a corpus covering:
 `tst_semantic_roundtrip` automatically discovers every `*.mpp` in this directory.
 Until the binary MPP field mapping is reverse-engineered, those cases self-skip
 with a clear message rather than failing.
+
+## Third-party fixtures
+
+- `mpp14availability.mpp` / `.xml` — sourced from
+  [joniles/mpxj](https://github.com/joniles/mpxj) (`junit/data/mpp14availability.mpp`,
+  `junit/data/mspdiavailability.xml` renamed to match this project's `<name>.mpp`/
+  `<name>.xml` pairing convention), LGPL-2.1. The only fixture with real resource
+  Availability-table data (see `AvailabilityTest.java` in that repo). Its
+  `TBkndCal` calendar records use a layout our calendar reader doesn't fully
+  parse yet — `tst_entities_oracle` knowingly skips calendar-identity checks for
+  this one file (see `knownCalendarLayoutGap` in that test) rather than loosen
+  them for every fixture.

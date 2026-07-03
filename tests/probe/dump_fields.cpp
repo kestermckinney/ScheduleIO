@@ -95,6 +95,25 @@ int main(int argc, char **argv)
         }
     }
 
+    // Dump the raw availability-table blob (var key 276) for every resource uid
+    // that has one, so the on-disk record layout can be reverse-engineered.
+    if (which == "resource") {
+        BkndVarData v;
+        v.parse(cf.readStream({ QStringLiteral("   114"), sub, QStringLiteral("VarMeta") }),
+                cf.readStream({ QStringLiteral("   114"), sub, QStringLiteral("Var2Data") }));
+        for (const auto &e : v.stringsForType(1)) {   // iterate resource uids via NAME
+            const QByteArray blob = v.blobFor(e.uniqueId, 276);
+            if (blob.isEmpty())
+                continue;
+            std::printf("--- availability blob uid=%u len=%d ---\n", e.uniqueId, blob.size());
+            for (int i = 0; i < blob.size(); ++i) {
+                std::printf("%02x ", static_cast<unsigned char>(blob.at(i)));
+                if (i % 20 == 19) std::printf("\n");
+            }
+            std::printf("\n");
+        }
+    }
+
     // Var-data type histogram for the entity (which var keys actually carry data).
     const QByteArray vm = cf.readStream({ QStringLiteral("   114"), sub, QStringLiteral("VarMeta") });
     QMap<quint16, int> hist;

@@ -47,6 +47,7 @@ constexpr quint16 kAssnNotes = 71;
 constexpr quint16 kCalName = 1, kCalData = 8;
 constexpr quint16 kCalHigh = 0x0D40;
 constexpr quint16 kCostRateVarKey[5] = { 61, 62, 63, 64, 65 };
+constexpr quint16 kAvailabilityVarKey = 276;   // MPXJ ResourceField.AVAILABILITY_DATA
 
 const QString kDataStorage = QStringLiteral("   114");
 
@@ -418,6 +419,58 @@ QByteArray costRateBlob(const QList<schedule::CostRate> &entries)
     return b;
 }
 
+// Resource availability-table blob (MPXJ AvailabilityFactory layout, reverse-
+// engineered from tests/fixtures/mpp14availability.mpp): 12-byte header ([u16
+// segment count][10 reserved]), then (segments+1) 20-byte boundary slots
+// [timestamp tenths @0, epoch 1983-12-31 -- NOT the same epoch
+// encodeTimestampTenths uses][units double @4, ten-thousandths like MAX_UNITS]
+// [8 unused]. Segment i spans [boundary[i], boundary[i+1] - 1 minute]; real
+// periods are interleaved with zero-units filler segments for gaps/leading/
+// trailing time, mirroring MS Project's own layout, so a reader (ours or
+// MPXJ's) can recover independent, possibly non-adjacent periods by skipping
+// zero-unit segments.
+QByteArray availabilityBlob(const QList<schedule::AvailabilityPeriod> &periods)
+{
+    const QDateTime startNa(QDate(1983, 12, 31), QTime(0, 0), Qt::UTC);
+    const QDateTime endNa(QDate(2049, 12, 31), QTime(23, 59), Qt::UTC);
+    auto encodeTs = [&](const QDateTime &dt) -> quint32 {
+        return quint32(static_cast<qint32>(startNa.secsTo(dt.toUTC()) / 6));
+    };
+
+    QList<schedule::AvailabilityPeriod> sorted = periods;
+    std::sort(sorted.begin(), sorted.end(),
+              [](const schedule::AvailabilityPeriod &a, const schedule::AvailabilityPeriod &b) {
+                  if (a.startDate.isValid() != b.startDate.isValid())
+                      return !a.startDate.isValid();   // open-start (invalid) sorts first
+                  return a.startDate.isValid() && a.startDate < b.startDate;
+              });
+
+    struct Segment { QDateTime start; double units; };
+    QList<Segment> segs;
+    QDateTime cursor = startNa;
+    for (const schedule::AvailabilityPeriod &p : sorted) {
+        const QDateTime effStart = p.startDate.isValid() ? p.startDate : startNa;
+        const QDateTime effEndExcl = (p.endDate.isValid() ? p.endDate : endNa).addSecs(60);
+        if (effStart > cursor)
+            segs.append({ cursor, 0.0 });         // gap filler
+        segs.append({ effStart, p.units * 10000.0 });
+        cursor = effEndExcl;
+    }
+    if (cursor < endNa.addSecs(60))
+        segs.append({ cursor, 0.0 });              // trailing filler
+    segs.append({ endNa.addSecs(60), 0.0 });        // terminating boundary (timestamp only)
+
+    QByteArray b(12, '\0');
+    pokeU16(b, 0, quint16(segs.size() - 1));   // count excludes the terminating boundary
+    for (const Segment &s : segs) {
+        QByteArray rec(20, '\0');
+        pokeU32(rec, 0, encodeTs(s.start));
+        pokeDouble(rec, 4, s.units);
+        b += rec;
+    }
+    return b;
+}
+
 // The default working week the reader assumes for a "flag == 1" day of a base
 // calendar (must match parseCalendarData's kMorning/kAfternoon).
 bool isDefaultDay(bool isBase, int blobDayIndex, const QList<schedule::TimeRange> &ranges)
@@ -602,6 +655,61 @@ bool patchPropsU32(QByteArray &props, quint32 key, quint32 value)
     return false;
 }
 
+// Patch a UTF-16LE (null-terminated) Props string item, matching
+// PropsReader::string()'s decode. Same-length replacements patch in place;
+// a different length (or a key the template lacks) rebuilds the item and
+// fixes up the two header "byteSize" fields by the size delta -- everything
+// else in the stream (other items, the field maps) is untouched.
+void patchPropsString(QByteArray &props, quint32 key, const QString &value)
+{
+    const QByteArray newData = utf16zBytes(value);
+    int o = 16;
+    while (o + 12 <= props.size()) {
+        const int itemStart = o;
+        quint32 len = 0, k = 0, flags = 0;
+        readU32(props, o, &len);
+        readU32(props, o + 4, &k);
+        readU32(props, o + 8, &flags);
+        o += 12;
+        if (len > quint32(props.size() - o))
+            break;
+        if (k == key) {
+            if (int(len) == newData.size()) {
+                memcpy(props.data() + o, newData.constData(), size_t(newData.size()));
+                return;
+            }
+            QByteArray newItem;
+            appU32(newItem, quint32(newData.size()));
+            appU32(newItem, key);
+            appU32(newItem, flags);
+            newItem += newData;
+            const int oldItemLen = 12 + int(len);
+            props.replace(itemStart, oldItemLen, newItem);
+            const int delta = newItem.size() - oldItemLen;
+            quint32 sz0 = 0, sz1 = 0;
+            readU32(props, 0, &sz0);
+            readU32(props, 4, &sz1);
+            pokeU32(props, 0, quint32(int(sz0) + delta));
+            pokeU32(props, 4, quint32(int(sz1) + delta));
+            return;
+        }
+        o += int(len);
+    }
+    // Key absent (the template should always have it, but handle it anyway):
+    // append a new item and grow both header size fields to match.
+    QByteArray newItem;
+    appU32(newItem, quint32(newData.size()));
+    appU32(newItem, key);
+    appU32(newItem, 0u);
+    newItem += newData;
+    props += newItem;
+    quint32 sz0 = 0, sz1 = 0;
+    readU32(props, 0, &sz0);
+    readU32(props, 4, &sz1);
+    pokeU32(props, 0, quint32(int(sz0) + newItem.size()));
+    pokeU32(props, 4, quint32(int(sz1) + newItem.size()));
+}
+
 // Slice `count` meta items (without the 16-byte header) out of a meta stream.
 QByteArray metaItems(const QByteArray &meta, int itemSize, int first, int count)
 {
@@ -653,6 +761,14 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     patchPropsU32(props, 0x02400002u, encodeMppTimestamp(in.startDate));    // PROJECT_START_DATE
     patchPropsU32(props, 0x02400003u, encodeMppTimestamp(in.finishDate));   // PROJECT_FINISH_DATE
     patchPropsU32(props, 0x02400045u, encodeMppTimestamp(in.statusDate));   // STATUS_DATE
+    {
+        // Project default calendar (PropsKey DEFAULT_CALENDAR_NAME = 37748750) is
+        // stored by NAME; -1/not-found means the implicit "Standard" calendar.
+        QString defaultCalName = QStringLiteral("Standard");
+        for (const schedule::Calendar &c : in.calendars)
+            if (c.uniqueId == in.calendarUniqueId && !c.name.isEmpty()) { defaultCalName = c.name; break; }
+        patchPropsString(props, 37748750u, defaultCalName);
+    }
     cf.addStream({ kDataStorage, QStringLiteral("Props") }, props);
     cf.addStream({ summaryName }, summaryInformationStream(in.title, in.author));
 
@@ -838,6 +954,8 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                 if (!entries.isEmpty())
                     sink.putVarBlob(kCostRateVarKey[table], costRateBlob(entries));
             }
+            if (!r.availabilityTable.isEmpty())
+                sink.putVarBlob(kAvailabilityVarKey, availabilityBlob(r.availabilityTable));
             flushVars(sink, vars, MppFieldIds::kResourceHigh);
 
             fixed.addItem(0x00080000u, rec, rscMetaTailTpl);
@@ -939,17 +1057,27 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
         fixed.addRaw(metaItems(tCalFM, kCalMetaItem, 0, 4), tCalFD.left(64));
         fixed2.addRaw(metaItems(tCalF2M, kCalF2MetaItem, 0, 4), QByteArray(4 * kCalF2Block, '\0'));
 
-        // Resource calendars are named after their resource; recover the link.
+        // Resource calendars are linked back to their owning resource via
+        // Resource::calendarUniqueId (authoritative); fall back to matching by
+        // name (the calendar's name mirrors its resource's) for calendars that
+        // predate that field, e.g. scaffold-path round trips.
+        QHash<int, int> resUidByCalUid;
         QHash<QString, int> resUidByName;
-        for (const schedule::Resource &r : in.resources)
+        for (const schedule::Resource &r : in.resources) {
+            if (r.calendarUniqueId >= 0)
+                resUidByCalUid.insert(r.calendarUniqueId, r.uniqueId);
             if (!r.name.isEmpty() && !resUidByName.contains(r.name))
                 resUidByName.insert(r.name, r.uniqueId);
+        }
 
         for (const schedule::Calendar &c : in.calendars) {
             const bool isBase = (c.baseCalendarUniqueId < 0);
             QByteArray rec(kCalRecSize, '\0');
             pokeU32(rec, 0, isBase ? 0xFFFFFFFFu : quint32(c.baseCalendarUniqueId));
-            pokeU32(rec, 4, isBase ? 0xFFFFFFFFu : quint32(resUidByName.value(c.name, 0)));
+            const quint32 resId = resUidByCalUid.contains(c.uniqueId)
+                                       ? quint32(resUidByCalUid.value(c.uniqueId))
+                                       : resUidByName.value(c.name, 0);
+            pokeU32(rec, 4, isBase ? 0xFFFFFFFFu : resId);
             pokeU32(rec, 8, quint32(c.uniqueId));
 
             QByteArray metaTail;

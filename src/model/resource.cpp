@@ -20,7 +20,8 @@ bool Resource::operator==(const Resource &o) const
         && costVariance == o.costVariance
         && baselines == o.baselines
         && customFields == o.customFields
-        && costRates == o.costRates;
+        && costRates == o.costRates
+        && availabilityTable == o.availabilityTable;
 }
 
 } // namespace schedule

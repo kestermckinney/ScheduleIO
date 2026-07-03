@@ -18,6 +18,8 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
     if (a.startDate != b.startDate) d << QStringLiteral("startDate %1 vs %2").arg(a.startDate.toString(Qt::ISODate), b.startDate.toString(Qt::ISODate));
     if (a.finishDate != b.finishDate) d << QStringLiteral("finishDate %1 vs %2").arg(a.finishDate.toString(Qt::ISODate), b.finishDate.toString(Qt::ISODate));
     if (a.statusDate != b.statusDate) d << QStringLiteral("statusDate");
+    if (a.calendarUniqueId != b.calendarUniqueId)
+        d << QStringLiteral("calendarUniqueId %1 vs %2").arg(a.calendarUniqueId).arg(b.calendarUniqueId);
     if (a.tasks.size() != b.tasks.size())
         d << QStringLiteral("task count %1 vs %2").arg(a.tasks.size()).arg(b.tasks.size());
     for (int i = 0; i < qMin(a.tasks.size(), b.tasks.size()); ++i) {
@@ -108,6 +110,9 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
                              .arg(x.costRates.at(n).endDate.toString(Qt::ISODate), y.costRates.at(n).endDate.toString(Qt::ISODate),
                                   x.costRates.at(n).startDate.toString(Qt::ISODate), y.costRates.at(n).startDate.toString(Qt::ISODate));
         }
+        if (x.availabilityTable != y.availabilityTable)
+            f << QStringLiteral("availabilityTable (%1/%2)")
+                     .arg(x.availabilityTable.size()).arg(y.availabilityTable.size());
         d << QStringLiteral("resource[%1] uid %2: %3").arg(i).arg(x.uniqueId).arg(f.join(QStringLiteral(", ")));
         if (d.size() > 12)
             break;
@@ -206,7 +211,30 @@ schedule::Project TstSemanticRoundtrip::makeSampleProject()
     schedule::Resource r;
     r.uniqueId = 1; r.id = 1; r.name = QStringLiteral("Alice"); r.initials = QStringLiteral("A");
     r.maxUnits = 0.5;
+    schedule::AvailabilityPeriod ap1;
+    ap1.startDate = QDateTime(QDate(2026, 1, 1), QTime(0, 0), Qt::UTC);
+    ap1.endDate = QDateTime(QDate(2026, 1, 31), QTime(23, 59), Qt::UTC);
+    ap1.units = 0.5;
+    schedule::AvailabilityPeriod ap2;
+    ap2.startDate = QDateTime(QDate(2026, 3, 1), QTime(0, 0), Qt::UTC);   // gap before this one
+    ap2.endDate = QDateTime(QDate(2026, 3, 31), QTime(23, 59), Qt::UTC);
+    ap2.units = 1.0;
+    r.availabilityTable = { ap1, ap2 };
     p.resources = { r };
+
+    schedule::Calendar cal;
+    cal.uniqueId = 1;
+    cal.name = QStringLiteral("Night Shift");
+    cal.baseCalendarUniqueId = -1;
+    // Base calendars must spell out working hours per weekday (Mon..Sun); the
+    // standard Mon-Fri 8-12/13-17 pattern matches the writer's "default day" case.
+    const QList<schedule::TimeRange> workDay = {
+        { QTime(8, 0), QTime(12, 0) }, { QTime(13, 0), QTime(17, 0) }
+    };
+    cal.workingTimes = { workDay, workDay, workDay, workDay, workDay, {}, {} };   // Mon..Fri, Sat/Sun off
+    cal.workingDayMask = 0b0011111;
+    p.calendars = { cal };
+    p.calendarUniqueId = cal.uniqueId;   // project default -> the non-Standard calendar
 
     return p;
 }

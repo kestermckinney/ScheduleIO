@@ -330,6 +330,76 @@ MPXJ is the strongest available oracle.
 - More SummaryInformation/DocumentSummaryInformation props (company, manager, ...).
 - Version detection (ApplicationVersion) to pick the right MILESTONE bit table for 2010 files.
 
+### Resource `calendarUniqueId` (DONE, 2026-07-03)
+
+`Resource::calendarUniqueId` is **not** a resource-side field-map field — index 5
+(MPXJ `ResourceField.BASE_CALENDAR`) is entirely absent from the resource field
+map in every fixture checked. The link lives on the **calendar** side instead:
+`TBkndCal`'s 12-byte fixed record (`baseID@0`/`resID@4`/`calID@8`, read since the
+calendar-name work) has `resID@4` pointing back to the owning resource for
+non-base (resource) calendars. `readRealCalendars` now inverts this onto
+`Resource::calendarUniqueId` once both lists are loaded (resources first). The
+writer (`mpp14writer.cpp` `TBkndCal` loop) now prefers `Resource::calendarUniqueId`
+(via a `calendar uid -> resource uid` map) over the pre-existing name-matching
+fallback, fixing a latent bug where two resources sharing one calendar name would
+mislink. Validated: `tst_entities_oracle` (new `resource calendar UID` check,
+matched by the assigned calendar's **name** since calendar UIDs are already known
+to differ between `.mpp` and XML) and `tst_semantic_roundtrip` (full model
+equality across all real fixtures).
+
+### Resource Availability Table (DONE, 2026-07-03)
+
+Time-phased Max Units rows (MS Project's Resource Information > General
+"Resource Availability" grid) — new `schedule::AvailabilityPeriod`
+(`startDate`/`endDate`/`units`, invalid dates = open start/end) and
+`Resource::availabilityTable`. Var key **276** (MPXJ `ResourceField.
+AVAILABILITY_DATA`). **No existing fixture had this data** — sourced
+`mpp14availability.mpp`/`.xml` from MPXJ's own test suite (`github.com/joniles/
+mpxj`, `junit/data/`, LGPL-2.1; see `AvailabilityTest.java`/
+`AvailabilityFactory.java`) since none of our 4 originals exercise it.
+
+Blob layout (empirically confirmed byte-for-byte against the sourced fixture +
+its XML oracle, cross-checked against MPXJ's `AvailabilityFactory.process`):
+12-byte header (`[u16 segment count][10 reserved]`), then `(count+1)` 20-byte
+boundary slots `[timestamp tenths @0][units double @4, ten-thousandths like
+MAX_UNITS][8 unused]`. Slot *i*'s timestamp is period *i*'s start; slot *i+1*'s
+timestamp is period *i*'s end (display subtracts 1 minute — the same
+inclusive-end convention as cost-rate tables). **Gotcha**: this timestamp uses
+epoch **1983-12-31**, not the 1984-01-01 epoch `FieldDecoders::decodeTimestampTenths`
+uses elsewhere (cost-rate tables genuinely do use 1984-01-01 — two different
+epochs for two different "tenths" fields in the same format; calendar
+exceptions use the 1983-12-31 one too). A units value of exactly 0 marks an
+implicit "no override" filler segment (leading/trailing/gap) that MPXJ's own
+reader skips and ours does too — `readRealResources` only appends nonzero-unit
+segments as real `AvailabilityPeriod`s. `mpp14writer.cpp`'s `availabilityBlob()`
+does the inverse: sorts periods, synthesizes zero-unit filler segments for any
+gaps plus leading/trailing time, and emits the terminating boundary. Validated:
+new `tst_availability_oracle` (3/3 periods exact vs XML) and
+`tst_semantic_roundtrip` (synthetic model with a real gap between two periods,
+plus the sourced fixture, both full model equality).
+
+### Project default calendar (DONE, 2026-07-03)
+
+`Project::calendarUniqueId` (-1 = the implicit "Standard" calendar) existed in
+the model but was read/written nowhere. It's stored by **name**, not uid --
+PropsKey `DEFAULT_CALENDAR_NAME` = 37748750 (0x0240000E) in `   114/Props`, a
+UTF-16LE string (same decode as `PropsReader::string()`). Reader resolves it
+against the already-loaded `calendars` list (`readRealCalendars` runs first).
+Writer needed a new `patchPropsString()` (unlike the existing `patchPropsU32`,
+a string's replacement can be a different byte length than the template's
+placeholder, so it splices the item and adjusts the two header "byteSize"
+fields rather than patching in place) -- falls back to `"Standard"` when
+`calendarUniqueId` doesn't resolve to a named calendar. Validated via
+`tst_semantic_roundtrip`'s synthetic model (a real non-Standard calendar set as
+the project default).
+
+**Known limit surfaced by the sourced fixture (pre-existing, unrelated):**
+`mpp14availability.mpp`'s `TBkndCal` records sit in a layout our calendar
+reader doesn't fully parse (calendar-name recall ~1/3 vs the ~100% on our other
+4 fixtures) — `tst_entities_oracle` explicitly skips its calendar-identity
+checks for this one fixture (`knownCalendarLayoutGap`) rather than loosen them
+project-wide. Worth investigating if calendar work resumes, but out of scope here.
+
 ## Diagnostics
 
 - `dump_task <file.mpp>` — hex-dumps `TBkndTask` streams and tallies string-bearing field codes.

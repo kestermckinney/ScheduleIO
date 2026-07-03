@@ -44,6 +44,7 @@ scheduleio_add_test(tst_baseline_oracle oracle/tst_baseline_oracle.cpp)
 scheduleio_add_test(tst_custom_oracle oracle/tst_custom_oracle.cpp)
 scheduleio_add_test(tst_notes_oracle oracle/tst_notes_oracle.cpp)
 scheduleio_add_test(tst_costrate_oracle oracle/tst_costrate_oracle.cpp)
+scheduleio_add_test(tst_availability_oracle oracle/tst_availability_oracle.cpp)
 scheduleio_add_test(tst_calendar_oracle oracle/tst_calendar_oracle.cpp)
 scheduleio_add_test(tst_assignment_oracle oracle/tst_assignment_oracle.cpp)
 

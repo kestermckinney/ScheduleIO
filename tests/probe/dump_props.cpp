@@ -68,6 +68,17 @@ int main(int argc, char **argv)
         return 0;
     }
 
+    if (which == "rawprops") {
+        for (int o = 16; o + 12 <= props.size(); ) {
+            const quint32 len = u32(props, o), key = u32(props, o + 4), flags = u32(props, o + 8);
+            o += 12;
+            if (len > quint32(props.size() - o)) break;
+            std::printf("key=%u (0x%08x) len=%u flags=0x%08x\n", key, key, len, flags);
+            o += int(len);
+        }
+        return 0;
+    }
+
     QByteArray map1, map2;
     for (int o = 16; o + 12 <= props.size(); ) {
         const quint32 len = u32(props, o), key = u32(props, o + 4);
@@ -80,7 +91,7 @@ int main(int argc, char **argv)
     const QByteArray map = !map1.isEmpty() ? map1 : map2;
     std::printf("%s field map: %d bytes (%d entries)\n", which.constData(), map.size(), map.size() / 28);
 
-    if (which == "resource") {
+    if (which == "resource" && argc < 4) {
         const QByteArray meta = cf.readStream({ QStringLiteral("   114"), QStringLiteral("TBkndRsc"), QStringLiteral("FixedMeta") });
         const QByteArray data = cf.readStream({ QStringLiteral("   114"), QStringLiteral("TBkndRsc"), QStringLiteral("FixedData") });
         const int count = (meta.size() - 16) / 37;

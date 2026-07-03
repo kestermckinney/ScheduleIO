@@ -5,6 +5,7 @@
 #define SCHEDULE_RESOURCE_H
 
 #include "scheduleio_export.h"
+#include "model/availability.h"
 #include "model/baseline.h"
 #include "model/costrate.h"
 #include "model/customfield.h"
@@ -34,6 +35,7 @@ public:
     QList<Baseline> baselines;        // resource baselines store cost + work
     QList<CustomField> customFields;
     QList<CostRate> costRates;        // cost-rate tables A..E (time-phased rates)
+    QList<AvailabilityPeriod> availabilityTable;   // time-phased Max Units rows
 
     bool operator==(const Resource &o) const;
     bool operator!=(const Resource &o) const { return !(*this == o); }

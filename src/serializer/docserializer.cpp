@@ -768,6 +768,68 @@ QList<schedule::CostRate> parseCostRateTable(const QByteArray &blob, int table)
     return out;
 }
 
+// Resource availability tables are a single var-data field (MPXJ
+// ResourceField.AVAILABILITY_DATA).
+constexpr quint16 kAvailabilityVarKey = 276;
+
+// The availability table's boundary timestamps use a DIFFERENT epoch than
+// FieldDecoders::decodeTimestampTenths (1984-01-01): empirically (checked
+// against tests/fixtures/mpp14availability.mpp + its XML oracle) they count
+// tenths-of-a-minute from 1983-12-31, the same epoch calendar exceptions use.
+inline QDateTime availabilityEpoch() { return QDateTime(QDate(1983, 12, 31), QTime(0, 0), Qt::UTC); }
+
+QDateTime decodeAvailabilityTimestamp(const QByteArray &d, int offset)
+{
+    qint32 tenths = 0;
+    if (!FieldDecoders::readI32(d, offset, &tenths))
+        return QDateTime();
+    return availabilityEpoch().addSecs(static_cast<qint64>(tenths) * 6);
+}
+
+qint32 encodeAvailabilityTimestamp(const QDateTime &dt)
+{
+    if (!dt.isValid())
+        return 0;
+    return static_cast<qint32>(availabilityEpoch().secsTo(dt.toUTC()) / 6);
+}
+
+// Parse a resource availability-table var blob (MPXJ AvailabilityFactory): a
+// 12-byte header ([u16 boundary count][10 bytes reserved]), then (count+1)
+// 20-byte boundary slots [timestamp tenths @0][units double @4, ten-thousandths
+// like MAX_UNITS][8 unused bytes]. Slot i's timestamp is period i's start; slot
+// i+1's timestamp is period i's end (displayed one minute earlier, matching the
+// cost-rate table's end-date convention). A units value of exactly 0 marks an
+// implicit "no override" filler slot -- not a real period -- and is skipped,
+// mirroring MS Project's own leading/trailing/gap fillers and MPXJ's decoder.
+QList<schedule::AvailabilityPeriod> parseAvailabilityTable(const QByteArray &blob)
+{
+    using namespace FieldDecoders;
+    QList<schedule::AvailabilityPeriod> out;
+    quint16 count = 0;
+    if (!readU16(blob, 0, &count))
+        return out;
+    for (int i = 0; i < int(count); ++i) {
+        const int off = 12 + 20 * i;
+        if (off + 24 > blob.size())
+            break;
+        double units = 0.0;
+        if (!readDouble(blob, off + 4, &units) || units == 0.0)
+            continue;
+        const QDateTime start = decodeAvailabilityTimestamp(blob, off);
+        QDateTime end = decodeAvailabilityTimestamp(blob, off + 20);
+        if (!start.isValid() || !end.isValid())
+            continue;
+        end = end.addSecs(-60);   // stored end is the next boundary; display is inclusive
+
+        schedule::AvailabilityPeriod p;
+        p.startDate = (start > availabilityEpoch()) ? start : QDateTime();   // == "NA" -> open start
+        p.endDate = (end < costRateEndNa()) ? end : QDateTime();             // >= "NA" -> open end
+        p.units = units / 10000.0;
+        out.append(p);
+    }
+    return out;
+}
+
 using FieldMap::EntityFieldLoc;
 using FieldMap::entityFieldLocations;
 
@@ -1020,6 +1082,9 @@ void readRealResources(const CompoundFile &cf, schedule::Project &out, const Pro
             if (!rateBlob.isEmpty())
                 r.costRates.append(parseCostRateTable(rateBlob, ti));
         }
+        const QByteArray availBlob = v.blobFor(uid, kAvailabilityVarKey);
+        if (!availBlob.isEmpty())
+            r.availabilityTable = parseAvailabilityTable(availBlob);
         out.resources.append(r);
     }
 }
@@ -1327,10 +1392,16 @@ void readRealCalendars(const CompoundFile &cf, schedule::Project &out)
     for (const auto &e : v.stringsForType(1))
         names.insert(int(e.uniqueId), e.value);
 
-    // Resource calendars take their name from the linked resource.
+    // Resource calendars take their name from the linked resource. The link is
+    // stored on the CALENDAR side (resId@4), not on the resource -- there is no
+    // resource-side field-map entry for it -- so we also invert it onto
+    // Resource::calendarUniqueId here, once both lists are loaded.
     QHash<int, QString> resName;
-    for (const schedule::Resource &r : out.resources)
-        resName.insert(r.uniqueId, r.name);
+    QHash<int, int> resIndexByUid;
+    for (int i = 0; i < out.resources.size(); ++i) {
+        resName.insert(out.resources[i].uniqueId, out.resources[i].name);
+        resIndexByUid.insert(out.resources[i].uniqueId, i);
+    }
 
     const QVector<QByteArray> blocks = readVarSizedBlocks(
         cf.readStream({ kDataStorage, cal, QStringLiteral("FixedMeta") }),
@@ -1353,6 +1424,9 @@ void readRealCalendars(const CompoundFile &cf, schedule::Project &out)
         } else {
             c.baseCalendarUniqueId = int(baseId);
             c.name = resName.value(int(resId));   // resource calendar -> resource name
+            const auto rit = resIndexByUid.constFind(int(resId));
+            if (rit != resIndexByUid.constEnd())
+                out.resources[rit.value()].calendarUniqueId = int(calId);
         }
         const QByteArray calData = v.blobFor(calId, 8);
         c.workingDayMask = calendarWorkingMask(calData);
@@ -1625,6 +1699,15 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
     out.startDate = projDate(props, 0x02400002u);
     out.finishDate = projDate(props, 0x02400003u);
     out.statusDate = projDate(props, 0x02400045u);   // PropsKey STATUS_DATE = 37748805
+
+    // Project default calendar (PropsKey DEFAULT_CALENDAR_NAME = 37748750) is
+    // stored by NAME; resolve it against the already-loaded calendars list.
+    const QString defaultCalName = props.string(37748750u);
+    if (!defaultCalName.isEmpty()) {
+        for (const schedule::Calendar &c : out.calendars) {
+            if (c.name == defaultCalName) { out.calendarUniqueId = c.uniqueId; break; }
+        }
+    }
     return true;
 }
 
