@@ -213,6 +213,14 @@ void parsePredecessorLink(QXmlStreamReader &r, int successorUid, QList<schedule:
         else
             r.skipCurrentElement();
     }
+    // Mirror docserializer.cpp's readRealRelations guard: a missing/malformed
+    // PredecessorUID leaves predecessorTaskUid at its 0 default, and task uid 0
+    // is always the Project Summary Task -- never a legitimate predecessor. A
+    // self-referencing link is equally invalid. Both would otherwise reach the
+    // MPP14 writer's TBkndCons table and produce a circular-reference row MS
+    // Project rejects on reopen.
+    if (rel.predecessorTaskUid == 0 || rel.predecessorTaskUid == rel.successorTaskUid)
+        return;
     out.append(rel);
 }
 

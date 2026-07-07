@@ -21,6 +21,7 @@ bool Task::operator==(const Task &o) const
         && finish == o.finish
         && durationMillis == o.durationMillis
         && durationFormat == o.durationFormat
+        && workMillis == o.workMillis
         && qFuzzyCompare(percentComplete + 1.0, o.percentComplete + 1.0)
         && milestone == o.milestone
         && summary == o.summary
@@ -29,6 +30,7 @@ bool Task::operator==(const Task &o) const
         && wbs == o.wbs
         && notes == o.notes
         && manual == o.manual
+        && levelingDelayMillis == o.levelingDelayMillis
         && effortDriven == o.effortDriven
         && taskType == o.taskType
         && priority == o.priority

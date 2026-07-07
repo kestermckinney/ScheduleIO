@@ -47,6 +47,10 @@ public:
     QDateTime finish;
     qint64 durationMillis = 0;   // duration normalised to milliseconds
     int durationFormat = 7;      // display unit for the duration (Duration::Unit, 7 = days)
+    qint64 workMillis = 0;       // task-level work; holds Work when no resource is
+                                 // assigned (MS Project keeps a task Work independent
+                                 // of assignments). Mirrors the assignment total when
+                                 // resources exist -- see TaskScheduling.
     double percentComplete = 0.0;
     bool milestone = false;
     bool summary = false;
@@ -57,6 +61,12 @@ public:
 
     // Scheduling behaviour (Task Information dialog fields).
     bool manual = false;         // manually scheduled (vs auto scheduled)
+    qint64 levelingDelayMillis = 0;   // working-time delay added by resource leveling;
+                                      // the forward pass pushes the task start by this
+    // Transient (not serialised): the un-levelled start a no-predecessor task is
+    // anchored at, so leveling delay is applied to a stable base each reschedule instead
+    // of compounding into `start`. Set by ResourceLeveling; invalid means "use start".
+    QDateTime levelingAnchor;
     bool effortDriven = false;   // effort-driven (work fixed as resources change)
     int taskType = 0;            // 0 = Fixed Units, 1 = Fixed Duration, 2 = Fixed Work
     int priority = 500;          // 0..1000, 500 = normal

@@ -77,6 +77,8 @@ private slots:
     void nonEffortDriven_add_addsWork();
     void effortDriven_remove_redistributes();
     void addToEmptyTask_bringsOwnWork();
+    void workOnResourcelessTask_holdsOnTask();
+    void assignAfterWork_inheritsTaskWork();
 };
 
 void TstTaskScheduling::baselineSync()
@@ -180,6 +182,32 @@ void TstTaskScheduling::addToEmptyTask_bringsOwnWork()
     // First resource on an effort-driven task still takes duration x units.
     QCOMPARE(assn(p, newUid)->workMillis, 40 * kHour);
     QCOMPARE(task(p).durationMillis, 40 * kHour);
+}
+
+void TstTaskScheduling::workOnResourcelessTask_holdsOnTask()
+{
+    // A brand-new task with no resources: entering Work must stick (it used to
+    // be silently rejected) and, for a Fixed Units task, drive the duration.
+    Project p = makeProject(0, false);
+    TaskScheduling::removeAssignment(p, 100);
+    QCOMPARE(TaskScheduling::taskWork(p, 1), qint64(0));
+    TaskScheduling::setWork(p, 1, 16 * kHour);
+    QCOMPARE(TaskScheduling::taskWork(p, 1), 16 * kHour);   // held on the task
+    QCOMPARE(task(p).workMillis, 16 * kHour);
+    QCOMPARE(task(p).durationMillis, 16 * kHour);           // duration followed
+}
+
+void TstTaskScheduling::assignAfterWork_inheritsTaskWork()
+{
+    // Work entered before any resource is assigned; the first resource assigned
+    // at 100% then picks up that work.
+    Project p = makeProject(0, false);
+    TaskScheduling::removeAssignment(p, 100);
+    TaskScheduling::setWork(p, 1, 16 * kHour);
+    const int newUid = TaskScheduling::addAssignment(p, 1, 11, 1.0);
+    QCOMPARE(assn(p, newUid)->workMillis, 16 * kHour);
+    QCOMPARE(TaskScheduling::taskWork(p, 1), 16 * kHour);
+    QCOMPARE(task(p).durationMillis, 16 * kHour);
 }
 
 QTEST_MAIN(TstTaskScheduling)

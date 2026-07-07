@@ -13,6 +13,7 @@
 #include <QHash>
 #include <QSet>
 #include <QUuid>
+#include <QVector>
 #include <QtEndian>
 
 #include <algorithm>
@@ -837,7 +838,24 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
         fixed.addRaw(metaItems(tTaskFM, kTaskMetaItem, 0, 3), tTaskFD.left(48));
         fixed2.addRaw(metaItems(tTaskF2M, kTaskF2MetaItem, 0, 3), tTaskF2D.left(192));
 
-        for (const schedule::Task &t : in.tasks) {
+        // Emit task rows in UNIQUE-ID order, the way real .mpp files lay them out.
+        // Microsoft Project associates each row's name/fields with its record by unique
+        // id, not by file position; the display ID field (23) carries the outline/sort
+        // position separately. Writing rows in display-ID order instead (as the model
+        // holds them after a reorder, where unique id != id) makes Project mis-match
+        // names to rows -- blank names -- and mis-read the outline of reordered tasks,
+        // which then trips a spurious circular-reference error on open.
+        QVector<const schedule::Task *> tasksByUid;
+        tasksByUid.reserve(in.tasks.size());
+        for (const schedule::Task &t : in.tasks)
+            tasksByUid.append(&t);
+        std::sort(tasksByUid.begin(), tasksByUid.end(),
+                  [](const schedule::Task *a, const schedule::Task *b) {
+                      return a->uniqueId < b->uniqueId;
+                  });
+
+        for (const schedule::Task *taskPtr : tasksByUid) {
+            const schedule::Task &t = *taskPtr;
             QByteArray rec = taskRecTpl;
             QByteArray f2 = taskF2Tpl;
             EntitySink sink;
@@ -1030,9 +1048,32 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
         QByteArray consF2Tail;
         consF2Tail.append(char(0x07));
 
+        // MSPDI carries no per-link UID, so every relation XmlIO parses has
+        // uniqueId == 0. Synthesize a distinct id for those rows only, seeded
+        // above the highest real relation id already present, so synthesized
+        // ids can never collide with a genuine one from the binary reader or
+        // the API.
+        int nextSynthConsUid = 0;
+        for (const schedule::Relation &r : in.relations)
+            nextSynthConsUid = std::max(nextSynthConsUid, r.uniqueId);
+        ++nextSynthConsUid;
+
         for (const schedule::Relation &r : in.relations) {
+            // Never let a zero-uid or self-referencing relation reach the real
+            // .mpp link table: MS Project treats predecessor/successor task uid
+            // 0 (the Project Summary Task) as a circular reference and rejects
+            // the file on next open. Mirrors docserializer.cpp's
+            // readRealRelations guard so no upstream caller of this writer --
+            // XmlIO, MppIO, or future readers -- can produce a file MS Project
+            // won't reopen.
+            if (r.predecessorTaskUid == 0 || r.successorTaskUid == 0
+                    || r.predecessorTaskUid == r.successorTaskUid)
+                continue;
+
+            const int consUid = r.uniqueId > 0 ? r.uniqueId : nextSynthConsUid++;
+
             QByteArray rec(kConsRecSize, '\0');
-            pokeU32(rec, 0, quint32(r.uniqueId));
+            pokeU32(rec, 0, quint32(consUid));
             pokeU32(rec, 4, quint32(r.predecessorTaskUid));
             pokeU32(rec, 8, quint32(r.successorTaskUid));
             pokeU16(rec, 12, quint16(r.type));
@@ -1041,7 +1082,7 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             fixed.addItem(0, rec, consMetaTail);
 
             // Fixed2Data: [relation GUID][predecessor task GUID][successor task GUID].
-            QByteArray f2 = guidFor("cons", r.uniqueId)
+            QByteArray f2 = guidFor("cons", consUid)
                 + guidFor("task", r.predecessorTaskUid)
                 + guidFor("task", r.successorTaskUid);
             fixed2.addItem(0, f2, consF2Tail);

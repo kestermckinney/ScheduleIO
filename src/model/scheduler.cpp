@@ -173,9 +173,10 @@ void Scheduler::reschedule(Project &project)
                 start = cand;
         }
 
-        // No predecessors: the task's current start anchors it in place.
+        // No predecessors: the task's start anchors it in place. When leveling is
+        // active, use the stable un-levelled anchor so its delay doesn't compound.
         if (!havePred)
-            start = t.start;
+            start = t.levelingAnchor.isValid() ? t.levelingAnchor : t.start;
         if (!start.isValid())
             continue;
 
@@ -210,6 +211,11 @@ void Scheduler::reschedule(Project &project)
         }
         if (fixedByFinish)
             continue;
+
+        // Resource leveling pushes the task later by a working-time delay, on top of
+        // whatever predecessors and constraints allow (MS Project's "Leveling Delay").
+        if (t.levelingDelayMillis > 0)
+            start = cal.addWork(start, t.levelingDelayMillis);
 
         t.start = start;
         t.finish = dur > 0 ? cal.addWork(start, dur) : start;

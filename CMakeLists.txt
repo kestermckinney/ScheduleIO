@@ -44,6 +44,7 @@ set(SCHEDULEIO_SOURCES
     src/model/scheduler.cpp
     src/model/workcalendar.cpp
     src/model/taskscheduling.cpp
+    src/model/resourceleveling.cpp
     src/serializer/docserializer.cpp
     src/serializer/mpp12serializer.cpp
     src/serializer/mpp14serializer.cpp
@@ -77,6 +78,7 @@ set(SCHEDULEIO_HEADERS
     src/model/scheduler.h
     src/model/workcalendar.h
     src/model/taskscheduling.h
+    src/model/resourceleveling.h
     src/serializer/docserializer.h
     src/serializer/mpp12serializer.h
     src/serializer/mpp14serializer.h

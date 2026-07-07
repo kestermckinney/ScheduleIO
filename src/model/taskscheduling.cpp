@@ -61,9 +61,13 @@ void sync(Project &p, Task &t)
 
     if (!assns.isEmpty()) {
         qint64 span = 0;
-        for (const Assignment *a : assns)
+        qint64 work = 0;
+        for (const Assignment *a : assns) {
             span = qMax(span, assignmentSpan(*a));
+            work += a->workMillis;
+        }
         t.durationMillis = span;
+        t.workMillis = work;   // keep the task-level total mirroring its assignments
     }
     if (t.start.isValid())
         t.finish = t.durationMillis > 0 ? cal.addWork(t.start, t.durationMillis) : t.start;
@@ -85,10 +89,19 @@ void sync(Project &p, Task &t)
 qint64 TaskScheduling::taskWork(const Project &p, int taskUid)
 {
     qint64 total = 0;
+    bool any = false;
     for (const Assignment &a : p.assignments)
-        if (a.taskUniqueId == taskUid && a.resourceUniqueId >= 0)
+        if (a.taskUniqueId == taskUid && a.resourceUniqueId >= 0) {
             total += a.workMillis;
-    return total;
+            any = true;
+        }
+    if (any)
+        return total;
+    // No assignments: the work is held on the task itself (see setWork).
+    for (const Task &t : p.tasks)
+        if (t.uniqueId == taskUid)
+            return t.workMillis;
+    return 0;
 }
 
 void TaskScheduling::syncTask(Project &p, int taskUid)
@@ -128,8 +141,18 @@ void TaskScheduling::setWork(Project &p, int taskUid, qint64 workMillis)
         return;
     workMillis = qMax<qint64>(0, workMillis);
     const QList<Assignment *> assns = assignmentsOf(p, taskUid);
-    if (assns.isEmpty())
-        return;   // work lives on assignments; nothing to hold it
+    if (assns.isEmpty()) {
+        // No resources yet: the task itself holds the Work, like MS Project's
+        // task-level Work. With an implied single 100%-units resource work equals
+        // span, so the duration follows the work unless the duration is fixed. A
+        // resource assigned later inherits this work (see addAssignment).
+        t->workMillis = workMillis;
+        if (t->taskType != 1)   // not Fixed Duration
+            t->durationMillis = workMillis;
+        t->milestone = t->durationMillis == 0;
+        sync(p, *t);
+        return;
+    }
 
     // Distribute the new total proportionally to the current work, falling
     // back to units when the task had no work yet.
@@ -281,6 +304,9 @@ void TaskScheduling::removeAssignment(Project &p, int assignmentUid)
 
     const bool effortDriven = t->effortDriven || t->taskType == 2;
     const QList<Assignment *> assns = assignmentsOf(p, t->uniqueId);
+    if (assns.isEmpty())
+        t->workMillis = 0;   // last resource gone: the work went with it (sync,
+                             // which holds task-level work when empty, won't clear it)
     if (effortDriven && !assns.isEmpty() && removed.workMillis > 0) {
         // The survivors absorb the departed work, proportionally to units.
         double unitsTotal = 0.0;
