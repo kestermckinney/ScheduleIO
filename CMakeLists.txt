@@ -30,6 +30,7 @@ set(SCHEDULEIO_SOURCES
     src/codec/bkndvardata.cpp
     src/codec/propsreader.cpp
     src/codec/mppfieldids.cpp
+    src/codec/viewformat.cpp
     src/model/project.cpp
     src/model/task.cpp
     src/model/resource.cpp
@@ -64,6 +65,7 @@ set(SCHEDULEIO_HEADERS
     src/codec/bkndvardata.h
     src/codec/propsreader.h
     src/codec/mppfieldids.h
+    src/codec/viewformat.h
     src/model/project.h
     src/model/task.h
     src/model/resource.h
@@ -72,6 +74,7 @@ set(SCHEDULEIO_HEADERS
     src/model/relation.h
     src/model/baseline.h
     src/model/customfield.h
+    src/model/viewstyles.h
     src/model/costrate.h
     src/model/availability.h
     src/model/duration.h

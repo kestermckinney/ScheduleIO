@@ -51,6 +51,7 @@ bool Task::operator==(const Task &o) const
         && actualDurationMillis == o.actualDurationMillis
         && actualWorkMillis == o.actualWorkMillis
         && evm == o.evm
+        && rowFormat == o.rowFormat
         && baselines == o.baselines
         && customFields == o.customFields;
 }

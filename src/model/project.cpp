@@ -18,7 +18,8 @@ bool Project::operator==(const Project &o) const
         && resources == o.resources
         && assignments == o.assignments
         && calendars == o.calendars
-        && relations == o.relations;
+        && relations == o.relations
+        && viewStyles == o.viewStyles;
 }
 
 } // namespace schedule

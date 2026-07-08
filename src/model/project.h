@@ -11,6 +11,7 @@
 #include "model/relation.h"
 #include "model/resource.h"
 #include "model/task.h"
+#include "model/viewstyles.h"
 
 #include <QDateTime>
 #include <QList>
@@ -45,6 +46,10 @@ public:
     QList<Assignment> assignments;
     QList<Calendar> calendars;
     QList<Relation> relations;
+
+    // View formatting template (text styles, gridline/date-line and bar colours),
+    // mirroring the Gantt Chart view's stored properties. See ViewStyles.
+    ViewStyles viewStyles;
 
     bool operator==(const Project &o) const;
     bool operator!=(const Project &o) const { return !(*this == o); }

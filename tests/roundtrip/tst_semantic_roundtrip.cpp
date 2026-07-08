@@ -201,12 +201,36 @@ schedule::Project TstSemanticRoundtrip::makeSampleProject()
     // WBS is not stored in the real format: it always reads back as the derived
     // OutlineNumber, so the sample carries the derived values.
     t1.wbs = QStringLiteral("1");
+    // Row formatting (Format > Font): stored as the Gantt view's exceptional
+    // text styles; must survive the CV_iew patch round trip.
+    t1.rowFormat.bold = true;
+    t1.rowFormat.color = 0xC00000;       // dark red text
+    t1.rowFormat.backColor = 0xFFFFCC;   // pale yellow cell fill
+    t1.rowFormat.backPattern = 1;        // solid
+
     schedule::Task t2;
     t2.uniqueId = 2; t2.id = 2; t2.outlineLevel = 1;
     t2.name = QStringLiteral("Implement — 実装");
     t2.milestone = true;
     t2.wbs = QStringLiteral("2");
     p.tasks = { t1, t2 };
+
+    // View style template: written by patching the template's Gantt view
+    // STYLE_DATA in place, so every modelled field must read back identically.
+    // A file always carries view styles, so a written project reads back with
+    // present == true; the sample starts that way to stay round-trippable.
+    p.viewStyles.present = true;
+    p.viewStyles.text[schedule::ViewStyles::Critical].bold = true;
+    p.viewStyles.text[schedule::ViewStyles::Critical].color = 0xCC0000;
+    p.viewStyles.text[schedule::ViewStyles::Summary].bold = true;
+    p.viewStyles.text[schedule::ViewStyles::RowAndColumn].color = 0x202020;
+    p.viewStyles.statusDateLine = { 0xE04040, 3 };
+    p.viewStyles.currentDateLine = { 0x5B7C99, 4 };
+    p.viewStyles.ganttRows = { 0xE2E2E2, 1 };
+    p.viewStyles.taskBar = { 0x9FC5E8, 0x4A7EBB, 0x4A7EBB };
+    p.viewStyles.milestone = { 0x101010, 0x101010, 0x101010 };
+    p.viewStyles.summaryBar = { 0x202020, 0x202020, 0x202020 };
+    p.viewStyles.projectSummaryBar = { 0x808080, 0x808080, 0x808080 };
 
     schedule::Resource r;
     r.uniqueId = 1; r.id = 1; r.name = QStringLiteral("Alice"); r.initials = QStringLiteral("A");

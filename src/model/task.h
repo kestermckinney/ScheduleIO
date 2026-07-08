@@ -7,6 +7,7 @@
 #include "scheduleio_export.h"
 #include "model/baseline.h"
 #include "model/customfield.h"
+#include "model/viewstyles.h"
 
 #include <QDateTime>
 #include <QList>
@@ -97,6 +98,11 @@ public:
     double actualCost = 0.0;
     double remainingCost = 0.0;
     double costVariance = 0.0;
+
+    // Row text formatting (MS Project's Format > Font): emphasis + colours applied
+    // to the task's grid row. Stored in the MPP file as the Gantt Chart view's
+    // per-cell "exceptional" text styles; font family/size are not editable here.
+    TextStyle rowFormat;
 
     // Saved baselines (number 0 = current baseline, 1..10 = saved), present only
     // when the file stores them. Custom ("extended") field values that are set.

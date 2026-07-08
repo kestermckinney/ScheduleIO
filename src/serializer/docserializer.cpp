@@ -12,6 +12,7 @@
 #include "codec/mppfieldids.h"
 #include "codec/propsreader.h"
 #include "codec/streamquartet.h"
+#include "codec/viewformat.h"
 #include "model/duration.h"
 #include "ole/compoundfile.h"
 
@@ -1708,6 +1709,10 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
             if (c.name == defaultCalName) { out.calendarUniqueId = c.uniqueId; break; }
         }
     }
+
+    // Gantt-view formatting: view-wide styles + per-task row formats (CV_iew).
+    // Needs the task list loaded, so it runs last.
+    ViewFormat::read(cf, &out);
     return true;
 }
 
