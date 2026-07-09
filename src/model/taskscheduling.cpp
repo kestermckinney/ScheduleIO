@@ -82,6 +82,24 @@ void sync(Project &p, Task &t)
         a->start = s;
         a->finish = a->workMillis > 0 ? cal.addWork(s, assignmentSpan(*a)) : s;
     }
+
+    // With no real resources, any "unassigned" placeholder row read from a file
+    // mirrors the task: MS Project carries the task's Work on it when one was
+    // entered, otherwise duration x units, with the task's dates. Left stale,
+    // its old work would re-derive the task's duration on import.
+    if (assns.isEmpty()) {
+        for (Assignment &a : p.assignments) {
+            if (a.taskUniqueId != t.uniqueId || a.resourceUniqueId >= 0)
+                continue;
+            const double units = a.units > 0 ? a.units : 1.0;
+            a.workMillis = t.workMillis > 0
+                ? t.workMillis
+                : qint64(std::llround(double(t.durationMillis) * units));
+            a.remainingWorkMillis = qMax<qint64>(0, a.workMillis - a.actualWorkMillis);
+            a.start = t.start;
+            a.finish = t.finish;
+        }
+    }
 }
 
 } // namespace
@@ -245,6 +263,14 @@ int TaskScheduling::addAssignment(Project &p, int taskUid, int resourceUid, doub
     const qint64 oldTotal = taskWork(p, taskUid);
     const bool effortDriven = t->effortDriven || t->taskType == 2;
     const bool hadAssignments = !assignmentsOf(p, taskUid).isEmpty();
+
+    // A real resource replaces the task's "unassigned" placeholder row (negative
+    // resource uid, as read from files). MS Project drops it at this point too;
+    // leaving it in would double-count its (stale) work on export.
+    for (int i = p.assignments.size() - 1; i >= 0; --i)
+        if (p.assignments.at(i).taskUniqueId == taskUid
+            && p.assignments.at(i).resourceUniqueId < 0)
+            p.assignments.removeAt(i);
 
     int nextUid = 1;
     for (const Assignment &a : p.assignments)

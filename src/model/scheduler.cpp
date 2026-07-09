@@ -181,8 +181,9 @@ void Scheduler::reschedule(Project &project)
             continue;
 
         // Constraints (MSPDI codes): 2 = Must Start On, 3 = Must Finish On,
-        // 4 = Start No Earlier Than, 6 = Finish No Earlier Than. ALAP and the
-        // "no later than" constraints are treated as ASAP for now.
+        // 4 = Start No Earlier Than, 5 = Start No Later Than, 6 = Finish No
+        // Earlier Than, 7 = Finish No Later Than. Only ALAP is still treated
+        // as ASAP (it needs a backward pass).
         bool fixedByFinish = false;
         if (t.constraintDate.isValid()) {
             switch (t.constraintType) {
@@ -198,10 +199,23 @@ void Scheduler::reschedule(Project &project)
                 if (t.constraintDate > start)
                     start = t.constraintDate;
                 break;
+            case 5:   // Start No Later Than
+                // Like MS Project with "honor constraints": the constraint wins
+                // over predecessors (which then show negative slack).
+                if (start > t.constraintDate)
+                    start = t.constraintDate;
+                break;
             case 6: { // Finish No Earlier Than
                 const QDateTime s = dur > 0 ? cal.addWork(t.constraintDate, -dur)
                                             : t.constraintDate;
                 if (s.isValid() && s > start)
+                    start = s;
+                break;
+            }
+            case 7: { // Finish No Later Than
+                const QDateTime s = dur > 0 ? cal.addWork(t.constraintDate, -dur)
+                                            : t.constraintDate;
+                if (s.isValid() && start > s)
                     start = s;
                 break;
             }

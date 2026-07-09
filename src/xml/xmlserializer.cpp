@@ -5,12 +5,14 @@
 
 #include "codec/mppfieldids.h"
 #include "model/duration.h"
+#include "model/workcalendar.h"
 
 #include <QDateTime>
 #include <QHash>
 #include <QMetaType>
 #include <QMultiHash>
 #include <QRegularExpression>
+#include <QSet>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
 
@@ -77,7 +79,11 @@ QDateTime parseDateTime(const QString &s)
 
 QString formatDateTime(const QDateTime &dt)
 {
-    return dt.toString(Qt::ISODate);
+    // MSPDI carries local wall-clock times with no timezone marker. Qt::ISODate
+    // appends 'Z' for UTC-spec values (e.g. those decoded from a .mpp), which
+    // real MS Project exports never do and which makes MS Project shift or
+    // reject the value on import. Emit the wall-clock unchanged, no 'Z'.
+    return dt.toString(QStringLiteral("yyyy-MM-ddTHH:mm:ss"));
 }
 
 // Whole numbers print without a decimal point; everything else round-trips at
@@ -730,7 +736,7 @@ void writeCalendar(QXmlStreamWriter &w, const schedule::Calendar &cal)
     w.writeEndElement();
 }
 
-void writeTask(QXmlStreamWriter &w, const schedule::Task &t, const QMultiHash<int, const schedule::Relation *> &linksBySucc)
+void writeTask(QXmlStreamWriter &w, const schedule::Project &in, const schedule::Task &t, const QMultiHash<int, const schedule::Relation *> &linksBySucc)
 {
     w.writeStartElement(QStringLiteral("Task"));
     writeText(w, "UID", QString::number(t.uniqueId));
@@ -746,6 +752,12 @@ void writeTask(QXmlStreamWriter &w, const schedule::Task &t, const QMultiHash<in
         writeText(w, "Finish", formatDateTime(t.finish));
     writeText(w, "Duration", formatIsoDuration(t.durationMillis));
     writeText(w, "DurationFormat", QString::number(t.durationFormat));
+    // Manual dates mirror the scheduled dates (auto-scheduled tasks); real
+    // MS Project exports always carry these alongside Start/Finish.
+    if (t.start.isValid())
+        writeText(w, "ManualStart", formatDateTime(t.start));
+    if (t.finish.isValid())
+        writeText(w, "ManualFinish", formatDateTime(t.finish));
     writeText(w, "Work", formatIsoDuration(t.workMillis));
     writeText(w, "PercentComplete", QString::number(qRound(t.percentComplete * 100.0)));
     writeText(w, "Milestone", t.milestone ? QStringLiteral("1") : QStringLiteral("0"));
@@ -776,10 +788,39 @@ void writeTask(QXmlStreamWriter &w, const schedule::Task &t, const QMultiHash<in
     writeText(w, "ActualCost", formatNumber(t.actualCost));
     writeText(w, "RemainingCost", formatNumber(t.remainingCost));
     writeText(w, "CostVariance", formatNumber(t.costVariance));
-    if (t.actualStart.isValid())
-        writeText(w, "ActualStart", formatDateTime(t.actualStart));
-    if (t.actualFinish.isValid())
-        writeText(w, "ActualFinish", formatDateTime(t.actualFinish));
+    // Progress anchors. MS Project pins a started task at its ActualStart (and
+    // ActualFinish once complete); the Stop/Resume pair records how far actual
+    // work has progressed. Without these a completed task is rescheduled to the
+    // current date on import. Fall back to the scheduled dates when the model
+    // lacks explicit actuals (MS Project always stores an ActualStart once a
+    // task has started).
+    const int pctComplete = qRound(t.percentComplete * 100.0);
+    // Preserve whatever actuals the model carries; only derive a missing one
+    // from the scheduled date when progress implies it must exist.
+    QDateTime actualStart = t.actualStart;
+    if (!actualStart.isValid() && pctComplete > 0)
+        actualStart = t.start;
+    QDateTime actualFinish = t.actualFinish;
+    if (!actualFinish.isValid() && pctComplete >= 100)
+        actualFinish = t.finish;
+    if (actualStart.isValid())
+        writeText(w, "ActualStart", formatDateTime(actualStart));
+    if (actualFinish.isValid())
+        writeText(w, "ActualFinish", formatDateTime(actualFinish));
+    QDateTime stop;
+    if (pctComplete >= 100)
+        stop = actualFinish;
+    else if (pctComplete > 0 && actualStart.isValid()) {
+        const schedule::WorkCalendar cal(in, t.calendarUniqueId >= 0 ? t.calendarUniqueId
+                                                                      : in.calendarUniqueId);
+        stop = t.actualDurationMillis > 0 ? cal.addWork(actualStart, t.actualDurationMillis)
+                                          : actualStart;
+    }
+    if (stop.isValid()) {
+        writeText(w, "Stop", formatDateTime(stop));
+        writeText(w, "Resume", formatDateTime(stop));
+        writeText(w, "ResumeValid", QStringLiteral("0"));
+    }
     writeText(w, "ActualDuration", formatIsoDuration(t.actualDurationMillis));
     writeText(w, "ActualWork", formatIsoDuration(t.actualWorkMillis));
     writeText(w, "BCWS", formatNumber(t.evm.pv));
@@ -1027,14 +1068,52 @@ QByteArray write(const schedule::Project &in, QString *error)
         writeText(w, "Title", in.title);
     if (!in.author.isEmpty())
         writeText(w, "Author", in.author);
+    writeText(w, "ScheduleFromStart", QStringLiteral("1"));
     if (in.startDate.isValid())
         writeText(w, "StartDate", formatDateTime(in.startDate));
     if (in.finishDate.isValid())
         writeText(w, "FinishDate", formatDateTime(in.finishDate));
-    if (in.statusDate.isValid())
+    if (in.statusDate.isValid()) {
         writeText(w, "StatusDate", formatDateTime(in.statusDate));
+        // The "as-of" date MS Project pins reported actuals against; without it
+        // MS Project falls back to today and moves completed work.
+        writeText(w, "CurrentDate", formatDateTime(in.statusDate));
+    }
     if (in.calendarUniqueId >= 0)
         writeText(w, "CalendarUID", QString::number(in.calendarUniqueId));
+
+    // Time defaults, derived from the project calendar's first working weekday.
+    // Without these MS Project falls back to its own settings and re-derives
+    // durations differently than we scheduled them.
+    QTime defStart(8, 0), defFinish(17, 0);
+    int minutesPerDay = 480, workingDaysPerWeek = 5;
+    for (const schedule::Calendar &c : in.calendars) {
+        if (c.uniqueId != in.calendarUniqueId)
+            continue;
+        int days = 0;
+        for (const QList<schedule::TimeRange> &day : c.workingTimes) {
+            if (day.isEmpty())
+                continue;
+            ++days;
+            if (days == 1) {
+                defStart = day.first().start;
+                defFinish = day.last().end;
+                qint64 mins = 0;
+                for (const schedule::TimeRange &tr : day)
+                    mins += tr.start.secsTo(tr.end) / 60;
+                if (mins > 0)
+                    minutesPerDay = int(mins);
+            }
+        }
+        if (days > 0)
+            workingDaysPerWeek = days;
+        break;
+    }
+    writeText(w, "DefaultStartTime", defStart.toString(QStringLiteral("HH:mm:ss")));
+    writeText(w, "DefaultFinishTime", defFinish.toString(QStringLiteral("HH:mm:ss")));
+    writeText(w, "MinutesPerDay", QString::number(minutesPerDay));
+    writeText(w, "MinutesPerWeek", QString::number(minutesPerDay * workingDaysPerWeek));
+    writeText(w, "DaysPerMonth", QStringLiteral("20"));
 
     writeExtendedAttributeDefs(w, in);
 
@@ -1052,17 +1131,66 @@ QByteArray write(const schedule::Project &in, QString *error)
 
     w.writeStartElement(QStringLiteral("Tasks"));
     for (const schedule::Task &t : in.tasks)
-        writeTask(w, t, linksBySucc);
+        writeTask(w, in, t, linksBySucc);
     w.writeEndElement();
 
+    // MSPDI requires unique resource IDs; projects whose resources never got
+    // one (all id 0) are renumbered by position, like MS Project's sheet order.
+    // The "Unassigned" pseudo resource (uid 0) legitimately carries id 0 and is
+    // left alone.
+    bool renumber = false;
+    QSet<int> ids;
+    for (const schedule::Resource &res : in.resources) {
+        if (res.uniqueId <= 0)
+            continue;
+        if (res.id <= 0 || ids.contains(res.id)) { renumber = true; break; }
+        ids.insert(res.id);
+    }
     w.writeStartElement(QStringLiteral("Resources"));
-    for (const schedule::Resource &res : in.resources)
+    int nextId = 1;
+    for (const schedule::Resource &r : in.resources) {
+        schedule::Resource res = r;
+        if (renumber && res.uniqueId > 0)
+            res.id = nextId++;
         writeResource(w, res);
+    }
     w.writeEndElement();
 
-    w.writeStartElement(QStringLiteral("Assignments"));
+    // Tasks that gained a real resource keep no "unassigned" placeholder row
+    // (negative resource uid) in MS Project; a stale one left over from an old
+    // file would double-count its work on import.
+    QSet<int> tasksWithRealAssignment;
     for (const schedule::Assignment &a : in.assignments)
+        if (a.resourceUniqueId >= 0)
+            tasksWithRealAssignment.insert(a.taskUniqueId);
+    QHash<int, const schedule::Task *> taskByUid;
+    for (const schedule::Task &t : in.tasks)
+        taskByUid.insert(t.uniqueId, &t);
+    w.writeStartElement(QStringLiteral("Assignments"));
+    for (const schedule::Assignment &a : in.assignments) {
+        if (a.resourceUniqueId < 0) {
+            if (tasksWithRealAssignment.contains(a.taskUniqueId))
+                continue;
+            // A lone placeholder mirrors its task: MS Project carries the task's
+            // Work on it when one was entered, otherwise duration x units, with
+            // the task's dates. Stale work left in an old file would make
+            // MS Project re-derive the task's duration from it on import.
+            schedule::Assignment fixed = a;
+            if (const schedule::Task *t = taskByUid.value(a.taskUniqueId)) {
+                const double units = fixed.units > 0 ? fixed.units : 1.0;
+                fixed.workMillis = t->workMillis > 0
+                    ? t->workMillis
+                    : qint64(std::llround(double(t->durationMillis) * units));
+                fixed.remainingWorkMillis =
+                    qMax<qint64>(0, fixed.workMillis - fixed.actualWorkMillis);
+                fixed.start = t->start;
+                fixed.finish = t->finish;
+            }
+            writeAssignment(w, fixed);
+            continue;
+        }
         writeAssignment(w, a);
+    }
     w.writeEndElement();
 
     w.writeEndElement();   // Project
