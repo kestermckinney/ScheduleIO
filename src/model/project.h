@@ -59,6 +59,10 @@ public:
     // colours). Falls back to viewStyles when not present.
     ViewStyles teamPlannerStyles;
 
+    // Separate style template for the Calendar view (text styles + bar colours).
+    // Falls back to viewStyles when not present.
+    ViewStyles calendarStyles;
+
     bool operator==(const Project &o) const;
     bool operator!=(const Project &o) const { return !(*this == o); }
 };

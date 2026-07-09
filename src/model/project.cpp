@@ -21,7 +21,8 @@ bool Project::operator==(const Project &o) const
         && relations == o.relations
         && viewStyles == o.viewStyles
         && resourceUsageStyles == o.resourceUsageStyles
-        && teamPlannerStyles == o.teamPlannerStyles;
+        && teamPlannerStyles == o.teamPlannerStyles
+        && calendarStyles == o.calendarStyles;
 }
 
 } // namespace schedule
