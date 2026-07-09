@@ -79,6 +79,18 @@ qt_add_executable(dump_assn probe/dump_assn.cpp)
 target_link_libraries(dump_assn PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_assn PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+qt_add_executable(dump_taskmeta probe/dump_taskmeta.cpp)
+target_link_libraries(dump_taskmeta PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_taskmeta PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(dump_fontbases probe/dump_fontbases.cpp)
+target_link_libraries(dump_fontbases PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_fontbases PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(dump_cview probe/dump_cview.cpp)
+target_link_libraries(dump_cview PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_cview PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
 qt_add_executable(resave probe/resave.cpp)
 target_link_libraries(resave PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(resave PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)

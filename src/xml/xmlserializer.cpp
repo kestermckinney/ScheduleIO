@@ -273,6 +273,10 @@ schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relatio
             t.durationMillis = parseIsoDuration(r.readElementText());
         else if (n == u"DurationFormat")
             t.durationFormat = schedule::Duration::normalizeUnit(r.readElementText().toInt());
+        else if (n == u"Work")
+            t.workMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"LevelingDelay")   // tenths of a minute, like task lag
+            t.levelingDelayMillis = r.readElementText().toLongLong() * 6000;
         else if (n == u"PercentComplete")
             t.percentComplete = r.readElementText().toDouble() / 100.0;
         else if (n == u"Milestone")
@@ -313,6 +317,8 @@ schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relatio
             t.actualCost = r.readElementText().toDouble();
         else if (n == u"RemainingCost")
             t.remainingCost = r.readElementText().toDouble();
+        else if (n == u"CostVariance")
+            t.costVariance = r.readElementText().toDouble();
         else if (n == u"ActualStart")
             t.actualStart = parseDateTime(r.readElementText());
         else if (n == u"ActualFinish")
@@ -380,6 +386,25 @@ schedule::CostRate parseRate(QXmlStreamReader &r)
     return cr;
 }
 
+// One row of the Resource Availability grid. An omitted AvailableFrom/AvailableTo
+// stays an invalid QDateTime (MS Project's open-ended "NA"), matching the model.
+schedule::AvailabilityPeriod parseAvailabilityPeriod(QXmlStreamReader &r)
+{
+    schedule::AvailabilityPeriod p;
+    while (r.readNextStartElement()) {
+        const QStringView n = r.name();
+        if (n == u"AvailableFrom")
+            p.startDate = parseDateTime(r.readElementText());
+        else if (n == u"AvailableTo")
+            p.endDate = parseDateTime(r.readElementText());
+        else if (n == u"AvailableUnits")
+            p.units = r.readElementText().toDouble();
+        else
+            r.skipCurrentElement();
+    }
+    return p;
+}
+
 schedule::Resource parseResource(QXmlStreamReader &r)
 {
     schedule::Resource res;
@@ -411,7 +436,14 @@ schedule::Resource parseResource(QXmlStreamReader &r)
             res.baselines.append(parseBaseline(r));
         else if (n == u"ExtendedAttribute")
             parseExtendedAttribute(r, res.customFields);
-        else if (n == u"Rates") {
+        else if (n == u"AvailabilityPeriods") {
+            while (r.readNextStartElement()) {
+                if (r.name() == u"AvailabilityPeriod")
+                    res.availabilityTable.append(parseAvailabilityPeriod(r));
+                else
+                    r.skipCurrentElement();
+            }
+        } else if (n == u"Rates") {
             while (r.readNextStartElement()) {
                 if (r.name() == u"Rate")
                     res.costRates.append(parseRate(r));
@@ -714,6 +746,7 @@ void writeTask(QXmlStreamWriter &w, const schedule::Task &t, const QMultiHash<in
         writeText(w, "Finish", formatDateTime(t.finish));
     writeText(w, "Duration", formatIsoDuration(t.durationMillis));
     writeText(w, "DurationFormat", QString::number(t.durationFormat));
+    writeText(w, "Work", formatIsoDuration(t.workMillis));
     writeText(w, "PercentComplete", QString::number(qRound(t.percentComplete * 100.0)));
     writeText(w, "Milestone", t.milestone ? QStringLiteral("1") : QStringLiteral("0"));
     writeText(w, "Summary", t.summary ? QStringLiteral("1") : QStringLiteral("0"));
@@ -723,6 +756,9 @@ void writeTask(QXmlStreamWriter &w, const schedule::Task &t, const QMultiHash<in
     writeText(w, "Priority", QString::number(t.priority));
     if (t.deadline.isValid())
         writeText(w, "Deadline", formatDateTime(t.deadline));
+    // Format 8 = elapsed days, what MS Project's own exports carry here.
+    writeText(w, "LevelingDelay", QString::number(t.levelingDelayMillis / 6000));
+    writeText(w, "LevelingDelayFormat", QStringLiteral("8"));
     if (t.calendarUniqueId >= 0)
         writeText(w, "CalendarUID", QString::number(t.calendarUniqueId));
     if (t.lateStart.isValid())
@@ -739,6 +775,7 @@ void writeTask(QXmlStreamWriter &w, const schedule::Task &t, const QMultiHash<in
     writeText(w, "Cost", formatNumber(t.cost));
     writeText(w, "ActualCost", formatNumber(t.actualCost));
     writeText(w, "RemainingCost", formatNumber(t.remainingCost));
+    writeText(w, "CostVariance", formatNumber(t.costVariance));
     if (t.actualStart.isValid())
         writeText(w, "ActualStart", formatDateTime(t.actualStart));
     if (t.actualFinish.isValid())
@@ -794,6 +831,19 @@ void writeResource(QXmlStreamWriter &w, const schedule::Resource &res)
         writeText(w, "Notes", res.notes);
     for (const schedule::Baseline &b : res.baselines)
         writeBaseline(w, b);
+    if (!res.availabilityTable.isEmpty()) {
+        w.writeStartElement(QStringLiteral("AvailabilityPeriods"));
+        for (const schedule::AvailabilityPeriod &p : res.availabilityTable) {
+            w.writeStartElement(QStringLiteral("AvailabilityPeriod"));
+            if (p.startDate.isValid())
+                writeText(w, "AvailableFrom", formatDateTime(p.startDate));
+            if (p.endDate.isValid())
+                writeText(w, "AvailableTo", formatDateTime(p.endDate));
+            writeText(w, "AvailableUnits", formatNumber(p.units));
+            w.writeEndElement();
+        }
+        w.writeEndElement();
+    }
     if (!res.costRates.isEmpty()) {
         w.writeStartElement(QStringLiteral("Rates"));
         for (const schedule::CostRate &cr : res.costRates) {

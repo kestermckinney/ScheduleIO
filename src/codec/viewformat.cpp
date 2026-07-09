@@ -48,10 +48,6 @@ constexpr quint16 kRowFields[] = { 23 /*ID*/, 14 /*NAME*/, 29 /*DURATION*/,
 constexpr quint16 kFieldName = 14;
 constexpr quint32 kTaskFieldBase = 0x0B400000u;
 
-// Change-flag bits of a 44-byte exceptional style record (MPXJ TableFontStyle).
-constexpr quint16 kChgBold = 0x01, kChgUnderline = 0x02, kChgItalic = 0x04,
-                  kChgColor = 0x08, kChgBackColor = 0x40, kChgBackPattern = 0x80;
-
 // ---- little-endian helpers ---------------------------------------------------
 
 quint16 rdU16(const QByteArray &b, int o)
@@ -232,6 +228,14 @@ QByteArray buildProps9(const Props9 &props)
         if (it.data.size() % 2 != 0)
             b.append('\0');
     }
+    // Bytes 0-3 (duplicated at 4-7) are a self-describing "remaining size"
+    // field (block size minus these first 4 bytes). Stale here (e.g. after
+    // appending an item) causes MS Project's own parser to misread/reject
+    // the block when constructing the view -- verified against a block MS
+    // Project itself wrote after growing via Format>Font.
+    const quint32 remaining = quint32(b.size() - 4);
+    wrU32(b, 0, remaining);
+    wrU32(b, 4, remaining);
     return b;
 }
 
@@ -366,17 +370,18 @@ void readColumnProperties(const QByteArray &d, schedule::Project *out)
         if (haveName.value(uid, false) && fieldIndex != kFieldName)
             continue;
 
+        // No separate "changed" bitmask (verified against a record MS Project
+        // itself wrote): style bits are taken at face value, and each color
+        // is either the Automatic sentinel or an explicit RGB value.
         const int bits = uchar(d.at(o + 11));
-        const quint16 change = rdU16(d, o + 40);
         schedule::TextStyle s;
-        s.bold = (change & kChgBold) && (bits & 0x01);
-        s.italic = (change & kChgItalic) && (bits & 0x02);
-        s.underline = (change & kChgUnderline) && (bits & 0x04);
-        s.color = (change & kChgColor) ? rdColor(d, o + 12)
-                                       : schedule::TextStyle::kAutomatic;
-        s.backColor = (change & kChgBackColor) ? rdColor(d, o + 24)
-                                               : schedule::TextStyle::kAutomatic;
-        s.backPattern = (change & kChgBackPattern) ? rdU16(d, o + 36) : 0;
+        s.bold = (bits & 0x01) != 0;
+        s.italic = (bits & 0x02) != 0;
+        s.underline = (bits & 0x04) != 0;
+        s.strikethrough = (bits & 0x08) != 0;
+        s.color = rdColor(d, o + 12);
+        s.backColor = rdColor(d, o + 24);
+        s.backPattern = rdU16(d, o + 36);
         byUid.insert(uid, s);
         if (fieldIndex == kFieldName)
             haveName.insert(uid, true);
@@ -397,17 +402,21 @@ QByteArray buildColumnProperties(const schedule::Project &in)
             QByteArray rec(44, '\0');
             wrU32(rec, 0, quint32(t.uniqueId));
             wrU32(rec, 4, kTaskFieldBase | field);
-            rec[8] = 0;   // font base 0; the font-changed flag stays off
+            // Verified against a record MS Project itself wrote (Format>Font,
+            // bold only, via COM automation): there is no separate "changed"
+            // bitmask -- offset 8 is a constant fontBase=1, offset 36 a
+            // constant backPattern-ish word=1, and offsets 40-43 are a THIRD
+            // color slot (Automatic by default), not flags. "What changed" is
+            // signalled solely by the style bits at +11 and by each color
+            // being the Automatic sentinel or an explicit RGB value.
+            rec[8] = 1;
             rec[11] = char((s.bold ? 0x01 : 0) | (s.italic ? 0x02 : 0)
                            | (s.underline ? 0x04 : 0)
                            | (s.strikethrough ? 0x08 : 0));
             wrColor(rec, 12, s.color);
             wrColor(rec, 24, s.backColor);
-            // Written verbatim: callers set a solid pattern (1) alongside an
-            // explicit background colour or nothing shows in MS Project.
-            wrU16(rec, 36, quint16(s.backPattern));
-            wrU16(rec, 40, quint16(kChgBold | kChgUnderline | kChgItalic
-                                   | kChgColor | kChgBackColor | kChgBackPattern));
+            wrU16(rec, 36, 1);
+            wrColor(rec, 40, schedule::TextStyle::kAutomatic);
             d += rec;
         }
     }
@@ -537,10 +546,17 @@ bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &
                 }
         } else {
             cols->data = colProps;
+            if (cols->flags == 0)
+                cols->flags = 1;   // heal a previously-written zero-flags item
         }
     } else if (!colProps.isEmpty()) {
         PropsItem item;
         item.key = kKeyColumnProperties;
+        // Every Props9 item in real MS-Project-authored Gantt views carries a
+        // nonzero flags value; a freshly-appended item (this key has no prior
+        // entry to inherit flags from) should match that convention rather
+        // than default to 0.
+        item.flags = 1;
         item.data = colProps;
         props.items.append(item);
     }

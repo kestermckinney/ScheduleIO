@@ -195,6 +195,8 @@ schedule::Project TstSemanticRoundtrip::makeSampleProject()
     t1.finish = QDateTime(QDate(2026, 1, 9), QTime(17, 0), Qt::UTC);
     t1.durationMillis = qint64(8) * 3600 * 1000;   // divisible by the duration unit
     t1.percentComplete = 0.5;
+    t1.workMillis = qint64(16) * 3600 * 1000;                // task-level Work
+    t1.levelingDelayMillis = qint64(4) * 3600 * 1000;        // resource-leveling delay
     // Notes are stored as their 8-bit raw RTF source in the real format, so the
     // sample keeps to ASCII (Project itself escapes non-ANSI as \uN in RTF).
     t1.notes = QStringLiteral("{\\rtf1\\ansi Design note - keep it raw.}");

@@ -900,6 +900,17 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             sink.putU16(MppFieldIds::taskInfo.priority, quint16(t.priority));
             sink.putU16(MppFieldIds::taskInfo.taskType, quint16(t.taskType));
             sink.putDate(MppFieldIds::taskInfo.deadline, t.deadline);
+            sink.putWork(MppFieldIds::taskInfo.work, t.workMillis);
+            // LEVELING_DELAY: the template's field map leaves it unassigned
+            // (META, no offset), so the sink cannot place it; store the u32
+            // tenth-minutes as a Var2Data blob keyed by the field id, which the
+            // reader falls back to when the field map has no location.
+            if (t.levelingDelayMillis != 0) {
+                QByteArray lvl;
+                appU32(lvl, quint32(FieldDecoders::encodeDurationTenthMinutes(
+                                t.levelingDelayMillis)));
+                sink.putVarBlob(MppFieldIds::taskInfo.levelingDelay, lvl);
+            }
             sink.putDate(MppFieldIds::taskActual.start, t.actualStart);
             sink.putDate(MppFieldIds::taskActual.finish, t.actualFinish);
             sink.putDuration(MppFieldIds::taskActual.duration, t.actualDurationMillis);

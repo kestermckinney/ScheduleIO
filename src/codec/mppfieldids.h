@@ -69,6 +69,8 @@ struct TaskInfoFields {
     quint16 priority;   // PRIORITY = 25 (u16, 0..1000)
     quint16 taskType;   // TYPE = 128 (u16: 0 Fixed Units / 1 Fixed Duration / 2 Fixed Work)
     quint16 deadline;   // DEADLINE = 437 (MPP timestamp)
+    quint16 work;       // WORK = 0 (double, thousandths-of-minute, like ACTUAL_WORK)
+    quint16 levelingDelay;   // LEVELING_DELAY = 92 (u32 tenths-of-a-minute)
 };
 
 // Task earned-value (PMI/EVM) fields Microsoft Project stores per task. All are

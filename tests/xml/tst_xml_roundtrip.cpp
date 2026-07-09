@@ -55,6 +55,8 @@ void TstXmlRoundtrip::synthetic()
     task.start = p.startDate;
     task.finish = QDateTime(QDate(2026, 1, 12), QTime(17, 0));
     task.durationMillis = 32LL * 3600 * 1000;
+    task.workMillis = 24LL * 3600 * 1000;
+    task.levelingDelayMillis = 2LL * 3600 * 1000;
     task.percentComplete = 0.5;
     task.milestone = false;
     task.constraintType = 4;
@@ -70,6 +72,7 @@ void TstXmlRoundtrip::synthetic()
     task.fixedCost = 100.0;
     task.actualCost = 600.0;
     task.remainingCost = 634.5;
+    task.costVariance = 34.5;
     task.actualStart = task.start;
     task.actualFinish = QDateTime(QDate(2026, 1, 9), QTime(17, 0));
     task.actualDurationMillis = 16LL * 3600 * 1000;
@@ -121,6 +124,14 @@ void TstXmlRoundtrip::synthetic()
     cr.standardRate = 75.0;
     cr.standardRateUnit = 2;
     res.costRates.append(cr);
+    schedule::AvailabilityPeriod avail;
+    avail.startDate = p.startDate;
+    avail.endDate = QDateTime(QDate(2026, 1, 31), QTime(23, 59));
+    avail.units = 0.5;
+    res.availabilityTable.append(avail);
+    schedule::AvailabilityPeriod availOpen;   // open-ended row: both dates "NA"
+    availOpen.units = 1.0;
+    res.availabilityTable.append(availOpen);
     p.resources.append(res);
 
     schedule::Assignment asn;

@@ -134,6 +134,10 @@ QByteArray packTaskExtra(const schedule::Task &t)
     putU16(b, static_cast<quint16>(t.taskType));
     putU32(b, static_cast<quint32>(t.priority));
     putU32(b, encodeTimestampSeconds(t.deadline));
+    // Appended after the original layout (readers guard each field, so older
+    // blobs that stop at the deadline still parse): task Work + leveling delay.
+    putI64(b, t.workMillis);
+    putI64(b, t.levelingDelayMillis);
     return b;
 }
 
@@ -163,6 +167,10 @@ void unpackTaskExtra(const QByteArray &b, schedule::Task &t)
     if (readU32(b, o, &u32v)) t.priority = static_cast<int>(u32v);
     o += 4;
     if (readU32(b, o, &u32v)) t.deadline = decodeTimestampSeconds(u32v);
+    o += 4;
+    getI64(b, o, &t.workMillis);
+    o += 8;
+    getI64(b, o, &t.levelingDelayMillis);
 }
 
 // Value tags for a custom field's QVariant.
@@ -857,6 +865,8 @@ struct TaskExtraOut {
     int *priority = nullptr;       // PRIORITY (u16, 0..1000)
     int *taskType = nullptr;       // TYPE (u16, 0/1/2)
     QDateTime *deadline = nullptr; // DEADLINE (MPP timestamp)
+    qint64 *workMillis = nullptr;          // WORK (double, thousandths-of-minute)
+    qint64 *levelingDelayMillis = nullptr; // LEVELING_DELAY (u32 tenths-of-minute)
 };
 
 void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
@@ -949,6 +959,15 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
     if (extra.deadline) {
         const QDateTime d = getDate(taskInfo.deadline);
         if (d.isValid()) *extra.deadline = d;
+    }
+    if (extra.workMillis) getWork(taskInfo.work, extra.workMillis);
+    if (extra.levelingDelayMillis
+        && !getDuration(taskInfo.levelingDelay, extra.levelingDelayMillis)) {
+        // Field maps commonly leave LEVELING_DELAY unassigned (META, no offset);
+        // our writer then stores it as a Var2Data blob keyed by the field id.
+        quint32 u = 0;
+        if (readU32(var.blobFor(uid, taskInfo.levelingDelay), 0, &u))
+            *extra.levelingDelayMillis = decodeDurationTenthMinutes(static_cast<qint32>(u));
     }
 
     if (baselines) {
@@ -1619,6 +1638,8 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
             ex.actualWorkMillis = &t.actualWorkMillis; ex.evm = &t.evm;
             ex.priority = &t.priority; ex.taskType = &t.taskType;
             ex.deadline = &t.deadline;
+            ex.workMillis = &t.workMillis;
+            ex.levelingDelayMillis = &t.levelingDelayMillis;
             fillCostBaselineCustom(taskLoc, b0, b1, taskVars, uid32, MppFieldIds::kTaskHigh,
                                    MppFieldIds::taskCost, MppFieldIds::taskBaselines,
                                    MppFieldIds::taskCustomFields(), co,
