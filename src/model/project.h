@@ -55,6 +55,10 @@ public:
     // overallocation highlight). Falls back to viewStyles when not present.
     ViewStyles resourceUsageStyles;
 
+    // Separate style template for the Team Planner view (text styles + bar
+    // colours). Falls back to viewStyles when not present.
+    ViewStyles teamPlannerStyles;
+
     bool operator==(const Project &o) const;
     bool operator!=(const Project &o) const { return !(*this == o); }
 };
