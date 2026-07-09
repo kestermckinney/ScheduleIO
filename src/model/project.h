@@ -51,6 +51,10 @@ public:
     // mirroring the Gantt Chart view's stored properties. See ViewStyles.
     ViewStyles viewStyles;
 
+    // Separate style template for the Resource Usage view (text styles + the
+    // overallocation highlight). Falls back to viewStyles when not present.
+    ViewStyles resourceUsageStyles;
+
     bool operator==(const Project &o) const;
     bool operator!=(const Project &o) const { return !(*this == o); }
 };
