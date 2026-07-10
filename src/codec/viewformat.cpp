@@ -21,8 +21,19 @@ constexpr quint32 kKeyStyleData = 574619656u;         // STYLE_DATA
 constexpr quint32 kKeyColumnProperties = 574619660u;  // COLUMN_PROPERTIES
 
 constexpr quint16 kViewPropsType = 6;   // GanttChartView14.PROPERTIES
-constexpr quint16 kViewTypeGantt = 1;   // ViewType.GANTT_CHART
+// MPP view-type codes (u16@112 of the FixedData record). These do NOT match
+// MPXJ's ViewType enum ordinals -- verified against real files by view name.
+constexpr quint16 kViewTypeGantt = 1;
+constexpr quint16 kViewTypeResourceUsage = 15;
+constexpr quint16 kViewTypeTeamPlanner = 9;
+constexpr quint16 kViewTypeCalendar = 13;
 constexpr int kViewRecordSize = 138;    // CV_iew FixedData block size
+
+// Non-Gantt views store text styles in the same STYLE_DATA structure but their
+// gridline/bar sections (and category count) differ and are undecoded, so only
+// the text-style region is round-tripped. Cap the categories we touch to stay
+// well inside every view's text region (never into its gridline section).
+constexpr int kNonGanttTextCategories = 12;
 
 // STYLE_DATA geometry (MPXJ GanttChartView14.processViewProperties).
 constexpr int kTextStyleBase = 26;      // first default text style
@@ -131,10 +142,10 @@ QString rdUtf16(const QByteArray &b, int o, int maxBytes)
 
 // ---- CV_iew navigation ---------------------------------------------------------
 
-// The Gantt Chart view's id in a CV_iew storage, or -1. Mirrors MPXJ
-// MPP14Reader.processViewData: meta item u16@4 is the record's offset into the
-// 138-byte-block FixedData; splitViewFlag u16@110 must be 0, type u16@112 == 1.
-int findGanttViewUid(const QByteArray &fixedMeta, const QByteArray &fixedData)
+// The id of the first non-split view of `viewType` in a CV_iew storage, or -1.
+// Mirrors MPXJ MPP14Reader.processViewData: meta item u16@4 is the record's
+// offset into the 138-byte-block FixedData; splitViewFlag u16@110 must be 0.
+int findViewUid(const QByteArray &fixedMeta, const QByteArray &fixedData, quint16 viewType)
 {
     if (fixedMeta.size() < 16)
         return -1;
@@ -153,7 +164,7 @@ int findGanttViewUid(const QByteArray &fixedMeta, const QByteArray &fixedData)
         const QByteArray rec = fixedData.mid(offset, kViewRecordSize);
         if (rdU16(rec, 110) == 1)
             continue;   // split view container, not a real view
-        if (rdU16(rec, 112) == kViewTypeGantt)
+        if (rdU16(rec, 112) == viewType)
             return int(rdU32(rec, 0));
     }
     return -1;
@@ -348,6 +359,49 @@ void patchStyleData(QByteArray &d, const schedule::ViewStyles &vs)
     }
 }
 
+// Patch only the text-style region, capped at kNonGanttTextCategories so we
+// never write past a smaller view's text region into its gridline section.
+void patchViewTextStyles(QByteArray &d, const schedule::ViewStyles &vs)
+{
+    const int cats = qMin(int(schedule::ViewStyles::TextCategoryCount), kNonGanttTextCategories);
+    if (d.size() < kTextStyleBase + cats * kTextStyleStride)
+        return;
+    for (int i = 0; i < cats; ++i)
+        writeTextStyle(d, kTextStyleBase + i * kTextStyleStride, vs.text[i]);
+}
+
+// Patch the STYLE_DATA text-style bytes IN PLACE within a raw Props9 blob,
+// leaving every other byte (all other items, header, padding) untouched, so a
+// view whose full Props9 layout we don't reproduce still round-trips exactly.
+// Returns the same-size blob, or an empty QByteArray if there's nothing to do.
+QByteArray patchViewTextStylesInBlob(const QByteArray &blob, const schedule::ViewStyles &vs)
+{
+    if (blob.size() < 16)
+        return {};
+    const int count = rdU16(blob, 12);
+    int o = 16;
+    for (int i = 0; i < count; ++i) {
+        if (o + 12 > blob.size())
+            break;
+        const int size = int(rdU32(blob, o));
+        const quint32 key = rdU32(blob, o + 4);
+        o += 12;
+        if (size < 1 || o + size > blob.size())
+            break;
+        if (key == kKeyStyleData) {
+            QByteArray out = blob;
+            QByteArray data = out.mid(o, size);
+            patchViewTextStyles(data, vs);
+            out.replace(o, size, data);
+            return out;
+        }
+        o += size;
+        if (size % 2 != 0)
+            ++o;
+    }
+    return {};
+}
+
 // ---- COLUMN_PROPERTIES (per-task exceptional styles) ----------------------------
 
 void readColumnProperties(const QByteArray &d, schedule::Project *out)
@@ -464,21 +518,26 @@ void read(const CompoundFile &cf, schedule::Project *out)
     if (!out || !cf.hasStorage({ kViewStorage, kCView }))
         return;
 
-    const int viewUid = findGanttViewUid(
-        cf.readStream({ kViewStorage, kCView, QStringLiteral("FixedMeta") }),
-        cf.readStream({ kViewStorage, kCView, QStringLiteral("FixedData") }));
-    if (viewUid < 0)
-        return;
+    const QByteArray fixedMeta = cf.readStream({ kViewStorage, kCView, QStringLiteral("FixedMeta") });
+    const QByteArray fixedData = cf.readStream({ kViewStorage, kCView, QStringLiteral("FixedData") });
 
     BkndVarData vd;
     if (!vd.parse(cf.readStream({ kViewStorage, kCView, QStringLiteral("VarMeta") }),
                   cf.readStream({ kViewStorage, kCView, QStringLiteral("Var2Data") })))
         return;
 
-    Props9 props;
-    if (!parseProps9(vd.blobFor(quint32(viewUid), kViewPropsType), &props))
+    // The Gantt Chart view: full template (text styles + gridlines + bars) plus
+    // the per-task exceptional styles. The other views' styles are not read back
+    // into the model: a written file always carries all standard views (from the
+    // template), so reading their styles would make read(write(x)) != x for any
+    // source that lacked them. Their styles are write-only -- patched into the
+    // output when the app has set them (see patch()).
+    const int ganttUid = findViewUid(fixedMeta, fixedData, kViewTypeGantt);
+    if (ganttUid < 0)
         return;
-
+    Props9 props;
+    if (!parseProps9(vd.blobFor(quint32(ganttUid), kViewPropsType), &props))
+        return;
     if (const PropsItem *style = props.find(kKeyStyleData))
         readStyleData(style->data, &out->viewStyles);
     if (const PropsItem *cols = props.find(kKeyColumnProperties))
@@ -487,7 +546,8 @@ void read(const CompoundFile &cf, schedule::Project *out)
 
 bool wantsPatch(const schedule::Project &in)
 {
-    if (in.viewStyles.present)
+    if (in.viewStyles.present || in.resourceUsageStyles.present
+        || in.teamPlannerStyles.present || in.calendarStyles.present)
         return true;
     for (const schedule::Task &t : in.tasks)
         if (!t.rowFormat.isDefault())
@@ -500,79 +560,105 @@ bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &
     if (!tpl.hasStorage({ kViewStorage, kCView }))
         return false;
 
+    const QByteArray fixedMeta = tpl.readStream({ kViewStorage, kCView, QStringLiteral("FixedMeta") });
+    const QByteArray fixedData = tpl.readStream({ kViewStorage, kCView, QStringLiteral("FixedData") });
     const QByteArray varMeta = tpl.readStream({ kViewStorage, kCView, QStringLiteral("VarMeta") });
     const QByteArray var2 = tpl.readStream({ kViewStorage, kCView, QStringLiteral("Var2Data") });
-    const int viewUid = findGanttViewUid(
-        tpl.readStream({ kViewStorage, kCView, QStringLiteral("FixedMeta") }),
-        tpl.readStream({ kViewStorage, kCView, QStringLiteral("FixedData") }));
-    if (viewUid < 0)
-        return false;
 
     QVector<VarRecord> records;
     if (!parseVarMeta(varMeta, &records))
         return false;
 
-    // Patch the Gantt view's Props9 blob.
-    int propsRecord = -1;
-    for (int i = 0; i < records.size(); ++i)
-        if (records[i].uid == quint32(viewUid) && records[i].typeLow == kViewPropsType) {
-            propsRecord = i;
-            break;
-        }
-    if (propsRecord < 0)
-        return false;
+    auto recordForView = [&](int uid) -> int {
+        for (int i = 0; i < records.size(); ++i)
+            if (records[i].uid == quint32(uid) && records[i].typeLow == kViewPropsType)
+                return i;
+        return -1;
+    };
+    auto parseRecordProps = [&](int recIdx, Props9 *p) -> bool {
+        const int off = int(records[recIdx].offset);
+        const int len = int(rdU32(var2, off));
+        if (len <= 0 || off + 4 + len > var2.size())
+            return false;
+        return parseProps9(var2.mid(off + 4, len), p);
+    };
 
-    const quint32 propsOffset = records[propsRecord].offset;
-    const int propsLen = int(rdU32(var2, int(propsOffset)));
-    if (propsLen <= 0 || int(propsOffset) + 4 + propsLen > var2.size())
-        return false;
+    // recordIndex -> rebuilt Props9 blob.
+    QHash<int, QByteArray> patched;
 
-    Props9 props;
-    if (!parseProps9(var2.mid(int(propsOffset) + 4, propsLen), &props))
-        return false;
+    // Gantt Chart view: full style template + per-task exceptional styles.
+    const int ganttUid = findViewUid(fixedMeta, fixedData, kViewTypeGantt);
+    const int ganttRec = ganttUid >= 0 ? recordForView(ganttUid) : -1;
+    if (ganttRec >= 0) {
+        Props9 props;
+        if (parseRecordProps(ganttRec, &props)) {
+            if (in.viewStyles.present)
+                if (PropsItem *style = props.find(kKeyStyleData))
+                    patchStyleData(style->data, in.viewStyles);
 
-    if (in.viewStyles.present) {
-        if (PropsItem *style = props.find(kKeyStyleData))
-            patchStyleData(style->data, in.viewStyles);
-    }
-
-    const QByteArray colProps = buildColumnProperties(in);
-    if (PropsItem *cols = props.find(kKeyColumnProperties)) {
-        if (colProps.isEmpty()) {
-            for (int i = 0; i < props.items.size(); ++i)
-                if (props.items[i].key == kKeyColumnProperties) {
-                    props.items.removeAt(i);
-                    break;
+            const QByteArray colProps = buildColumnProperties(in);
+            if (PropsItem *cols = props.find(kKeyColumnProperties)) {
+                if (colProps.isEmpty()) {
+                    for (int i = 0; i < props.items.size(); ++i)
+                        if (props.items[i].key == kKeyColumnProperties) {
+                            props.items.removeAt(i);
+                            break;
+                        }
+                } else {
+                    cols->data = colProps;
+                    if (cols->flags == 0)
+                        cols->flags = 1;   // heal a previously-written zero-flags item
                 }
-        } else {
-            cols->data = colProps;
-            if (cols->flags == 0)
-                cols->flags = 1;   // heal a previously-written zero-flags item
+            } else if (!colProps.isEmpty()) {
+                PropsItem item;
+                item.key = kKeyColumnProperties;
+                // Every Props9 item in real MS-Project-authored Gantt views carries
+                // a nonzero flags value; match that rather than default to 0.
+                item.flags = 1;
+                item.data = colProps;
+                props.items.append(item);
+            }
+            patched.insert(ganttRec, buildProps9(props));
         }
-    } else if (!colProps.isEmpty()) {
-        PropsItem item;
-        item.key = kKeyColumnProperties;
-        // Every Props9 item in real MS-Project-authored Gantt views carries a
-        // nonzero flags value; a freshly-appended item (this key has no prior
-        // entry to inherit flags from) should match that convention rather
-        // than default to 0.
-        item.flags = 1;
-        item.data = colProps;
-        props.items.append(item);
     }
 
-    const QByteArray newProps = buildProps9(props);
+    // Resource Usage / Team Planner / Calendar views: text styles only, patched
+    // in place so the rest of each view's (undecoded) Props9 stays byte-identical.
+    const struct { quint16 type; const schedule::ViewStyles *styles; } kOthers[] = {
+        { kViewTypeResourceUsage, &in.resourceUsageStyles },
+        { kViewTypeTeamPlanner, &in.teamPlannerStyles },
+        { kViewTypeCalendar, &in.calendarStyles },
+    };
+    for (const auto &v : kOthers) {
+        if (!v.styles->present)
+            continue;
+        const int uid = findViewUid(fixedMeta, fixedData, v.type);
+        const int rec = uid >= 0 ? recordForView(uid) : -1;
+        if (rec < 0 || patched.contains(rec))
+            continue;
+        const int off = int(records[rec].offset);
+        const int len = int(rdU32(var2, off));
+        if (len <= 0 || off + 4 + len > var2.size())
+            continue;
+        const QByteArray newBlob = patchViewTextStylesInBlob(var2.mid(off + 4, len), *v.styles);
+        if (!newBlob.isEmpty())
+            patched.insert(rec, newBlob);
+    }
+
+    if (patched.isEmpty())
+        return false;   // nothing to change; caller copies the template verbatim
 
     // Rebuild Var2Data with every blob verbatim (in record order) except the
-    // patched props blob, recomputing offsets; then rebuild VarMeta to match.
+    // patched props blobs, recomputing offsets; then rebuild VarMeta to match.
     QByteArray newVar2;
     QByteArray newMeta = varMeta.left(24);
-    for (const VarRecord &r : records) {
+    for (int i = 0; i < records.size(); ++i) {
+        const VarRecord &r = records[i];
         const int oldOff = int(r.offset);
         const int len = int(rdU32(var2, oldOff));
         QByteArray blob;
-        if (&r == &records[propsRecord])
-            blob = newProps;
+        if (patched.contains(i))
+            blob = patched.value(i);
         else if (len >= 0 && oldOff + 4 + len <= var2.size())
             blob = var2.mid(oldOff + 4, len);
 

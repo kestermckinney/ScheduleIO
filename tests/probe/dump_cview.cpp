@@ -11,6 +11,9 @@
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QFile>
+#include <QPair>
+#include <QString>
+#include <QVector>
 #include <QtEndian>
 #include <cstdio>
 
@@ -53,6 +56,7 @@ int main(int argc, char **argv)
     const int fmItems = fixedMeta.size() >= 16 ? int(u32(fixedMeta, 8)) : 0;
     int lastOffset = -1;
     int ganttUid = -1;
+    QVector<QPair<int, int>> views;   // (uid, viewType) for non-split views
     for (int i = 0; i < fmItems; ++i) {
         const int metaOff = 16 + i * 10;
         if (metaOff + 10 > fixedMeta.size()) break;
@@ -63,17 +67,75 @@ int main(int argc, char **argv)
         const quint32 id = u32(fixedData, offset + 0);
         const quint16 split = u16(fixedData, offset + 110);
         const quint16 vtype = u16(fixedData, offset + 112);
-        std::printf("  id=%u split=%u type=%u%s\n", id, split, vtype,
-                    (split == 0 && vtype == 1) ? "  <- GANTT" : "");
-        if (split == 0 && vtype == 1 && ganttUid < 0) {
-            ganttUid = int(id);
-            std::printf("  Gantt FixedData record (138 bytes) @offset %d:", offset);
-            for (int b = 0; b < 138; ++b)
-                std::printf(" %02x", uchar(fixedData.at(offset + b)));
-            std::printf("\n");
+        // The UTF-16 view name starts at offset 4 in the record.
+        QString name;
+        for (int b = 4; b + 1 < 110; b += 2) {
+            const ushort ch = u16(fixedData, offset + b);
+            if (ch == 0) break;
+            name.append(QChar(ch));
+        }
+        std::printf("  id=%u split=%u type=%u name=\"%s\"%s\n", id, split, vtype,
+                    qPrintable(name), (split == 0 && vtype == 1) ? "  <- GANTT" : "");
+        if (split == 0) {
+            views.append({ int(id), int(vtype) });
+            if (vtype == 1 && ganttUid < 0)
+                ganttUid = int(id);
         }
     }
     std::printf("Resolved Gantt view uid = %d\n", ganttUid);
+
+    // For every non-split view, find its PROPERTIES (type=6) var record and dump
+    // the Props9 item keys, flagging STYLE_DATA (574619656) and dumping its first
+    // text-style slots (32-byte stride @ 26) to see if the Gantt layout carries
+    // over to Resource Usage / Calendar / Task Usage views.
+    std::printf("\n-- Per-view Props9 (STYLE_DATA probe) --\n");
+    for (const QPair<int, int> &v : views) {
+        int propsOff = -1, propsLen = -1;
+        for (int i = 0; i < itemCount; ++i) {
+            const int o = 24 + i * 12;
+            if (o + 12 > varMeta.size()) break;
+            if (int(u32(varMeta, o)) == v.first && u16(varMeta, o + 8) == 6) {
+                propsOff = int(u32(varMeta, o + 4));
+                propsLen = int(u32(var2, propsOff));
+                break;
+            }
+        }
+        std::printf("view uid=%d type=%d: ", v.first, v.second);
+        if (propsOff < 0) { std::printf("no PROPERTIES record\n"); continue; }
+        const QByteArray props = var2.mid(propsOff + 4, propsLen);
+        if (props.size() < 16) { std::printf("props too short (%d)\n", props.size()); continue; }
+        const int pc = u16(props, 12);
+        std::printf("propsLen=%d items=%d keys=[", propsLen, pc);
+        int po = 16;
+        int styleOff = -1, styleSize = 0;
+        for (int i = 0; i < pc; ++i) {
+            if (po + 12 > props.size()) break;
+            const quint32 size = u32(props, po);
+            const quint32 key = u32(props, po + 4);
+            po += 12;
+            std::printf("%u(%u) ", key, size);
+            if (key == 574619656u) { styleOff = po; styleSize = int(size); }
+            po += int(size);
+            if (size % 2 != 0) ++po;
+        }
+        std::printf("]\n");
+        if (styleOff >= 0) {
+            std::printf("  STYLE_DATA size=%d; first text slots @26+32n:\n", styleSize);
+            for (int c = 0; c < 12; ++c) {
+                const int so = styleOff + 26 + c * 32;
+                if (so + 32 > props.size() || so + 32 > styleOff + styleSize) break;
+                const int bits = uchar(props.at(so + 3));
+                auto col = [&](int co) -> QString {
+                    if (uchar(props.at(so + co + 3)) != 0) return QStringLiteral("auto");
+                    return QStringLiteral("%1,%2,%3").arg(uchar(props.at(so+co)))
+                        .arg(uchar(props.at(so+co+1))).arg(uchar(props.at(so+co+2)));
+                };
+                std::printf("    [%2d] fontIdx=%u bits=0x%02x color=%-11s back=%-11s pat=%u\n",
+                            c, uchar(props.at(so)), bits, qPrintable(col(4)),
+                            qPrintable(col(16)), u16(props, so + 28));
+            }
+        }
+    }
 
     // Walk every VarMeta record, bounds-check its blob against Var2Data.
     std::printf("\n-- VarMeta records (bounds check) --\n");
