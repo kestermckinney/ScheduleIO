@@ -832,7 +832,6 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     const QByteArray taskF2Tpl = tTaskF2D.mid(192, kTaskF2Block);
     const QByteArray taskF2TailTpl = tTaskF2M.mid(16 + 3 * kTaskF2MetaItem + 8, kTaskF2MetaItem - 8);
     const QByteArray rscRecTpl = tRscFD.mid(48, kRscRecSize);
-    const QByteArray rscMetaTailTpl = tRscFM.mid(16 + 3 * kRscMetaItem + 8, kRscMetaItem - 8);
     if (taskRecTpl.size() != kTaskRecSize || rscRecTpl.size() != kRscRecSize) {
         if (error) *error = QStringLiteral("unexpected MPP14 template record geometry");
         return false;
@@ -1006,7 +1005,21 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                 sink.putVarBlob(kAvailabilityVarKey, availabilityBlob(r.availabilityTable));
             flushVars(sink, vars, MppFieldIds::kResourceHigh);
 
-            fixed.addItem(0x00080000u, rec, rscMetaTailTpl);
+            // FixedMeta tail: live resource rows carry a field-presence bit
+            // pattern the uid-0 stub lacks; with the stub's tail, real MS
+            // Project shows every var-backed column (Name, Initials, ...)
+            // blank even though the Var2Data blobs are present. Pattern from
+            // Average Project.mpp live rows; notes rows additionally set
+            // byte 3 bit 0x80 and byte 27 bit 0x40.
+            QByteArray metaTail(kRscMetaItem - 8, '\0');
+            static const quint8 kRscLiveTail[8] = { 0xE3, 0xFF, 0xFD, 0x3F,
+                                                    0x5C, 0x46, 0x30, 0xC0 };
+            memcpy(metaTail.data(), kRscLiveTail, 8);
+            if (!r.notes.isEmpty()) {
+                metaTail[3] = char(quint8(metaTail[3]) | 0x80);
+                metaTail[27] = char(quint8(metaTail[27]) | 0x40);
+            }
+            fixed.addItem(0x00080000u, rec, metaTail);
             fixed2.addItem(0, QByteArray(kRscF2Block, '\0'));
         }
         writeQuartet("TBkndRsc", fixed, fixed2, vars);

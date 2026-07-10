@@ -139,6 +139,22 @@ summary = "0"). WBS matches 100% (Has Macros 82/83, one outline-gap edge).
   Resource-name recall = 100% (7/7, 48/48, 67/67); max-units 100%. NOTE: STANDARD_RATE (field 6,
   fixed @16) reads **0** — resource rates are NOT a fixed field; they live in cost-rate tables (see
   the cost-rate section below).
+- **Resource FixedMeta tail gates var-field display in real MS Project (2026-07-10).** The 29 tail
+  bytes of a live resource's 37-byte FixedMeta item (past `[flags][offset]`) carry a bit pattern the
+  uid-0 stub row lacks: live rows in Average Project.mpp are `e3 ff fd 3f 5c 46 30 c0` + zeros
+  (tail byte 4 is `5c` or `5d`; rows with notes flip tail byte 3 `3f→bf` and tail byte 27 `00→40`).
+  Writing rows with the stub's "everything absent" tail produces a file our reader and MPXJ read
+  fine, but **real MS Project shows every var-backed column blank** (empty Name/Initials in the
+  Resource Sheet, assignments showing only `[50%]` with no name) — it treats the bits as
+  field-presence flags and never consults the (valid, present) Var2Data blobs. Verified via the
+  dpr2hw3 COM oracle: with the stub tail all 7 names read back empty; with the live-row pattern all
+  7 Name/Initials and 21 task ResourceNames read back correctly. The writer now stamps the live-row
+  pattern (+ notes bits) on every resource row; `tests/probe/dump_rsc.cpp` dumps the TBkndRsc
+  quartet for this kind of ground-truth diff. The FixedMeta item **flags u32** did NOT need to
+  change (stub's `0x00080000` accepted; real files vary `0x000b0000`/`0x000c0000`/...), and
+  all-zero Fixed2Data blocks are also accepted (real rows carry `[GUID][double][GUID]` there —
+  still unwritten, no observed symptom). Unwritten real-file var types 68/69/85/726/739/756/757
+  were not needed for name display either.
 - **Assignments** (`TBkndAssn`, FixedMeta item size **34**, field map `0x00020017`, type high word
   `0x0F40`): UID(0)@0, TASK_UID(1)@4, RESOURCE_UID(2)@8, UNITS(7)@12 (double), WORK(8)@20 (double,
   tenths-of-minute), all block-0 FIXED. Assignment-link recall ≥95% (all XML links found; the `.mpp`

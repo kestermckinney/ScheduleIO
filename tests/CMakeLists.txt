@@ -79,6 +79,10 @@ qt_add_executable(dump_assn probe/dump_assn.cpp)
 target_link_libraries(dump_assn PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_assn PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+qt_add_executable(dump_rsc probe/dump_rsc.cpp)
+target_link_libraries(dump_rsc PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_rsc PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
 qt_add_executable(dump_taskmeta probe/dump_taskmeta.cpp)
 target_link_libraries(dump_taskmeta PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_taskmeta PRIVATE ${CMAKE_SOURCE_DIR}/src)
