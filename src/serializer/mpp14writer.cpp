@@ -487,6 +487,17 @@ bool isDefaultDay(bool isBase, int blobDayIndex, const QList<schedule::TimeRange
         && ranges[1] == schedule::TimeRange{ QTime(13, 0), QTime(17, 0) };
 }
 
+// A range's length in tenths of a minute. An end of midnight means "until the
+// end of the day" (the 24 Hours calendar's 00:00-00:00, Night Shift's
+// 23:00-00:00), mirroring WorkCalendar::toPeriods; a plain msecsTo() would go
+// negative there and silently write a zero-length period.
+int rangeDurationTenths(const schedule::TimeRange &r)
+{
+    constexpr int kMsPerDay = 24 * 60 * 60 * 1000;
+    const int endMs = (r.end == QTime(0, 0)) ? kMsPerDay : r.end.msecsSinceStartOfDay();
+    return qMax(0, endMs - r.start.msecsSinceStartOfDay()) / 6000;
+}
+
 // CALENDAR_DATA blob (var type 8): 7 x 60-byte day blocks (0=Sunday..6=Saturday),
 // then the exceptions section at offset 420. Times are tenths of a minute.
 QByteArray calendarDataBlob(const schedule::Calendar &c, bool isBase, bool *needed)
@@ -511,10 +522,8 @@ QByteArray calendarDataBlob(const schedule::Calendar &c, bool isBase, bool *need
         pokeU16(b, 60 * i + 2, quint16(n));
         for (int p = 0; p < n; ++p) {
             const int startTenths = ranges[p].start.msecsSinceStartOfDay() / 6000;
-            const int durTenths =
-                qMax(0, ranges[p].start.msecsTo(ranges[p].end)) / 6000;
             pokeU16(b, 60 * i + 8 + p * 2, quint16(startTenths));
-            pokeU16(b, 60 * i + 20 + p * 4, quint16(durTenths));
+            pokeU16(b, 60 * i + 20 + p * 4, quint16(rangeDurationTenths(ranges[p])));
         }
     }
 
@@ -536,8 +545,7 @@ QByteArray calendarDataBlob(const schedule::Calendar &c, bool isBase, bool *need
             for (int p = 0; p < n; ++p) {
                 pokeU16(blk, 20 + p * 2,
                         quint16(ex.workingTimes[p].start.msecsSinceStartOfDay() / 6000));
-                pokeU16(blk, 32 + p * 4,
-                        quint16(qMax(0, ex.workingTimes[p].start.msecsTo(ex.workingTimes[p].end)) / 6000));
+                pokeU16(blk, 32 + p * 4, quint16(rangeDurationTenths(ex.workingTimes[p])));
             }
             quint32 nameLen = 0;
             QByteArray nameBytes;
@@ -1156,8 +1164,16 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
 
         for (const schedule::Calendar &c : in.calendars) {
             const bool isBase = (c.baseCalendarUniqueId < 0);
+            // Base calendars other than Standard (uid 1) must use the pattern
+            // real files use for user-created base calendars ("Copy of
+            // Standard": base field 0, flags 0x00020000, meta tail 0x00CF).
+            // The 0xFFFFFFFF/0x00010000/0x00AF shape is what MS Project writes
+            // for its internal "Project 98 Baseline" calendar, and real MS
+            // Project HIDES such rows from the project's base-calendar list.
+            const bool isStandard = isBase && c.uniqueId == 1;
             QByteArray rec(kCalRecSize, '\0');
-            pokeU32(rec, 0, isBase ? 0xFFFFFFFFu : quint32(c.baseCalendarUniqueId));
+            pokeU32(rec, 0, isStandard ? 0xFFFFFFFFu
+                                       : (isBase ? 0u : quint32(c.baseCalendarUniqueId)));
             const quint32 resId = resUidByCalUid.contains(c.uniqueId)
                                        ? quint32(resUidByCalUid.value(c.uniqueId))
                                        : resUidByName.value(c.name, 0);
@@ -1165,10 +1181,11 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             pokeU32(rec, 8, quint32(c.uniqueId));
 
             QByteArray metaTail;
-            appU16(metaTail, c.uniqueId == 1 ? 0x008F : (isBase ? 0x00AF : 0x000E));
-            fixed.addItem(isBase ? 0x00010000u : 0u, rec, metaTail);
+            appU16(metaTail, isStandard ? 0x008F : (isBase ? 0x00CF : 0x000E));
+            fixed.addItem(isStandard ? 0x00010000u : (isBase ? 0x00020000u : 0u),
+                          rec, metaTail);
             QByteArray f2Tail;
-            appU16(f2Tail, isBase ? 0x001E : 0x000E);
+            appU16(f2Tail, isStandard ? 0x001E : 0x000E);
             fixed2.addItem(0, QByteArray(kCalF2Block, '\0'), f2Tail);
 
             if (isBase && !c.name.isEmpty())

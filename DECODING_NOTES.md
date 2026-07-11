@@ -178,6 +178,37 @@ summary = "0"). WBS matches 100% (Has Macros 82/83, one outline-gap edge).
   CALENDAR_DATA (var type **8**): 7 days × 60 bytes, `u16@(60*i)`=default flag, `u16@(60*i+2)`=period
   count (>0 == working), MPP day index 0=Sunday; absent ⇒ default Mon-Fri (0x1F). These fixtures only
   use default working time (no type-8 records present), so the mask validates as Mon-Fri. 100% match.
+- **Base-calendar visibility (2026-07-10, dpr2hw3 COM oracle).** Real MS Project distinguishes two
+  kinds of base-calendar rows and *hides* one from `Project.BaseCalendars` (and the calendar lists):
+  the **Standard** row (uid 1) is `baseID=0xFFFFFFFF, resID=0xFFFFFFFF`, FixedMeta flags
+  `0x00010000`, meta tail `0x008F`, Fixed2Meta tail `0x001E`; a **visible user base calendar**
+  ("Copy of Standard", uid 17 in Average Project.mpp) is `baseID=0x00000000, resID=0xFFFFFFFF`,
+  flags `0x00020000`, meta tail `0x00CF`, Fixed2Meta tail `0x000E`; the `0xFFFFFFFF/0x00010000/
+  0x00AF` shape on a non-Standard uid is what the internal "Used for Microsoft Project 98 Baseline
+  Calendar" row uses, and MS Project **drops such rows from the base-calendar list** (verified:
+  extra base calendars written that way, under any name, never appear; rewritten in the uid-17
+  shape they all do). The reader already treated `baseID==0` as "base". Writer now emits the uid-17
+  shape for every base calendar except uid 1. Known limit: a re-save makes a genuinely internal
+  98-baseline row visible, since the model has no "hidden" flag.
+- **Per-resource calendar rows are synthesized at write time (2026-07-10).** Since the format's
+  only resource→calendar link is the derived per-resource row, both writers (MPP14 via
+  `DocSerializer::write`, MSPDI via `XmlSerializer::write`) run
+  `schedule::materializeResourceCalendars()` on a working copy: any resource pointing at a *base*
+  calendar gets a synthesized derived row (name = resource name, empty week). Resources already
+  pointing at derived rows (i.e. every model read from a real file) and `-1` resources are
+  untouched, so the pass is a no-op for round trips. The inverse,
+  `collapseResourceCalendarPassThroughs()`, folds uncustomized single-referent derived rows back
+  into plain resource→base references — used by ScheduleVault after a read so the UI shows
+  "Standard" instead of a per-resource entry; the library reader itself stays faithful.
+  Unit-tested in `tests/unit/tst_resourcecalendars.cpp` (incl. binary round-trip idempotence).
+- **Working times ending at midnight** (24 Hours' `00:00-00:00`, Night Shift's `23:00-00:00`):
+  `TimeRange.end == QTime(0,0)` means end-of-day everywhere (`WorkCalendar::toPeriods`, both
+  codecs). The MPP writer's day/exception durations must use that convention
+  (`rangeDurationTenths`); a plain `start.msecsTo(end)` goes negative and writes zero-length
+  periods. The reader's `start.addMSecs(dur)` wraps 24:00 back to `QTime(0,0)`, so full-day and
+  cross-midnight periods round-trip. `schedule::Calendar::microsoftDefaults()` builds Standard /
+  24 Hours / Night Shift with Microsoft's exact definitions; `tests/probe/dump_cal.cpp` (parsed),
+  `dump_calraw.cpp` (raw quartet) and `rename_cal.cpp` (rename+resave) are the probes used.
 - **Title / Author**: the standard `\005SummaryInformation` OLE property set ([MS-OLEPS]) — header
   section offset @44, section = [size][count] then (propId, propOffset) pairs; PIDSI_TITLE=2,
   PIDSI_AUTHOR=4; values VT_LPSTR(0x1E, ANSI) / VT_LPWSTR(0x1F, UTF-16), `[u32 len incl NUL][bytes]`.

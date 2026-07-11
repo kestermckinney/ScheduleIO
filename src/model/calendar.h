@@ -62,7 +62,33 @@ public:
 
     bool operator==(const Calendar &o) const;
     bool operator!=(const Calendar &o) const { return !(*this == o); }
+
+    // The three base calendars every new Microsoft Project schedule offers:
+    // Standard (uid 1, the usual project default), 24 Hours (uid 2) and
+    // Night Shift (uid 3), with Microsoft's exact names and working times.
+    static QList<Calendar> microsoftDefaults();
 };
+
+class Project;
+
+// Give every resource that points at a BASE calendar its own derived
+// per-resource calendar row (name = resource name, empty week -- it inherits
+// the base's hours), repointing the resource at it. This is the only
+// representation the .mpp format has for a resource's calendar, so the
+// writers apply it to a working copy before serializing. Resources with
+// calendarUniqueId == -1, already pointing at a derived calendar, or pointing
+// at an unknown uid are left untouched, which makes the pass a no-op for
+// models read back from real files.
+SCHEDULEIO_EXPORT void materializeResourceCalendars(Project &project);
+
+// The inverse, for consumers that want plain references (e.g. ScheduleVault
+// after a read): a derived calendar that customizes nothing (all workingTimes
+// empty, no exceptions -- workingDayMask is ignored, the reader defaults it
+// to 0x1F for blob-less rows), is referenced by exactly one resource, is not
+// the project default, not any task's calendar and not the base of another
+// calendar, collapses to a direct resource -> base reference and is removed.
+// Customized per-resource calendars survive, like in Microsoft Project.
+SCHEDULEIO_EXPORT void collapseResourceCalendarPassThroughs(Project &project);
 
 } // namespace schedule
 

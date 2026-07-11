@@ -1049,9 +1049,16 @@ bool read(const QByteArray &xml, schedule::Project &out, QString *error)
     return true;
 }
 
-QByteArray write(const schedule::Project &in, QString *error)
+QByteArray write(const schedule::Project &original, QString *error)
 {
     Q_UNUSED(error);
+    // Like the .mpp writer: real MS Project exports carry a derived calendar
+    // per resource (the resource's CalendarUID points at it), so synthesize
+    // them on a working copy for resources holding plain base references.
+    schedule::Project inCopy = original;
+    schedule::materializeResourceCalendars(inCopy);
+    const schedule::Project &in = inCopy;
+
     QByteArray bytes;
     QXmlStreamWriter w(&bytes);
     w.setAutoFormatting(true);

@@ -1877,8 +1877,14 @@ bool DocSerializer::write(const schedule::Project &in, CompoundFile &cf, QString
 {
     // MPP.14 writes the real Microsoft Project format (template-based; see
     // mpp14writer.cpp). MPP.12 still uses the scaffold's own container below.
-    if (version() == FormatVersion::Mpp14)
-        return writeMpp14(in, cf, error);
+    if (version() == FormatVersion::Mpp14) {
+        // The format records a resource's calendar only via a per-resource
+        // derived calendar row; synthesize those on a working copy so callers
+        // can keep plain resource -> base-calendar references in the model.
+        schedule::Project p = in;
+        schedule::materializeResourceCalendars(p);
+        return writeMpp14(p, cf, error);
+    }
 
     Q_UNUSED(error);
     cf.addStream({ QStringLiteral("Project"), QStringLiteral("Props") },

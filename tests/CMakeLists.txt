@@ -30,6 +30,7 @@ scheduleio_add_test(tst_duration        unit/tst_duration.cpp)
 scheduleio_add_test(tst_scheduler       unit/tst_scheduler.cpp)
 scheduleio_add_test(tst_workcalendar    unit/tst_workcalendar.cpp)
 scheduleio_add_test(tst_taskscheduling  unit/tst_taskscheduling.cpp)
+scheduleio_add_test(tst_resourcecalendars unit/tst_resourcecalendars.cpp)
 
 # Layer 2 - round-trip (synthetic now; fixture-driven cases self-skip if absent)
 scheduleio_add_test(tst_semantic_roundtrip roundtrip/tst_semantic_roundtrip.cpp)
@@ -78,6 +79,18 @@ target_include_directories(dump_fields PRIVATE ${CMAKE_SOURCE_DIR}/src)
 qt_add_executable(dump_assn probe/dump_assn.cpp)
 target_link_libraries(dump_assn PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_assn PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(dump_calraw probe/dump_calraw.cpp)
+target_link_libraries(dump_calraw PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_calraw PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(rename_cal probe/rename_cal.cpp)
+target_link_libraries(rename_cal PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(rename_cal PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(dump_cal probe/dump_cal.cpp)
+target_link_libraries(dump_cal PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_cal PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
 
 qt_add_executable(dump_rsc probe/dump_rsc.cpp)
 target_link_libraries(dump_rsc PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
