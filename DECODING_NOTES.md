@@ -155,6 +155,31 @@ summary = "0"). WBS matches 100% (Has Macros 82/83, one outline-gap edge).
   all-zero Fixed2Data blocks are also accepted (real rows carry `[GUID][double][GUID]` there —
   still unwritten, no observed symptom). Unwritten real-file var types 68/69/85/726/739/756/757
   were not needed for name display either.
+- **Task row categorisation (why "all text bold" happened) — decoded 2026-07-17.** MS Project
+  routes each row to a text-style category (ProjectSummary/Summary/task) from structural fields,
+  not from any stored per-row font weight. The writer built every row from the template's UID-0
+  project-summary stub, so every row inherited project-summary state and ALL task text rendered in
+  the bold Calibri-12 ProjectSummary style. Byte-bisecting `03_hierarchy_dependencies` (with the
+  dpr2hw3 render oracle) plus field-by-field comparison against `Average Project.mpp` identified
+  the fields, all now written per task:
+  - **Field 31 (u32@88) = remaining duration** (tenth-minutes; == duration at 0% complete, 0 when
+    done). This alone flipped the rendering in the bisect. Matches Average Project 30/30 when
+    computed as `duration - actualDuration`.
+  - **Field 160 (u32@142) = parent task's UNIQUE ID** (-1 for the UID-0 row). The parent of a row
+    is the nearest shallower row above it in DISPLAY order — order by the ID field, which
+    `in.tasks` does not guarantee for reordered files. Matches Average Project 30/30. An
+    inconsistent parent graph is dangerous (crash suspected but not cleanly reproduced — early
+    "crashes" turned out to be COM contention with the logged-on user's session).
+  - **Field 128 (u16@140) = SUMMARY flag**, **field 181 (u16@164) = state flags** (0x35 manual,
+    0x15 summary, 0x07 leaf; Average also shows 0x09 on some leaves — bit meaning unidentified),
+    and **FixedMeta tail byte 4 bit 0x08** = summary presence bit (template stub has it set; must
+    be cleared on non-summary rows).
+  Verified end-to-end: resaved 03 renders summary-bold/leaves-normal in real MS Project, and
+  resaved Average Project opens with correct structure via the COM oracle. Residual cosmetic gap:
+  the ribbon Font box reports "Calibri 12" (genuine files report 11) — clears only when the still
+  unwritten computed fields (early/late dates @104-119/@174, rollups @74/@186, create date @128,
+  Fixed2 double@16 = id+1, Fixed2 dates@46, Fixed2 byte@62) are also genuine; those are candidates
+  for a later increment.
 - **Task FixedMeta advertises notes the same way (2026-07-16).** A task row's notes Var2Data blob
   is ignored by real MS Project (`Task.Notes` returns empty) unless the row's 47-byte FixedMeta
   item carries the notes-presence bits: item byte 44 (tail byte 36) bit `0x10` plus header flags

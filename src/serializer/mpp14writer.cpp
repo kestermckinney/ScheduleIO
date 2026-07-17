@@ -891,6 +891,39 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                       return a->uniqueId < b->uniqueId;
                   });
 
+        // Parent task per row (field 160, u32 at fixed offset 142): the
+        // parent row's UNIQUE ID, where the parent of a row is the nearest
+        // shallower row above it in DISPLAY order -- i.e. ordered by the ID
+        // field (the row number), which in.tasks does not guarantee for
+        // files with reordered unique ids (verified against Average
+        // Project.mpp). The UID-0 project summary has none (-1). MS Project
+        // uses this (not just the SUMMARY flag) to categorise rows: the
+        // template stub's -1 on every row made every row render as a bold
+        // project summary, and an inconsistent parent graph crashes Project
+        // on open.
+        QHash<int, quint32> parentUidOf;   // task uid -> parent's unique id
+        {
+            QVector<const schedule::Task *> byRow;
+            byRow.reserve(in.tasks.size());
+            for (const schedule::Task &t : in.tasks)
+                byRow.append(&t);
+            std::sort(byRow.begin(), byRow.end(),
+                      [](const schedule::Task *a, const schedule::Task *b) {
+                          return a->id < b->id;
+                      });
+            QVector<int> lastAtLevel(34, -1);
+            for (const schedule::Task *t : byRow) {
+                const int lvl = qBound(0, t->outlineLevel, 31);
+                int parent = -1;
+                for (int l = lvl - 1; l >= 0; --l)
+                    if (lastAtLevel[l] >= 0) { parent = lastAtLevel[l]; break; }
+                parentUidOf.insert(t->uniqueId, quint32(parent));
+                lastAtLevel[lvl] = t->uniqueId;
+                for (int l = lvl + 1; l < lastAtLevel.size(); ++l)
+                    lastAtLevel[l] = -1;
+            }
+        }
+
         for (const schedule::Task *taskPtr : tasksByUid) {
             const schedule::Task &t = *taskPtr;
             QByteArray rec = taskRecTpl;
@@ -904,10 +937,28 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             sink.putU32(86, quint32(t.uniqueId));                    // UNIQUE_ID
             sink.putU32(23, quint32(t.id));                          // ID
             sink.putDuration(29, t.durationMillis);                  // DURATION
+            // Field 31 (u32@88): REMAINING duration (equals the full duration
+            // on 0%-complete tasks, 0 on completed ones -- verified against
+            // Average Project.mpp). Leaving it 0 made MS Project categorise
+            // every row as a project-summary and render ALL task text in the
+            // bold Calibri-12 ProjectSummary text style (proved by
+            // byte-bisecting 03_hierarchy_dependencies).
+            sink.putDuration(31, qMax<qint64>(0, t.durationMillis - t.actualDurationMillis));
             sink.putDate(35, t.start);                               // (scheduled) START
             sink.putDate(36, t.finish);                              // (scheduled) FINISH
             sink.putU16(32, encodePercent(t.percentComplete));       // PERCENT_COMPLETE
             sink.putU16(249, quint16(t.outlineLevel));               // OUTLINE_LEVEL
+            // Row-category fields (decoded from summary-vs-leaf diffs of the
+            // mpp_samples ground truth; without them every row inherited the
+            // template's project-summary values and MS Project rendered ALL
+            // task text with the bold Summary text style):
+            sink.putU16(128, t.summary ? 1 : 0);                     // SUMMARY
+            sink.putU32(160, parentUidOf.value(t.uniqueId, quint32(-1)));  // PARENT_TASK_UID
+            // Field 181 (u16@164): scheduling/state flags -- 0x35 on manual
+            // rows, 0x15 for summaries, 0x07 for leaves (matches samples
+            // 01/03/06/09 exactly; Average Project also shows 0x09 on some
+            // leaves, meaning of that bit still unidentified).
+            sink.putU16(181, t.manual ? 0x35 : (t.summary ? 0x15 : 0x07));
             sink.putU16(17, quint16(t.constraintType));              // CONSTRAINT_TYPE
             sink.putDate(18, t.constraintDate);                      // CONSTRAINT_DATE
             // Manual-mode dates (block 1); template default is "no date".
@@ -968,6 +1019,12 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                                            : (quint8(metaTail[2]) & ~0x02));
             metaTail[5] = char(t.effortDriven ? (quint8(metaTail[5]) | 0x08)
                                               : (quint8(metaTail[5]) & ~0x08));
+            // Summary presence bit (tail byte 4 & 0x08): set on summary rows in
+            // every genuine file, clear on leaves/milestones. The template tail
+            // comes from the UID-0 project-summary stub, so it must be cleared
+            // for non-summary rows or MS Project treats every row as a summary.
+            metaTail[4] = char(t.summary ? (quint8(metaTail[4]) | 0x08)
+                                         : (quint8(metaTail[4]) & ~0x08));
             // Notes presence: like the resource rows below, MS Project ignores
             // the notes Var2Data blob unless the row's FixedMeta advertises it
             // -- tail byte 36 bit 0x10 plus header bit 0x00010000 (both taken
