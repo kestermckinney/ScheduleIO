@@ -155,6 +155,12 @@ summary = "0"). WBS matches 100% (Has Macros 82/83, one outline-gap edge).
   all-zero Fixed2Data blocks are also accepted (real rows carry `[GUID][double][GUID]` there —
   still unwritten, no observed symptom). Unwritten real-file var types 68/69/85/726/739/756/757
   were not needed for name display either.
+- **Task FixedMeta advertises notes the same way (2026-07-16).** A task row's notes Var2Data blob
+  is ignored by real MS Project (`Task.Notes` returns empty) unless the row's 47-byte FixedMeta
+  item carries the notes-presence bits: item byte 44 (tail byte 36) bit `0x10` plus header flags
+  bit `0x00010000` — both taken from a row MS Project itself wrote in the `06_unicode_notes`
+  sample. The writer sets both whenever the task has notes; verified via the dpr2hw3 COM oracle
+  (resaved 06 and Average Project both read their notes back).
 - **Assignments** (`TBkndAssn`, FixedMeta item size **34**, field map `0x00020017`, type high word
   `0x0F40`): UID(0)@0, TASK_UID(1)@4, RESOURCE_UID(2)@8, UNITS(7)@12 (double), WORK(8)@20 (double,
   tenths-of-minute), all block-0 FIXED. Assignment-link recall ≥95% (all XML links found; the `.mpp`
@@ -447,9 +453,48 @@ reader doesn't fully parse (calendar-name recall ~1/3 vs the ~100% on our other
 checks for this one fixture (`knownCalendarLayoutGap`) rather than loosen them
 project-wide. Worth investigating if calendar work resumes, but out of scope here.
 
+## Per-cell / per-row text formatting (TABLE_FONT_STYLES, a.k.a. COLUMN_PROPERTIES)
+
+Decoded 2026-07-16 from the regenerated `mpp_samples` fixtures (18 ground-truth
+Name-cell records in `01_font_cell_formatting`, 8 fill records in
+`10_cell_background`) plus a whole-row ground-truth file written by real MS
+Project via `SelectRow` + `Font32Ex`. Gantt-view Props9 item key `0x2240000C`,
+44-byte records:
+
+| off | meaning |
+|-----|---------|
+| 0   | task UniqueID (u32) |
+| 4   | field id: `0x0B400000 \| MPPTaskField index` for one cell, **`0xFFFFFFFF` = the whole row** |
+| 8   | font-base index — into the table at `   214/Props` key `0x03400000` (68-byte entries `[flags u16][pointSize u16][name utf16x32]`; base 3 = stock "Calibri 11") |
+| 11  | style bits: 0x01 bold, 0x02 italic, 0x04 underline, 0x08 strikethrough |
+| 12  | text colour `[r][g][b][flag]` (flag!=0 = Automatic) |
+| 24  | cell background colour, same encoding |
+| 36  | background pattern (u16): 0 transparent, **1 solid**, 2 light dotted, 4 heavy dotted (= MPXJ `BackgroundPattern`; the stored value equals the `Font32Ex` Pattern argument) |
+| 40  | **change mask (u16)** — gates everything: 0x01 bold, 0x02 underline, 0x04 italic, 0x08 text colour, 0x10 font base, 0x20 row height (row records), 0x40 cell colour, 0x80 pattern, 0x100 strikethrough |
+| 42  | uninitialised noise (ignore) |
+
+Hard-won behaviours:
+
+- **Without the right change-mask bits MS Project renders nothing from the
+  record** — this (mask written as an "automatic colour" sentinel = 0) was the
+  long-standing "Format>Font from ScheduleVault doesn't render" bug.
+- The stored pattern rides along as `1` when unchanged; `0x80` is set only for
+  a pattern other than 1. Setting `0x80` with pattern=1 breaks the record.
+- For a whole-row format MS Project writes exactly **two** records: the ID
+  column (`0x0B400017`) and the whole-row record (`0xFFFFFFFF`) — NOT one
+  record per visible column. Our writer mirrors that shape; per-column records
+  beyond the table's real columns (e.g. WORK/PERCENT_COMPLETE) made Project
+  drop all cell fills.
+- The reader collapses records to `Task::rowFormat` with priority whole-row >
+  Name cell > any other cell, applying only mask-gated properties.
+
 ## Diagnostics
 
 - `dump_task <file.mpp>` — hex-dumps `TBkndTask` streams and tallies string-bearing field codes.
 - `dump_props <file.mpp>` — parses `   114/Props`, lists all keys, dumps the task field map as
   28-byte rows.
+- `dump_model <file.mpp|.xml>` — prints the decoded model (tasks with rowFormat, resources,
+  assignments, relations, calendars) for eyeballing against a fixture's XML/manifest.
 - `tst_fixture_cfb` — prints any fixture's full storage tree.
+- `SCHEDULEIO_MPP14_TEMPLATE=<file.mpp>` (env) — makes the MPP14 writer use any real file as
+  its container template; isolates regenerated-stream bugs from template bugs.

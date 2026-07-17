@@ -11,9 +11,7 @@
 #include <QTest>
 #include <QXmlStreamReader>
 
-#ifndef SCHEDULEIO_FIXTURE_DIR
-#define SCHEDULEIO_FIXTURE_DIR ""
-#endif
+#include "fixtureutils.h"
 
 // Layer 3 oracle: custom ("extended") task fields decoded from var/fixed data must
 // agree with the per-task <ExtendedAttribute> values in the MS Project XML export.
@@ -75,11 +73,10 @@ void TstCustomOracle::customMatchesXml_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
-    for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
-        const QString xml = QDir(dir).filePath(QFileInfo(f).completeBaseName() + QStringLiteral(".xml"));
-        if (QFile::exists(xml))
-            QTest::newRow(qPrintable(f)) << QDir(dir).filePath(f) << xml;
+    for (const QString &mpp : fixtures::mppFiles()) {
+        const QString xml = fixtures::xmlSibling(mpp);
+        if (!xml.isEmpty())
+            QTest::newRow(qPrintable(fixtures::label(mpp))) << mpp << xml;
     }
 }
 
@@ -113,8 +110,7 @@ static bool valueMatches(const QVariant &v, const QString &xml)
 
 void TstCustomOracle::customMatchesXml()
 {
-    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
-            .entryList({ QStringLiteral("*.mpp") }, QDir::Files).isEmpty())
+    if (fixtures::mppFiles().isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
 
     QFETCH(QString, mpp);

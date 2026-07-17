@@ -11,9 +11,7 @@
 #include <QTest>
 #include <QXmlStreamReader>
 
-#ifndef SCHEDULEIO_FIXTURE_DIR
-#define SCHEDULEIO_FIXTURE_DIR ""
-#endif
+#include "fixtureutils.h"
 
 // Layer 3 oracle: task and resource notes. MppIO stores the *raw RTF* source while
 // the Microsoft Project XML export stores the *plain text*, so we assert that every
@@ -60,12 +58,77 @@ void TstNotesOracle::notesMatchXml_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
-    for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
-        const QString xml = QDir(dir).filePath(QFileInfo(f).completeBaseName() + QStringLiteral(".xml"));
-        if (QFile::exists(xml))
-            QTest::newRow(qPrintable(f)) << QDir(dir).filePath(f) << xml;
+    for (const QString &mpp : fixtures::mppFiles()) {
+        const QString xml = fixtures::xmlSibling(mpp);
+        if (!xml.isEmpty())
+            QTest::newRow(qPrintable(fixtures::label(mpp))) << mpp << xml;
     }
+}
+
+// Reduce RTF source to its plain text: resolve \uN? / \'hh escapes, map
+// \par|\line|\tab to whitespace, drop other control words and group braces.
+// Just enough fidelity for containment checks against the XML plain text.
+static QString rtfToPlain(const QString &rtf)
+{
+    QString out;
+    out.reserve(rtf.size());
+    int i = 0;
+    const int n = rtf.size();
+    while (i < n) {
+        const QChar c = rtf.at(i);
+        if (c == QLatin1Char('{') || c == QLatin1Char('}')) {
+            ++i;
+            continue;
+        }
+        if (c != QLatin1Char('\\')) {
+            if (c != QLatin1Char('\r') && c != QLatin1Char('\n'))
+                out.append(c);
+            ++i;
+            continue;
+        }
+        // control: \\ \{ \} , \'hh , \uN? , or \word[-]N[ ]
+        if (i + 1 >= n)
+            break;
+        const QChar next = rtf.at(i + 1);
+        if (next == QLatin1Char('\\') || next == QLatin1Char('{') || next == QLatin1Char('}')) {
+            out.append(next);
+            i += 2;
+            continue;
+        }
+        if (next == QLatin1Char('\'') && i + 3 < n) {
+            const int hi = QString(rtf.at(i + 2)).toInt(nullptr, 16);
+            const int lo = QString(rtf.at(i + 3)).toInt(nullptr, 16);
+            out.append(QChar::fromLatin1(char(hi * 16 + lo)));   // cp1252 ~ latin1 for the test corpus
+            i += 4;
+            continue;
+        }
+        int j = i + 1;
+        while (j < n && rtf.at(j).isLetter())
+            ++j;
+        const QString word = rtf.mid(i + 1, j - i - 1);
+        int numStart = j;
+        if (j < n && rtf.at(j) == QLatin1Char('-'))
+            ++j;
+        while (j < n && rtf.at(j).isDigit())
+            ++j;
+        const QString num = rtf.mid(numStart, j - numStart);
+        if (j < n && rtf.at(j) == QLatin1Char(' '))
+            ++j;   // control words eat one trailing space
+        if (word == QLatin1String("u")) {
+            int code = num.toInt();
+            if (code < 0)
+                code += 65536;
+            out.append(QChar(ushort(code)));
+            if (j < n && rtf.at(j) != QLatin1Char('\\'))
+                ++j;   // skip the fallback character after \uN
+        } else if (word == QLatin1String("par") || word == QLatin1String("line")) {
+            out.append(QLatin1Char('\n'));
+        } else if (word == QLatin1String("tab")) {
+            out.append(QLatin1Char('\t'));
+        }
+        i = j;
+    }
+    return out;
 }
 
 // True if every non-empty line of the plain-text note appears in the decoded RTF.
@@ -73,17 +136,17 @@ static bool rtfContainsPlain(const QString &rtf, const QString &plain)
 {
     if (rtf.isEmpty())
         return false;
+    const QString text = rtfToPlain(rtf);
     const QStringList lines = plain.split(QRegularExpression(QStringLiteral("[\\r\\n]+")), Qt::SkipEmptyParts);
     for (const QString &line : lines)
-        if (!rtf.contains(line.trimmed()))
+        if (!text.contains(line.trimmed()))
             return false;
     return true;
 }
 
 void TstNotesOracle::notesMatchXml()
 {
-    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
-            .entryList({ QStringLiteral("*.mpp") }, QDir::Files).isEmpty())
+    if (fixtures::mppFiles().isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
 
     QFETCH(QString, mpp);

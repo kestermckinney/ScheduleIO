@@ -734,9 +734,16 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
 {
     scheduleioEnsureResources();
 
-    QFile tf(QStringLiteral(":/scheduleio/mpp14template.mpp"));
+    // Diagnostic hook: SCHEDULEIO_MPP14_TEMPLATE overrides the embedded
+    // container template with any real .mpp, to isolate whether a rendering
+    // difference comes from the regenerated streams or the template.
+    QString tplPath = QStringLiteral(":/scheduleio/mpp14template.mpp");
+    const QByteArray tplOverride = qgetenv("SCHEDULEIO_MPP14_TEMPLATE");
+    if (!tplOverride.isEmpty())
+        tplPath = QString::fromLocal8Bit(tplOverride);
+    QFile tf(tplPath);
     if (!tf.open(QIODevice::ReadOnly)) {
-        if (error) *error = QStringLiteral("MPP14 template resource missing");
+        if (error) *error = QStringLiteral("MPP14 template missing: %1").arg(tplPath);
         return false;
     }
     CompoundFile tpl;
@@ -797,6 +804,10 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             if (c.uniqueId == in.calendarUniqueId && !c.name.isEmpty()) { defaultCalName = c.name; break; }
         patchPropsString(props, 37748750u, defaultCalName);
     }
+    // Project title (PropsKey 0x02400008). MS Project reads the title from
+    // here, NOT from \005SummaryInformation -- leaving it unpatched made every
+    // written file open as "blank_template" (the template's stale value).
+    patchPropsString(props, 0x02400008u, in.title);
     cf.addStream({ kDataStorage, QStringLiteral("Props") }, props);
     cf.addStream({ summaryName }, summaryInformationStream(in.title, in.author));
 
@@ -957,7 +968,16 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                                            : (quint8(metaTail[2]) & ~0x02));
             metaTail[5] = char(t.effortDriven ? (quint8(metaTail[5]) | 0x08)
                                               : (quint8(metaTail[5]) & ~0x08));
-            fixed.addItem(0x00080000u, rec, metaTail);
+            // Notes presence: like the resource rows below, MS Project ignores
+            // the notes Var2Data blob unless the row's FixedMeta advertises it
+            // -- tail byte 36 bit 0x10 plus header bit 0x00010000 (both taken
+            // from a task row MS Project itself wrote in 06_unicode_notes).
+            quint32 metaHeader = 0x00080000u;
+            if (!t.notes.isEmpty()) {
+                metaTail[36] = char(quint8(metaTail[36]) | 0x10);
+                metaHeader |= 0x00010000u;
+            }
+            fixed.addItem(metaHeader, rec, metaTail);
 
             // Fixed2Meta bit flags: TASK_MODE (manual) int@8 & 0x80.
             QByteArray f2Tail = taskF2TailTpl;

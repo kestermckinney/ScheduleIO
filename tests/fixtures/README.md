@@ -22,9 +22,12 @@ Aim for a corpus covering:
 - `large.mpp` — thousands of tasks (performance/scale)
 - both **MPP.12** (Project 2007) and **MPP.14** (Project 2010+) format versions
 
-`tst_semantic_roundtrip` automatically discovers every `*.mpp` in this directory.
-Until the binary MPP field mapping is reverse-engineered, those cases self-skip
-with a clear message rather than failing.
+Every fixture-driven test discovers `*.mpp`/`*.xml` **recursively** under this
+directory (see `tests/fixtureutils.h`), so sample sets can live in their own
+subfolders — e.g. the generated corpus under `mpp_samples/` (see its README).
+Folders may also carry a `manifest.json` recording per-row text formatting;
+`tst_format_oracle` verifies the decoded model against it, since the XML
+export never contains presentation data.
 
 ## Third-party fixtures
 

@@ -9,7 +9,8 @@ function(scheduleio_add_test name)
     # Link the object library (internal symbols) rather than the DLL's exported
     # ABI, so unit tests can exercise internal classes directly.
     target_link_libraries(${name} PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Test)
-    target_include_directories(${name} PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
+    target_include_directories(${name} PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR})   # fixtureutils.h shared fixture discovery
     # The dynamic-load test needs the actual .dll/.dylib/.so to exist at run time.
     add_dependencies(${name} ScheduleIO)
     # Make the directory holding the real fixtures and the built shared library
@@ -48,6 +49,7 @@ scheduleio_add_test(tst_costrate_oracle oracle/tst_costrate_oracle.cpp)
 scheduleio_add_test(tst_availability_oracle oracle/tst_availability_oracle.cpp)
 scheduleio_add_test(tst_calendar_oracle oracle/tst_calendar_oracle.cpp)
 scheduleio_add_test(tst_assignment_oracle oracle/tst_assignment_oracle.cpp)
+scheduleio_add_test(tst_format_oracle oracle/tst_format_oracle.cpp)
 
 # XmlIO - MS Project compatible XML (MSPDI) read/write over the shared model
 scheduleio_add_test(tst_xml_roundtrip      xml/tst_xml_roundtrip.cpp)
@@ -111,6 +113,10 @@ target_include_directories(dump_cview PRIVATE ${CMAKE_SOURCE_DIR}/src)
 qt_add_executable(resave probe/resave.cpp)
 target_link_libraries(resave PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(resave PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(dump_model probe/dump_model.cpp)
+target_link_libraries(dump_model PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_model PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
 
 qt_add_executable(xml_diff probe/xml_diff.cpp)
 target_link_libraries(xml_diff PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)

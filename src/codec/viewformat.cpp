@@ -48,16 +48,25 @@ constexpr int kBarStylesBase = 2255;
 constexpr int kBarStyleSize = 195;
 constexpr int kStyleDataMinSize = 2255; // enough for text styles + gridlines + bar header
 
-// The exceptional-style record set written per formatted task: the standard
-// Entry-table columns, so the whole visible row picks up the formatting.
-// Values are MPXJ MPPTaskField FIELD_ARRAY indices; the full field id is
-// 0x0B400000 | index.
-constexpr quint16 kRowFields[] = { 23 /*ID*/, 14 /*NAME*/, 29 /*DURATION*/,
-                                   35 /*START*/, 36 /*FINISH*/, 47 /*PREDECESSORS*/,
-                                   49 /*RESOURCE_NAMES*/, 32 /*PERCENT_COMPLETE*/,
-                                   0 /*WORK*/ };
+// Per-cell/row exceptional-style records. Field ids are 0x0B400000 | MPXJ
+// MPPTaskField FIELD_ARRAY index for a single cell; 0xFFFFFFFF means "the
+// whole row". When the user formats an entire row, MS Project itself writes
+// exactly two records: one for the ID column (field 23) and one whole-row
+// record (verified against a file real Project wrote via SelectRow +
+// Font32Ex).
 constexpr quint16 kFieldName = 14;
+constexpr quint16 kFieldId = 23;
 constexpr quint32 kTaskFieldBase = 0x0B400000u;
+constexpr quint32 kFieldWholeRow = 0xFFFFFFFFu;
+
+// Change-mask bits at record offset 40 (decoded from the 01/10 fixture
+// samples and the SelectRow ground truth): what the record actually applies.
+constexpr quint16 kChgBold = 0x01, kChgUnderline = 0x02, kChgItalic = 0x04,
+                  kChgColor = 0x08, kChgFontBase = 0x10, kChgBackColor = 0x40,
+                  kChgPattern = 0x80;
+constexpr quint16 kChgStrike = 0x100;
+constexpr quint16 kChgAnyStyle = kChgBold | kChgUnderline | kChgItalic
+                                 | kChgColor | kChgBackColor | kChgPattern | kChgStrike;
 
 // ---- little-endian helpers ---------------------------------------------------
 
@@ -410,35 +419,50 @@ void readColumnProperties(const QByteArray &d, schedule::Project *out)
     for (int i = 0; i < out->tasks.size(); ++i)
         rowByUid.insert(out->tasks[i].uniqueId, i);
 
-    // One record per (uid, field); collapse to a row-level style, preferring the
-    // Name column's record as the representative when a row has several.
+    // One record per (uid, field). Collapse to a row-level style: a whole-row
+    // record (field 0xFFFFFFFF) is the row's format when present; otherwise
+    // the Name column's record stands in (the common per-cell case).
     QHash<int, schedule::TextStyle> byUid;
-    QHash<int, bool> haveName;
+    QHash<int, int> rank;   // 3 whole-row, 2 Name, 1 other cell
     const int count = d.size() / 44;
     for (int i = 0; i < count; ++i) {
         const int o = i * 44;
         const int uid = int(rdU32(d, o));
         if (!rowByUid.contains(uid))
             continue;
-        const quint16 fieldIndex = quint16(rdU32(d, o + 4) & 0xFFFF);
-        if (haveName.value(uid, false) && fieldIndex != kFieldName)
+        const quint32 field = rdU32(d, o + 4);
+        const bool wholeRow = field == kFieldWholeRow;
+        if (!wholeRow && (field >> 16) != (kTaskFieldBase >> 16))
             continue;
 
-        // No separate "changed" bitmask (verified against a record MS Project
-        // itself wrote): style bits are taken at face value, and each color
-        // is either the Automatic sentinel or an explicit RGB value.
+        // The change mask at +40 gates every property: bits/colours outside
+        // it are leftovers (e.g. a row record written only for a row-height
+        // change carries pattern=1 with everything automatic -- applying that
+        // at face value used to smear junk styles over whole rows).
+        const quint16 mask = rdU16(d, o + 40);
+        if ((mask & kChgAnyStyle) == 0)
+            continue;
+
+        const int newRank = wholeRow ? 3 : (quint16(field & 0xFFFF) == kFieldName ? 2 : 1);
+        if (newRank <= rank.value(uid, 0))
+            continue;
+
         const int bits = uchar(d.at(o + 11));
         schedule::TextStyle s;
-        s.bold = (bits & 0x01) != 0;
-        s.italic = (bits & 0x02) != 0;
-        s.underline = (bits & 0x04) != 0;
-        s.strikethrough = (bits & 0x08) != 0;
-        s.color = rdColor(d, o + 12);
-        s.backColor = rdColor(d, o + 24);
-        s.backPattern = rdU16(d, o + 36);
+        s.bold = (mask & kChgBold) && (bits & 0x01);
+        s.italic = (mask & kChgItalic) && (bits & 0x02);
+        s.underline = (mask & kChgUnderline) && (bits & 0x04);
+        s.strikethrough = (mask & kChgStrike) && (bits & 0x08);
+        if (mask & kChgColor)
+            s.color = rdColor(d, o + 12);
+        if (mask & kChgBackColor)
+            s.backColor = rdColor(d, o + 24);
+        if (mask & (kChgBackColor | kChgPattern))
+            s.backPattern = rdU16(d, o + 36);
+        if (s.backPattern == 0)   // transparent: any stored colour is not drawn
+            s.backColor = schedule::TextStyle::kAutomatic;
         byUid.insert(uid, s);
-        if (fieldIndex == kFieldName)
-            haveName.insert(uid, true);
+        rank.insert(uid, newRank);
     }
 
     for (auto it = byUid.constBegin(); it != byUid.constEnd(); ++it)
@@ -452,25 +476,40 @@ QByteArray buildColumnProperties(const schedule::Project &in)
         const schedule::TextStyle &s = t.rowFormat;
         if (s.isDefault())
             continue;
-        for (quint16 field : kRowFields) {
+
+        // Byte-for-byte the shape MS Project writes for a whole-row format
+        // (SelectRow + Font32Ex ground truth): an ID-column record plus a
+        // whole-row (0xFFFFFFFF) record. Offset 8 is an index into the view
+        // font-base table ("   214/Props" key 0x03400000, 68-byte entries
+        // [flags u16][pointSize u16][name utf16x32]); base 3 is the stock
+        // "Calibri 11" row default. Offsets 40-41 are the change mask gating
+        // what the record applies -- without the right bits MS Project
+        // renders none of it (this was the long-standing "formatting doesn't
+        // render" bug). The stored pattern defaults to 1 (solid) and only
+        // carries the kChgPattern bit when it is something else.
+        const quint16 pat = s.backPattern == 0 ? 1 : quint16(s.backPattern);
+        quint16 changeMask = 0;
+        if (s.bold) changeMask |= kChgBold;
+        if (s.underline) changeMask |= kChgUnderline;
+        if (s.italic) changeMask |= kChgItalic;
+        if (s.color != schedule::TextStyle::kAutomatic) changeMask |= kChgColor;
+        if (s.backColor != schedule::TextStyle::kAutomatic) changeMask |= kChgBackColor;
+        if (pat != 1) changeMask |= kChgPattern;
+        if (s.strikethrough) changeMask |= kChgStrike;
+
+        const quint32 fields[] = { kTaskFieldBase | kFieldId, kFieldWholeRow };
+        for (quint32 field : fields) {
             QByteArray rec(44, '\0');
             wrU32(rec, 0, quint32(t.uniqueId));
-            wrU32(rec, 4, kTaskFieldBase | field);
-            // Verified against a record MS Project itself wrote (Format>Font,
-            // bold only, via COM automation): there is no separate "changed"
-            // bitmask -- offset 8 is a constant fontBase=1, offset 36 a
-            // constant backPattern-ish word=1, and offsets 40-43 are a THIRD
-            // color slot (Automatic by default), not flags. "What changed" is
-            // signalled solely by the style bits at +11 and by each color
-            // being the Automatic sentinel or an explicit RGB value.
-            rec[8] = 1;
+            wrU32(rec, 4, field);
+            rec[8] = 3;
             rec[11] = char((s.bold ? 0x01 : 0) | (s.italic ? 0x02 : 0)
                            | (s.underline ? 0x04 : 0)
                            | (s.strikethrough ? 0x08 : 0));
             wrColor(rec, 12, s.color);
             wrColor(rec, 24, s.backColor);
-            wrU16(rec, 36, 1);
-            wrColor(rec, 40, schedule::TextStyle::kAutomatic);
+            wrU16(rec, 36, pat);
+            wrU16(rec, 40, changeMask);
             d += rec;
         }
     }

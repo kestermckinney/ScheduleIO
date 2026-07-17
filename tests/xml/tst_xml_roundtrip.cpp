@@ -8,9 +8,7 @@
 #include <QFileInfo>
 #include <QTest>
 
-#ifndef SCHEDULEIO_FIXTURE_DIR
-#define SCHEDULEIO_FIXTURE_DIR ""
-#endif
+#include "fixtureutils.h"
 
 // XmlIO must be a faithful reader/writer of the MSPDI model: parsing an XML
 // document, writing it back out, and parsing it again must yield an identical
@@ -184,9 +182,8 @@ void TstXmlRoundtrip::synthetic()
 void TstXmlRoundtrip::fixtures_data()
 {
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
-    for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.xml") }, QDir::Files))
-        QTest::newRow(qPrintable(f)) << QDir(dir).filePath(f);
+    for (const QString &xml : fixtures::xmlFiles())
+        QTest::newRow(qPrintable(fixtures::label(xml))) << xml;
 }
 
 void TstXmlRoundtrip::fixtures()

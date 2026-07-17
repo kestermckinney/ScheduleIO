@@ -10,9 +10,7 @@
 #include <QTest>
 #include <QXmlStreamReader>
 
-#ifndef SCHEDULEIO_FIXTURE_DIR
-#define SCHEDULEIO_FIXTURE_DIR ""
-#endif
+#include "fixtureutils.h"
 
 // Layer 3 oracle: assignment scheduling fields decoded from the binary .mpp
 // (units, work, actual/remaining work, start/finish, delay) must agree with
@@ -29,6 +27,7 @@ namespace {
 
 struct XmlAssn {
     double units = 1.0;
+    bool hasUnits = false;   // MSPDI omits <Units> for cost-resource assignments
     qint64 work = 0, actualWork = 0, remainingWork = 0, delay = 0;
     QDateTime start, finish;
 };
@@ -54,18 +53,16 @@ void TstAssignmentOracle::assignmentsMatchXml_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
-    for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
-        const QString xml = QDir(dir).filePath(QFileInfo(f).completeBaseName() + QStringLiteral(".xml"));
-        if (QFile::exists(xml))
-            QTest::newRow(qPrintable(f)) << QDir(dir).filePath(f) << xml;
+    for (const QString &mpp : fixtures::mppFiles()) {
+        const QString xml = fixtures::xmlSibling(mpp);
+        if (!xml.isEmpty())
+            QTest::newRow(qPrintable(fixtures::label(mpp))) << mpp << xml;
     }
 }
 
 void TstAssignmentOracle::assignmentsMatchXml()
 {
-    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
-            .entryList({ QStringLiteral("*.mpp") }, QDir::Files).isEmpty())
+    if (fixtures::mppFiles().isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
 
     QFETCH(QString, mpp);
@@ -88,7 +85,7 @@ void TstAssignmentOracle::assignmentsMatchXml()
                 else if (inAssn && (n == u"Baseline" || n == u"TimephasedData"))
                     r.skipCurrentElement();   // their Start/Finish/Work are NOT the assignment's
                 else if (inAssn && n == u"UID" && uid < 0) uid = r.readElementText().toInt();
-                else if (inAssn && n == u"Units") cur.units = r.readElementText().toDouble();
+                else if (inAssn && n == u"Units") { cur.units = r.readElementText().toDouble(); cur.hasUnits = true; }
                 else if (inAssn && n == u"Work") cur.work = isoDurationMs(r.readElementText());
                 else if (inAssn && n == u"ActualWork") cur.actualWork = isoDurationMs(r.readElementText());
                 else if (inAssn && n == u"RemainingWork") cur.remainingWork = isoDurationMs(r.readElementText());
@@ -123,7 +120,7 @@ void TstAssignmentOracle::assignmentsMatchXml()
         if (it == xmlAssn.constEnd())
             continue;
         ++total;
-        unitsOk     += qAbs(a.units - it->units) < 0.001;
+        unitsOk     += !it->hasUnits || qAbs(a.units - it->units) < 0.001;
         workOk      += a.workMillis == it->work;
         actualOk    += a.actualWorkMillis == it->actualWork;
         remainingOk += a.remainingWorkMillis == it->remainingWork;

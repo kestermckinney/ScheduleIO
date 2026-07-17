@@ -9,9 +9,7 @@
 #include <QTest>
 #include <QtEndian>
 
-#ifndef SCHEDULEIO_FIXTURE_DIR
-#define SCHEDULEIO_FIXTURE_DIR ""
-#endif
+#include "fixtureutils.h"
 
 class TstPropsReader : public QObject
 {
@@ -63,16 +61,13 @@ void TstPropsReader::rejectsTooShort()
 void TstPropsReader::readsEntityNameListFromFixtures_data()
 {
     QTest::addColumn<QString>("path");
-    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
-    for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files))
-        QTest::newRow(qPrintable(f)) << QDir(dir).filePath(f);
+    for (const QString &mpp : fixtures::mppFiles())
+        QTest::newRow(qPrintable(fixtures::label(mpp))) << mpp;
 }
 
 void TstPropsReader::readsEntityNameListFromFixtures()
 {
-    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
-            .entryList({ QStringLiteral("*.mpp") }, QDir::Files)
-            .isEmpty())
+    if (fixtures::mppFiles().isEmpty())
         QSKIP("no .mpp fixtures present");
 
     QFETCH(QString, path);

@@ -11,9 +11,7 @@
 #include <QTest>
 #include <QXmlStreamReader>
 
-#ifndef SCHEDULEIO_FIXTURE_DIR
-#define SCHEDULEIO_FIXTURE_DIR ""
-#endif
+#include "fixtureutils.h"
 
 // Layer 3 oracle: task Start / Finish / Duration decoded from the binary .mpp
 // FixedData must agree with the MS Project XML export, matched by unique id.
@@ -83,11 +81,10 @@ void TstTaskDatesOracle::datesMatchXml_data()
 {
     QTest::addColumn<QString>("mpp");
     QTest::addColumn<QString>("xml");
-    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
-    for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files)) {
-        const QString xml = QDir(dir).filePath(QFileInfo(f).completeBaseName() + QStringLiteral(".xml"));
-        if (QFile::exists(xml))
-            QTest::newRow(qPrintable(f)) << QDir(dir).filePath(f) << xml;
+    for (const QString &mpp : fixtures::mppFiles()) {
+        const QString xml = fixtures::xmlSibling(mpp);
+        if (!xml.isEmpty())
+            QTest::newRow(qPrintable(fixtures::label(mpp))) << mpp << xml;
     }
 }
 
@@ -100,8 +97,7 @@ static bool sameInstant(const QDateTime &decoded, const QDateTime &xml)
 
 void TstTaskDatesOracle::datesMatchXml()
 {
-    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
-            .entryList({ QStringLiteral("*.mpp") }, QDir::Files).isEmpty())
+    if (fixtures::mppFiles().isEmpty())
         QSKIP("no .mpp/.xml fixture pairs present");
 
     QFETCH(QString, mpp);

@@ -75,6 +75,15 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
                              .arg(x.customFields.at(n).name, x.customFields.at(n).value.toString(),
                                   y.customFields.at(n).name, y.customFields.at(n).value.toString());
         }
+        if (x.rowFormat != y.rowFormat)
+            f << QStringLiteral("rowFormat b%1%2 i%3%4 u%5%6 s%7%8 color %9/%10 back %11/%12 pat %13/%14")
+                     .arg(x.rowFormat.bold).arg(y.rowFormat.bold)
+                     .arg(x.rowFormat.italic).arg(y.rowFormat.italic)
+                     .arg(x.rowFormat.underline).arg(y.rowFormat.underline)
+                     .arg(x.rowFormat.strikethrough).arg(y.rowFormat.strikethrough)
+                     .arg(x.rowFormat.color).arg(y.rowFormat.color)
+                     .arg(x.rowFormat.backColor).arg(y.rowFormat.backColor)
+                     .arg(x.rowFormat.backPattern).arg(y.rowFormat.backPattern);
         d << QStringLiteral("task[%1] uid %2: %3").arg(i).arg(x.uniqueId).arg(f.join(QStringLiteral(", ")));
         if (d.size() > 6)
             break;
@@ -162,9 +171,7 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
     return d.join(QStringLiteral("\n"));
 }
 
-#ifndef SCHEDULEIO_FIXTURE_DIR
-#define SCHEDULEIO_FIXTURE_DIR ""
-#endif
+#include "fixtureutils.h"
 
 class TstSemanticRoundtrip : public QObject
 {
@@ -298,19 +305,15 @@ void TstSemanticRoundtrip::writerIsDeterministic()
 void TstSemanticRoundtrip::realFixtures_data()
 {
     QTest::addColumn<QString>("path");
-    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
-    const QStringList mpps = QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files);
-    for (const QString &f : mpps)
-        QTest::newRow(qPrintable(f)) << QDir(dir).filePath(f);
+    for (const QString &mpp : fixtures::mppFiles())
+        QTest::newRow(qPrintable(fixtures::label(mpp))) << mpp;
 }
 
 void TstSemanticRoundtrip::realFixtures()
 {
     // With no fixtures present this slot is still invoked once with no data row;
     // skip cleanly before touching QFETCH.
-    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
-            .entryList({ QStringLiteral("*.mpp") }, QDir::Files)
-            .isEmpty())
+    if (fixtures::mppFiles().isEmpty())
         QSKIP("no .mpp fixtures present yet (add real files under tests/fixtures)");
 
     QFETCH(QString, path);

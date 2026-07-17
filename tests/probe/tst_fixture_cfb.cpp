@@ -7,9 +7,7 @@
 #include <QFile>
 #include <QTest>
 
-#ifndef SCHEDULEIO_FIXTURE_DIR
-#define SCHEDULEIO_FIXTURE_DIR ""
-#endif
+#include "fixtureutils.h"
 
 // Validates the real MS-CFB reader against the user's real .mpp fixtures, and
 // prints each file's storage tree. This is how we learn the actual internal
@@ -47,16 +45,13 @@ void TstFixtureCfb::dump(const CompoundFile &cf, const QStringList &path, int de
 void TstFixtureCfb::parsesRealContainers_data()
 {
     QTest::addColumn<QString>("path");
-    const QString dir = QStringLiteral(SCHEDULEIO_FIXTURE_DIR);
-    for (const QString &f : QDir(dir).entryList({ QStringLiteral("*.mpp") }, QDir::Files))
-        QTest::newRow(qPrintable(f)) << QDir(dir).filePath(f);
+    for (const QString &mpp : fixtures::mppFiles())
+        QTest::newRow(qPrintable(fixtures::label(mpp))) << mpp;
 }
 
 void TstFixtureCfb::parsesRealContainers()
 {
-    if (QDir(QStringLiteral(SCHEDULEIO_FIXTURE_DIR))
-            .entryList({ QStringLiteral("*.mpp") }, QDir::Files)
-            .isEmpty())
+    if (fixtures::mppFiles().isEmpty())
         QSKIP("no .mpp fixtures present");
 
     QFETCH(QString, path);
