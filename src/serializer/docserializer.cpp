@@ -139,6 +139,7 @@ QByteArray packTaskExtra(const schedule::Task &t)
     putI64(b, t.workMillis);
     putI64(b, t.levelingDelayMillis);
     putU8(b, t.active ? 1 : 0);   // appended; older blobs default active=true on read
+    putI32(b, t.barColor);        // per-task bar colour (kAutomatic = -1)
     return b;
 }
 
@@ -175,6 +176,10 @@ void unpackTaskExtra(const QByteArray &b, schedule::Task &t)
     o += 8;
     if (o < b.size())
         t.active = b.at(o) != 0;
+    o += 1;
+    quint32 bc = 0;
+    if (readU32(b, o, &bc))
+        t.barColor = static_cast<qint32>(bc);
 }
 
 // Value tags for a custom field's QVariant.

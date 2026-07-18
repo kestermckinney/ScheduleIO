@@ -110,6 +110,11 @@ public:
     // per-cell "exceptional" text styles; font family/size are not editable here.
     TextStyle rowFormat;
 
+    // Per-task Gantt bar colour override (MS Project's Format > Bar). kAutomatic (-1)
+    // means "use the category bar style". Round-trips via XML/scaffold; MPP-binary
+    // persistence of a per-task bar format is a known gap.
+    qint32 barColor = TextStyle::kAutomatic;
+
     // Saved baselines (number 0 = current baseline, 1..10 = saved), present only
     // when the file stores them. Custom ("extended") field values that are set.
     QList<Baseline> baselines;

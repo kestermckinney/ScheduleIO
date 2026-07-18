@@ -53,6 +53,7 @@ bool Task::operator==(const Task &o) const
         && actualWorkMillis == o.actualWorkMillis
         && evm == o.evm
         && rowFormat == o.rowFormat
+        && barColor == o.barColor
         && baselines == o.baselines
         && customFields == o.customFields;
 }

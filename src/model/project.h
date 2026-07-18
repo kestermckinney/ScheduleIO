@@ -63,6 +63,11 @@ public:
     // Falls back to viewStyles when not present.
     ViewStyles calendarStyles;
 
+    // User-chosen accent colour for the report charts' primary series (0xRRGGBB), or
+    // TextStyle::kAutomatic to keep the built-in blue. Persisted via XML/scaffold; MPP
+    // persistence is a known gap.
+    qint32 reportAccentColor = TextStyle::kAutomatic;
+
     bool operator==(const Project &o) const;
     bool operator!=(const Project &o) const { return !(*this == o); }
 };
