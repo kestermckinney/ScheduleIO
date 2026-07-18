@@ -10,6 +10,7 @@
 #include "model/viewstyles.h"
 
 #include <QDateTime>
+#include <QHash>
 #include <QList>
 #include <QString>
 
@@ -114,6 +115,12 @@ public:
     // means "use the category bar style". Round-trips via XML/scaffold; MPP-binary
     // persistence of a per-task bar format is a known gap.
     qint32 barColor = TextStyle::kAutomatic;
+
+    // Per-cell (per-column) text/background formatting, keyed by a column identifier the
+    // GUI controls. Overlays `rowFormat` for that one column only, so a single cell can be
+    // coloured independently (MS Project's per-cell background/text colour). MPP-binary
+    // persistence is a known gap.
+    QHash<QString, TextStyle> cellFormats;
 
     // Saved baselines (number 0 = current baseline, 1..10 = saved), present only
     // when the file stores them. Custom ("extended") field values that are set.

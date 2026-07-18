@@ -54,6 +54,7 @@ bool Task::operator==(const Task &o) const
         && evm == o.evm
         && rowFormat == o.rowFormat
         && barColor == o.barColor
+        && cellFormats == o.cellFormats
         && baselines == o.baselines
         && customFields == o.customFields;
 }
