@@ -27,18 +27,25 @@ public:
     qint32 color = kAutomatic;       // 0xRRGGBB, or kAutomatic
     qint32 backColor = kAutomatic;   // cell background, or kAutomatic
     int backPattern = 0;             // MPP BackgroundPattern (0 transparent, 1 solid, ...)
+    // Font family/size overrides (empty/0 = inherit the view's font base). MS Project's
+    // MPP stores fonts via a font-base table; XML/scaffold round-trip them directly,
+    // while MPP-binary persistence of a per-row font is a known gap.
+    QString fontName;
+    int fontSize = 0;                // points; 0 = inherit
 
     bool isDefault() const
     {
         return !bold && !italic && !underline && !strikethrough
-            && color == kAutomatic && backColor == kAutomatic && backPattern == 0;
+            && color == kAutomatic && backColor == kAutomatic && backPattern == 0
+            && fontName.isEmpty() && fontSize == 0;
     }
 
     bool operator==(const TextStyle &o) const
     {
         return bold == o.bold && italic == o.italic && underline == o.underline
             && strikethrough == o.strikethrough && color == o.color
-            && backColor == o.backColor && backPattern == o.backPattern;
+            && backColor == o.backColor && backPattern == o.backPattern
+            && fontName == o.fontName && fontSize == o.fontSize;
     }
     bool operator!=(const TextStyle &o) const { return !(*this == o); }
 };

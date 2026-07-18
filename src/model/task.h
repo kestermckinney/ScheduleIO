@@ -60,6 +60,12 @@ public:
     QString wbs;
     QString notes;   // raw RTF source of the task's notes (empty if none)
 
+    // Inactive tasks (MS Project Professional's Task > Inactivate) stay in the plan but
+    // are excluded from scheduling: they impose no constraints on successors and don't
+    // count toward rollups, resource allocation, leveling, cost or earned value. Drawn
+    // greyed with strikethrough. `active` defaults true (a normal task).
+    bool active = true;
+
     // Scheduling behaviour (Task Information dialog fields).
     bool manual = false;         // manually scheduled (vs auto scheduled)
     qint64 levelingDelayMillis = 0;   // working-time delay added by resource leveling;

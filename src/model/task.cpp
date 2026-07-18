@@ -29,6 +29,7 @@ bool Task::operator==(const Task &o) const
         && constraintDate == o.constraintDate
         && wbs == o.wbs
         && notes == o.notes
+        && active == o.active
         && manual == o.manual
         && levelingDelayMillis == o.levelingDelayMillis
         && effortDriven == o.effortDriven

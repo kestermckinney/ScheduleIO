@@ -138,6 +138,7 @@ QByteArray packTaskExtra(const schedule::Task &t)
     // blobs that stop at the deadline still parse): task Work + leveling delay.
     putI64(b, t.workMillis);
     putI64(b, t.levelingDelayMillis);
+    putU8(b, t.active ? 1 : 0);   // appended; older blobs default active=true on read
     return b;
 }
 
@@ -171,6 +172,9 @@ void unpackTaskExtra(const QByteArray &b, schedule::Task &t)
     getI64(b, o, &t.workMillis);
     o += 8;
     getI64(b, o, &t.levelingDelayMillis);
+    o += 8;
+    if (o < b.size())
+        t.active = b.at(o) != 0;
 }
 
 // Value tags for a custom field's QVariant.
