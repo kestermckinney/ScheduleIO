@@ -291,6 +291,8 @@ schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relatio
             t.summary = r.readElementText().toInt() != 0;
         else if (n == u"Manual")
             t.manual = r.readElementText().toInt() != 0;
+        else if (n == u"Active")
+            t.active = r.readElementText().toInt() != 0;
         else if (n == u"EffortDriven")
             t.effortDriven = r.readElementText().toInt() != 0;
         else if (n == u"Type")   // task type: 0 Fixed Units / 1 Fixed Duration / 2 Fixed Work
@@ -763,6 +765,7 @@ void writeTask(QXmlStreamWriter &w, const schedule::Project &in, const schedule:
     writeText(w, "Milestone", t.milestone ? QStringLiteral("1") : QStringLiteral("0"));
     writeText(w, "Summary", t.summary ? QStringLiteral("1") : QStringLiteral("0"));
     writeText(w, "Manual", t.manual ? QStringLiteral("1") : QStringLiteral("0"));
+    writeText(w, "Active", t.active ? QStringLiteral("1") : QStringLiteral("0"));
     writeText(w, "EffortDriven", t.effortDriven ? QStringLiteral("1") : QStringLiteral("0"));
     writeText(w, "Type", QString::number(t.taskType));
     writeText(w, "Priority", QString::number(t.priority));

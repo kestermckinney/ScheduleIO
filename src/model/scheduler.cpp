@@ -107,6 +107,10 @@ void Scheduler::reschedule(Project &project)
         if (!idx.contains(rel.predecessorTaskUid) || !idx.contains(rel.successorTaskUid)
             || rel.predecessorTaskUid == rel.successorTaskUid)
             continue;
+        // An inactive predecessor imposes no constraint: its successors schedule as if
+        // the link weren't there (MS Project Inactivate semantics).
+        if (!project.tasks.at(idx.value(rel.predecessorTaskUid)).active)
+            continue;
         predsOf.insert(rel.successorTaskUid, &rel);
         succsOf.insert(rel.predecessorTaskUid, rel.successorTaskUid);
         ++indegree[rel.successorTaskUid];
@@ -128,9 +132,9 @@ void Scheduler::reschedule(Project &project)
             if (--indegree[it.value()] == 0)
                 queue.enqueue(it.value());
 
-        // Summaries roll up from their children (the caller's job); manual
-        // tasks and tasks that have actually started stay where they are.
-        if (t.summary || t.manual || t.actualStart.isValid())
+        // Summaries roll up from their children (the caller's job); manual tasks,
+        // inactive tasks, and tasks that have actually started stay where they are.
+        if (t.summary || t.manual || !t.active || t.actualStart.isValid())
             continue;
 
         const WorkCalendar &cal = calendarFor(t);

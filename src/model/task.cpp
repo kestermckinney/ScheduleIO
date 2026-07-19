@@ -29,6 +29,7 @@ bool Task::operator==(const Task &o) const
         && constraintDate == o.constraintDate
         && wbs == o.wbs
         && notes == o.notes
+        && active == o.active
         && manual == o.manual
         && levelingDelayMillis == o.levelingDelayMillis
         && effortDriven == o.effortDriven
@@ -52,6 +53,8 @@ bool Task::operator==(const Task &o) const
         && actualWorkMillis == o.actualWorkMillis
         && evm == o.evm
         && rowFormat == o.rowFormat
+        && barColor == o.barColor
+        && cellFormats == o.cellFormats
         && baselines == o.baselines
         && customFields == o.customFields;
 }

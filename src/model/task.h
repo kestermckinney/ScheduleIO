@@ -10,6 +10,7 @@
 #include "model/viewstyles.h"
 
 #include <QDateTime>
+#include <QHash>
 #include <QList>
 #include <QString>
 
@@ -60,6 +61,12 @@ public:
     QString wbs;
     QString notes;   // raw RTF source of the task's notes (empty if none)
 
+    // Inactive tasks (MS Project Professional's Task > Inactivate) stay in the plan but
+    // are excluded from scheduling: they impose no constraints on successors and don't
+    // count toward rollups, resource allocation, leveling, cost or earned value. Drawn
+    // greyed with strikethrough. `active` defaults true (a normal task).
+    bool active = true;
+
     // Scheduling behaviour (Task Information dialog fields).
     bool manual = false;         // manually scheduled (vs auto scheduled)
     qint64 levelingDelayMillis = 0;   // working-time delay added by resource leveling;
@@ -103,6 +110,17 @@ public:
     // to the task's grid row. Stored in the MPP file as the Gantt Chart view's
     // per-cell "exceptional" text styles; font family/size are not editable here.
     TextStyle rowFormat;
+
+    // Per-task Gantt bar colour override (MS Project's Format > Bar). kAutomatic (-1)
+    // means "use the category bar style". Round-trips via XML/scaffold; MPP-binary
+    // persistence of a per-task bar format is a known gap.
+    qint32 barColor = TextStyle::kAutomatic;
+
+    // Per-cell (per-column) text/background formatting, keyed by a column identifier the
+    // GUI controls. Overlays `rowFormat` for that one column only, so a single cell can be
+    // coloured independently (MS Project's per-cell background/text colour). MPP-binary
+    // persistence is a known gap.
+    QHash<QString, TextStyle> cellFormats;
 
     // Saved baselines (number 0 = current baseline, 1..10 = saved), present only
     // when the file stores them. Custom ("extended") field values that are set.
