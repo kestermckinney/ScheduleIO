@@ -39,8 +39,14 @@ namespace ViewFormat {
 // leaves everything at defaults (viewStyles.present == false).
 void read(const CompoundFile &cf, schedule::Project *out);
 
+// Ensure every requested font family/size has a FONT_BASES entry and update
+// the corresponding TextStyle::fontBaseIndex values. When the source project
+// did not carry a font table, `fallback` (normally the embedded MPP template's
+// table) is used as the starting point.
+void prepareFontBases(schedule::Project *project, const QByteArray &fallback);
+
 // Whether the project carries any formatting the writer must patch into the
-// template's view data (styles present, or any task row formatted).
+// template's view data (styles present, or any task row/cell formatted).
 bool wantsPatch(const schedule::Project &in);
 
 // Rebuild the template's CV_iew VarMeta/Var2Data with the project's formatting

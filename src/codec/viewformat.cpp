@@ -4,12 +4,18 @@
 #include "codec/viewformat.h"
 
 #include "codec/bkndvardata.h"
+#include "codec/mppfieldids.h"
 #include "model/project.h"
 #include "ole/compoundfile.h"
 
 #include <QHash>
+#include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QVector>
+
+#include <algorithm>
+#include <cstring>
 
 namespace {
 
@@ -67,7 +73,11 @@ constexpr quint16 kChgBold = 0x01, kChgUnderline = 0x02, kChgItalic = 0x04,
                   kChgPattern = 0x80;
 constexpr quint16 kChgStrike = 0x100;
 constexpr quint16 kChgAnyStyle = kChgBold | kChgUnderline | kChgItalic
-                                 | kChgColor | kChgBackColor | kChgPattern | kChgStrike;
+                                 | kChgColor | kChgFontBase | kChgBackColor
+                                 | kChgPattern | kChgStrike;
+
+constexpr int kFontBaseHeaderSize = 2;
+constexpr int kFontBaseRecordSize = 68;
 
 // ---- little-endian helpers ---------------------------------------------------
 
@@ -148,6 +158,160 @@ QString rdUtf16(const QByteArray &b, int o, int maxBytes)
         s.append(QChar(ch));
     }
     return s;
+}
+
+void wrUtf16(QByteArray &b, int o, int maxBytes, const QString &value)
+{
+    if (o < 0 || maxBytes <= 0 || o + maxBytes > b.size())
+        return;
+    memset(b.data() + o, 0, size_t(maxBytes));
+    const int chars = qMin(value.size(), maxBytes / 2 - 1);
+    for (int i = 0; i < chars; ++i)
+        wrU16(b, o + i * 2, value.at(i).unicode());
+}
+
+int fontBaseCount(const QByteArray &bases)
+{
+    if (bases.size() < kFontBaseHeaderSize)
+        return 0;
+    return qMin(int(rdU16(bases, 0)),
+                (bases.size() - kFontBaseHeaderSize) / kFontBaseRecordSize);
+}
+
+QString fontBaseName(const QByteArray &bases, int index)
+{
+    if (index < 0 || index >= fontBaseCount(bases))
+        return {};
+    return rdUtf16(bases, kFontBaseHeaderSize + index * kFontBaseRecordSize + 4, 64);
+}
+
+int fontBaseSize(const QByteArray &bases, int index)
+{
+    if (index < 0 || index >= fontBaseCount(bases))
+        return 0;
+    return int(rdU16(bases, kFontBaseHeaderSize + index * kFontBaseRecordSize + 2));
+}
+
+void hydrateFont(schedule::TextStyle &style, const QByteArray &bases)
+{
+    if (style.fontBaseIndex < 0 || style.fontBaseIndex >= fontBaseCount(bases))
+        return;
+    style.fontName = fontBaseName(bases, style.fontBaseIndex);
+    style.fontSize = fontBaseSize(bases, style.fontBaseIndex);
+}
+
+int ensureFontBase(QByteArray &bases, const schedule::TextStyle &style)
+{
+    if (style.fontBaseIndex >= 0 && style.fontBaseIndex < fontBaseCount(bases))
+        return style.fontBaseIndex; // exact on-disk identity is authoritative
+    if (style.fontName.isEmpty() && style.fontSize <= 0)
+        return style.fontBaseIndex;
+    const int count = fontBaseCount(bases);
+    if (count == 0)
+        return style.fontBaseIndex;
+
+    const int inherited = qMin(3, count - 1);
+    const QString family = style.fontName.isEmpty() ? fontBaseName(bases, inherited)
+                                                    : style.fontName;
+    const int points = style.fontSize > 0 ? style.fontSize : fontBaseSize(bases, inherited);
+    for (int i = 0; i < count; ++i)
+        if (fontBaseSize(bases, i) == points
+            && fontBaseName(bases, i).compare(family, Qt::CaseInsensitive) == 0)
+            return i;
+
+    for (int i = 0; i < count; ++i) {
+        if (!fontBaseName(bases, i).isEmpty() || fontBaseSize(bases, i) != 0)
+            continue;
+        const int o = kFontBaseHeaderSize + i * kFontBaseRecordSize;
+        wrU16(bases, o, 0x0005); // MS Project's user-created font-base flags
+        wrU16(bases, o + 2, quint16(qBound(1, points, 32767)));
+        wrUtf16(bases, o + 4, 64, family);
+        return i;
+    }
+    return inherited;
+}
+
+// Task::cellFormats uses ScheduleVault's stable numeric ColType keys for
+// built-ins and "c:<name>" for custom fields. Keep this mapping beside the
+// MPP FIELD_ARRAY indices so the codec can persist those cells independently.
+int formatKeyForField(quint16 field)
+{
+    switch (field) {
+    case 23: return 1;   // Id
+    case 32: return 3;   // Percent
+    case 14: return 4;   // Name
+    case 29: return 5;   // Duration
+    case 35: return 6;   // Start
+    case 36: return 7;   // Finish
+    case 47: return 8;   // Predecessors
+    case 0:  return 9;   // Work
+    case 16: return 10;  // WBS
+    case 49: return 11;  // Resource Names
+    case 5:  return 12;  // Cost
+    case 8:  return 13;  // Fixed Cost
+    case 7:  return 14;  // Actual Cost
+    case 10: return 15;  // Remaining Cost
+    case 9:  return 16;  // Cost Variance
+    case 43: return 17;  // Baseline Start
+    case 44: return 18;  // Baseline Finish
+    case 27: return 19;  // Baseline Duration
+    case 1:  return 20;  // Baseline Work
+    case 6:  return 21;  // Baseline Cost
+    case 41: return 22;  // Actual Start
+    case 42: return 23;  // Actual Finish
+    case 28: return 24;  // Actual Duration
+    case 2:  return 25;  // Actual Work
+    case 12: return 26;  // PV / BCWS
+    case 11: return 27;  // EV / BCWP
+    case 120:return 28;  // AC / ACWP
+    case 83: return 29;  // CV
+    case 13: return 30;  // SV
+    case 537:return 31;  // CPI
+    case 538:return 32;  // SPI
+    case 541:return 34;  // EAC
+    case 542:return 36;  // TCPI
+    default: return -1;
+    }
+}
+
+bool fieldForFormatKey(const QString &key, quint16 *field)
+{
+    if (key.startsWith(QLatin1String("c:"))) {
+        const QString name = key.mid(2);
+        for (const MppFieldIds::CustomFieldDef &def : MppFieldIds::taskCustomFields())
+            if (name.compare(QLatin1String(def.name), Qt::CaseInsensitive) == 0) {
+                *field = def.index;
+                return true;
+            }
+        return false;
+    }
+    bool ok = false;
+    const int col = key.toInt(&ok);
+    if (!ok)
+        return false;
+    static const QHash<int, quint16> fields = {
+        {1,23}, {3,32}, {4,14}, {5,29}, {6,35}, {7,36}, {8,47}, {9,0},
+        {10,16}, {11,49}, {12,5}, {13,8}, {14,7}, {15,10}, {16,9},
+        {17,43}, {18,44}, {19,27}, {20,1}, {21,6}, {22,41}, {23,42},
+        {24,28}, {25,2}, {26,12}, {27,11}, {28,120}, {29,83}, {30,13},
+        {31,537}, {32,538}, {34,541}, {36,542}
+    };
+    const auto it = fields.constFind(col);
+    if (it == fields.cend())
+        return false;
+    *field = it.value();
+    return true;
+}
+
+QString formatKeyForMppField(quint16 field)
+{
+    const int builtIn = formatKeyForField(field);
+    if (builtIn >= 0)
+        return QString::number(builtIn);
+    for (const MppFieldIds::CustomFieldDef &def : MppFieldIds::taskCustomFields())
+        if (def.index == field)
+            return QStringLiteral("c:") + QLatin1String(def.name);
+    return {};
 }
 
 // ---- CV_iew navigation ---------------------------------------------------------
@@ -423,11 +587,9 @@ void readColumnProperties(const QByteArray &d, schedule::Project *out)
     for (int i = 0; i < out->tasks.size(); ++i)
         rowByUid.insert(out->tasks[i].uniqueId, i);
 
-    // One record per (uid, field). Collapse to a row-level style: a whole-row
-    // record (field 0xFFFFFFFF) is the row's format when present; otherwise
-    // the Name column's record stands in (the common per-cell case).
-    QHash<int, schedule::TextStyle> byUid;
-    QHash<int, int> rank;   // 3 whole-row, 2 Name, 1 other cell
+    QHash<int, schedule::TextStyle> rowsByUid;
+    QHash<int, QHash<QString, schedule::TextStyle>> cellsByUid;
+    QSet<int> wholeRowUids;
     const int count = d.size() / 44;
     for (int i = 0; i < count; ++i) {
         const int o = i * 44;
@@ -447,13 +609,10 @@ void readColumnProperties(const QByteArray &d, schedule::Project *out)
         if ((mask & kChgAnyStyle) == 0)
             continue;
 
-        const int newRank = wholeRow ? 3 : (quint16(field & 0xFFFF) == kFieldName ? 2 : 1);
-        if (newRank <= rank.value(uid, 0))
-            continue;
-
         const int bits = uchar(d.at(o + 11));
         schedule::TextStyle s;
-        s.fontBaseIndex = uchar(d.at(o + 8));
+        if (mask & kChgFontBase)
+            s.fontBaseIndex = uchar(d.at(o + 8));
         s.bold = (mask & kChgBold) && (bits & 0x01);
         s.italic = (mask & kChgItalic) && (bits & 0x02);
         s.underline = (mask & kChgUnderline) && (bits & 0x04);
@@ -466,57 +625,80 @@ void readColumnProperties(const QByteArray &d, schedule::Project *out)
             s.backPattern = rdU16(d, o + 36);
         if (s.backPattern == 0)   // transparent: any stored colour is not drawn
             s.backColor = schedule::TextStyle::kAutomatic;
-        byUid.insert(uid, s);
-        rank.insert(uid, newRank);
+        if (wholeRow) {
+            rowsByUid.insert(uid, s);
+            wholeRowUids.insert(uid);
+        } else {
+            const QString key = formatKeyForMppField(quint16(field & 0xFFFF));
+            if (!key.isEmpty())
+                cellsByUid[uid].insert(key, s);
+        }
     }
 
-    for (auto it = byUid.constBegin(); it != byUid.constEnd(); ++it)
+    for (auto it = rowsByUid.constBegin(); it != rowsByUid.constEnd(); ++it)
         out->tasks[rowByUid.value(it.key())].rowFormat = it.value();
+    for (auto taskIt = cellsByUid.constBegin(); taskIt != cellsByUid.constEnd(); ++taskIt) {
+        schedule::Task &task = out->tasks[rowByUid.value(taskIt.key())];
+        for (auto cellIt = taskIt->constBegin(); cellIt != taskIt->constEnd(); ++cellIt) {
+            // A whole-row format carries a duplicate ID-column record. It is
+            // structural, not a real per-cell override.
+            if (wholeRowUids.contains(taskIt.key()) && cellIt.key() == QLatin1String("1"))
+                continue;
+            task.cellFormats.insert(cellIt.key(), cellIt.value());
+            // Preserve the historical Name-cell fallback used by existing
+            // formatting fixtures while also retaining the true cell format.
+            if (!wholeRowUids.contains(taskIt.key()) && cellIt.key() == QLatin1String("4"))
+                task.rowFormat = cellIt.value();
+        }
+    }
 }
 
 QByteArray buildColumnProperties(const schedule::Project &in)
 {
     QByteArray d;
-    for (const schedule::Task &t : in.tasks) {
-        const schedule::TextStyle &s = t.rowFormat;
-        if (s.isDefault())
-            continue;
-
-        // Byte-for-byte the shape MS Project writes for a whole-row format
-        // (SelectRow + Font32Ex ground truth): an ID-column record plus a
-        // whole-row (0xFFFFFFFF) record. Offset 8 is an index into the view
-        // font-base table ("   214/Props" key 0x03400000, 68-byte entries
-        // [flags u16][pointSize u16][name utf16x32]); base 3 is the stock
-        // "Calibri 11" row default. Offsets 40-41 are the change mask gating
-        // what the record applies -- without the right bits MS Project
-        // renders none of it (this was the long-standing "formatting doesn't
-        // render" bug). The stored pattern defaults to 1 (solid) and only
-        // carries the kChgPattern bit when it is something else.
+    const auto appendRecord = [&](int uid, quint32 field, const schedule::TextStyle &s) {
         const quint16 pat = s.backPattern == 0 ? 1 : quint16(s.backPattern);
         quint16 changeMask = 0;
         if (s.bold) changeMask |= kChgBold;
         if (s.underline) changeMask |= kChgUnderline;
         if (s.italic) changeMask |= kChgItalic;
         if (s.color != schedule::TextStyle::kAutomatic) changeMask |= kChgColor;
+        if (s.fontBaseIndex >= 0) changeMask |= kChgFontBase;
         if (s.backColor != schedule::TextStyle::kAutomatic) changeMask |= kChgBackColor;
         if (pat != 1) changeMask |= kChgPattern;
         if (s.strikethrough) changeMask |= kChgStrike;
 
-        const quint32 fields[] = { kTaskFieldBase | kFieldId, kFieldWholeRow };
-        for (quint32 field : fields) {
-            QByteArray rec(44, '\0');
-            wrU32(rec, 0, quint32(t.uniqueId));
-            wrU32(rec, 4, field);
-            rec[8] = char(s.fontBaseIndex >= 0 && s.fontBaseIndex <= 255
-                          ? s.fontBaseIndex : 3);
-            rec[11] = char((s.bold ? 0x01 : 0) | (s.italic ? 0x02 : 0)
-                           | (s.underline ? 0x04 : 0)
-                           | (s.strikethrough ? 0x08 : 0));
-            wrColor(rec, 12, s.color);
-            wrColor(rec, 24, s.backColor);
-            wrU16(rec, 36, pat);
-            wrU16(rec, 40, changeMask);
-            d += rec;
+        QByteArray rec(44, '\0');
+        wrU32(rec, 0, quint32(uid));
+        wrU32(rec, 4, field);
+        rec[8] = char(s.fontBaseIndex >= 0 && s.fontBaseIndex <= 255
+                      ? s.fontBaseIndex : 3);
+        rec[11] = char((s.bold ? 0x01 : 0) | (s.italic ? 0x02 : 0)
+                       | (s.underline ? 0x04 : 0)
+                       | (s.strikethrough ? 0x08 : 0));
+        wrColor(rec, 12, s.color);
+        wrColor(rec, 24, s.backColor);
+        wrU16(rec, 36, pat);
+        wrU16(rec, 40, changeMask);
+        d += rec;
+    };
+
+    for (const schedule::Task &t : in.tasks) {
+        const schedule::TextStyle &s = t.rowFormat;
+        if (!s.isDefault()) {
+            // MS Project writes an ID-column record plus a whole-row record.
+            appendRecord(t.uniqueId, kTaskFieldBase | kFieldId, s);
+            appendRecord(t.uniqueId, kFieldWholeRow, s);
+        }
+
+        QStringList keys = t.cellFormats.keys();
+        std::sort(keys.begin(), keys.end());
+        for (const QString &key : keys) {
+            const schedule::TextStyle cell = t.cellFormats.value(key);
+            quint16 field = 0;
+            if (cell.isDefault() || !fieldForFormatKey(key, &field))
+                continue;
+            appendRecord(t.uniqueId, kTaskFieldBase | field, cell);
         }
     }
     return d;
@@ -576,6 +758,8 @@ void read(const CompoundFile &cf, schedule::Project *out)
             break;
         }
         o += int(len);
+        if (len % 2 != 0)
+            ++o;
     }
 
     const QByteArray fixedMeta = cf.readStream({ kViewStorage, kCView, QStringLiteral("FixedMeta") });
@@ -602,6 +786,39 @@ void read(const CompoundFile &cf, schedule::Project *out)
         readStyleData(style->data, &out->viewStyles);
     if (const PropsItem *cols = props.find(kKeyColumnProperties))
         readColumnProperties(cols->data, out);
+
+    for (schedule::Task &task : out->tasks) {
+        hydrateFont(task.rowFormat, out->mppFontBases);
+        for (auto it = task.cellFormats.begin(); it != task.cellFormats.end(); ++it)
+            hydrateFont(it.value(), out->mppFontBases);
+    }
+}
+
+void prepareFontBases(schedule::Project *project, const QByteArray &fallback)
+{
+    if (!project)
+        return;
+    if (project->mppFontBases.isEmpty())
+        project->mppFontBases = fallback;
+    if (fontBaseCount(project->mppFontBases) == 0)
+        return;
+
+    for (int i = 0; i < schedule::ViewStyles::TextCategoryCount; ++i) {
+        schedule::TextStyle &style = project->viewStyles.text[i];
+        const int index = ensureFontBase(project->mppFontBases, style);
+        if (index >= 0)
+            style.fontBaseIndex = index;
+    }
+    for (schedule::Task &task : project->tasks) {
+        const int rowIndex = ensureFontBase(project->mppFontBases, task.rowFormat);
+        if (rowIndex >= 0 && (!task.rowFormat.fontName.isEmpty() || task.rowFormat.fontSize > 0))
+            task.rowFormat.fontBaseIndex = rowIndex;
+        for (auto it = task.cellFormats.begin(); it != task.cellFormats.end(); ++it) {
+            const int cellIndex = ensureFontBase(project->mppFontBases, it.value());
+            if (cellIndex >= 0 && (!it->fontName.isEmpty() || it->fontSize > 0))
+                it->fontBaseIndex = cellIndex;
+        }
+    }
 }
 
 bool wantsPatch(const schedule::Project &in)
@@ -610,7 +827,7 @@ bool wantsPatch(const schedule::Project &in)
         || in.teamPlannerStyles.present || in.calendarStyles.present)
         return true;
     for (const schedule::Task &t : in.tasks)
-        if (!t.rowFormat.isDefault())
+        if (!t.rowFormat.isDefault() || !t.cellFormats.isEmpty())
             return true;
     return false;
 }

@@ -771,7 +771,25 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     // patched into the template's CV_iew var data; skip those two streams in
     // the verbatim copy only when there is something to patch.
     const QString viewStorage = QStringLiteral("   214");
-    const bool patchViews = ViewFormat::wantsPatch(in);
+    QByteArray fontProps = tpl.readStream({ viewStorage, QStringLiteral("Props") });
+    QByteArray templateFontBases;
+    for (int o = 16; o + 12 <= fontProps.size(); ) {
+        const quint32 len = readLeU32(fontProps, o);
+        const quint32 key = readLeU32(fontProps, o + 4);
+        o += 12;
+        if (len > quint32(fontProps.size() - o))
+            break;
+        if (key == 0x03400000u) {
+            templateFontBases = fontProps.mid(o, int(len));
+            break;
+        }
+        o += int(len);
+        if (len % 2 != 0)
+            ++o;
+    }
+    schedule::Project viewProject = in;
+    ViewFormat::prepareFontBases(&viewProject, templateFontBases);
+    const bool patchViews = ViewFormat::wantsPatch(viewProject);
 
     copyTree(tpl, cf, {}, [&](const QStringList &p) {
         if (p.size() == 3 && p.at(0) == kDataStorage && regen.contains(p.at(1))
@@ -792,24 +810,25 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     // byte-sized index. The embedded template has a different index layout
     // from many real Project files, so retain the source payload whenever its
     // fixed-size table matches the template item.
-    if (!in.mppFontBases.isEmpty()) {
-        QByteArray fontProps = tpl.readStream({ viewStorage, QStringLiteral("Props") });
+    if (!viewProject.mppFontBases.isEmpty()) {
         for (int o = 16; o + 12 <= fontProps.size(); ) {
             const quint32 len = readLeU32(fontProps, o);
             const quint32 key = readLeU32(fontProps, o + 4);
             o += 12;
             if (len > quint32(fontProps.size() - o))
                 break;
-            if (key == 0x03400000u && len == quint32(in.mppFontBases.size())) {
-                pokeBytes(fontProps, o, in.mppFontBases);
+            if (key == 0x03400000u && len == quint32(viewProject.mppFontBases.size())) {
+                pokeBytes(fontProps, o, viewProject.mppFontBases);
                 cf.addStream({ viewStorage, QStringLiteral("Props") }, fontProps);
                 break;
             }
             o += int(len);
+            if (len % 2 != 0)
+                ++o;
         }
     }
 
-    if (patchViews && !ViewFormat::patch(tpl, cf, in)) {
+    if (patchViews && !ViewFormat::patch(tpl, cf, viewProject)) {
         // No usable Gantt view in the template: fall back to the verbatim copy.
         cf.addStream({ viewStorage, QStringLiteral("CV_iew"), QStringLiteral("VarMeta") },
                      tpl.readStream({ viewStorage, QStringLiteral("CV_iew"), QStringLiteral("VarMeta") }));

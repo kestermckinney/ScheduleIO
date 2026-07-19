@@ -108,7 +108,8 @@ public:
 
     // Row text formatting (MS Project's Format > Font): emphasis + colours applied
     // to the task's grid row. Stored in the MPP file as the Gantt Chart view's
-    // per-cell "exceptional" text styles; font family/size are not editable here.
+    // per-cell "exceptional" text styles, including font family/size through the
+    // view's FONT_BASES table.
     TextStyle rowFormat;
 
     // Per-task Gantt bar colour override (MS Project's Format > Bar). kAutomatic (-1)
@@ -116,10 +117,9 @@ public:
     // persistence of a per-task bar format is a known gap.
     qint32 barColor = TextStyle::kAutomatic;
 
-    // Per-cell (per-column) text/background formatting, keyed by a column identifier the
-    // GUI controls. Overlays `rowFormat` for that one column only, so a single cell can be
-    // coloured independently (MS Project's per-cell background/text colour). MPP-binary
-    // persistence is a known gap.
+    // Per-cell (per-column) text/background formatting. Built-ins use ScheduleVault's
+    // stable numeric ColType key; custom fields use "c:<field name>". The style overlays
+    // `rowFormat` for that one column and persists as an MPP column-property record.
     QHash<QString, TextStyle> cellFormats;
 
     // Saved baselines (number 0 = current baseline, 1..10 = saved), present only

@@ -37,6 +37,7 @@ int main(int argc, char **argv)
         if (len > quint32(props.size() - o)) break;
         if (key == 54525952u) fontBases = props.mid(o, int(len));
         o += int(len);
+        if (len % 2 != 0) ++o;
     }
 
     if (fontBases.isEmpty()) { std::printf("no FONT_BASES key found\n"); return 1; }

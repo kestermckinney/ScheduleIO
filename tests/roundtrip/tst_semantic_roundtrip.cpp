@@ -86,6 +86,15 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
                      .arg(x.rowFormat.color).arg(y.rowFormat.color)
                      .arg(x.rowFormat.backColor).arg(y.rowFormat.backColor)
                      .arg(x.rowFormat.backPattern).arg(y.rowFormat.backPattern);
+        if (x.rowFormat.fontName != y.rowFormat.fontName
+            || x.rowFormat.fontSize != y.rowFormat.fontSize)
+            f << QStringLiteral("rowFont '%1'/%2 vs '%3'/%4")
+                     .arg(x.rowFormat.fontName).arg(x.rowFormat.fontSize)
+                     .arg(y.rowFormat.fontName).arg(y.rowFormat.fontSize);
+        if (x.cellFormats != y.cellFormats)
+            f << QStringLiteral("cellFormats keys %1 vs %2")
+                     .arg(x.cellFormats.keys().join(QLatin1Char(',')),
+                          y.cellFormats.keys().join(QLatin1Char(',')));
         d << QStringLiteral("task[%1] uid %2: %3").arg(i).arg(x.uniqueId).arg(f.join(QStringLiteral(", ")));
         if (d.size() > 6)
             break;
@@ -221,6 +230,13 @@ schedule::Project TstSemanticRoundtrip::makeSampleProject()
     t1.rowFormat.color = 0xC00000;       // dark red text
     t1.rowFormat.backColor = 0xFFFFCC;   // pale yellow cell fill
     t1.rowFormat.backPattern = 1;        // solid
+    t1.rowFormat.fontName = QStringLiteral("Arial");
+    t1.rowFormat.fontSize = 10;
+    schedule::TextStyle durationCell;
+    durationCell.color = 0x0044CC;
+    durationCell.backColor = 0xFFF080;
+    durationCell.backPattern = 1;
+    t1.cellFormats.insert(QStringLiteral("5"), durationCell); // ScheduleVault Duration key
 
     schedule::Task t2;
     t2.uniqueId = 2; t2.id = 2; t2.outlineLevel = 1;
@@ -290,7 +306,7 @@ void TstSemanticRoundtrip::syntheticRoundTrip()
     QVERIFY2(reader.openFromData(bytes), qPrintable(reader.errorString()));
 
     // Primary correctness gate: model survives read -> write -> read.
-    QVERIFY(reader.project() == original);
+    QVERIFY2(reader.project() == original, qPrintable(diffProjects(original, reader.project())));
 }
 
 void TstSemanticRoundtrip::writerIsDeterministic()

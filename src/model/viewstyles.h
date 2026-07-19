@@ -28,8 +28,8 @@ public:
     qint32 backColor = kAutomatic;   // cell background, or kAutomatic
     int backPattern = 0;             // MPP BackgroundPattern (0 transparent, 1 solid, ...)
     // Font family/size overrides (empty/0 = inherit the view's font base). MS Project's
-    // MPP stores fonts via a font-base table; XML/scaffold round-trip them directly,
-    // while MPP-binary persistence of a per-row font is a known gap.
+    // MPP stores fonts via a font-base table; the codec resolves and creates table
+    // entries as needed.
     QString fontName;
     int fontSize = 0;                // points; 0 = inherit
     // Exact index into MPP's FONT_BASES table. Kept alongside the friendly
