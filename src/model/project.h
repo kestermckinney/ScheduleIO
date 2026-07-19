@@ -14,6 +14,7 @@
 #include "model/viewstyles.h"
 
 #include <QDateTime>
+#include <QByteArray>
 #include <QList>
 #include <QString>
 
@@ -46,6 +47,12 @@ public:
     QList<Assignment> assignments;
     QList<Calendar> calendars;
     QList<Relation> relations;
+
+    // Opaque MPP14 FONT_BASES payload ("   214/Props", key 0x03400000).
+    // It is intentionally not part of semantic equality; it preserves the
+    // source file's exact font-index mapping when the binary writer uses its
+    // stock container template.
+    QByteArray mppFontBases;
 
     // View formatting template (text styles, gridline/date-line and bar colours),
     // mirroring the Gantt Chart view's stored properties. See ViewStyles.

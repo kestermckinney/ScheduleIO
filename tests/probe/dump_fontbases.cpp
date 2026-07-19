@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Paul McKinney
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Diagnostic (throwaway): dump the FONT_BASES table from "   114/Props".
+// Diagnostic (throwaway): dump the FONT_BASES table from "   214/Props".
 // usage: dump_fontbases <file.mpp>
 
 #include "ole/compoundfile.h"
@@ -27,8 +27,8 @@ int main(int argc, char **argv)
     CompoundFile cf;
     if (!cf.openFromData(f.readAll())) { std::printf("CFB parse failed\n"); return 2; }
 
-    const QByteArray props = cf.readStream({ QStringLiteral("   114"), QStringLiteral("Props") });
-    if (props.size() < 16) { std::printf("no   114/Props\n"); return 1; }
+    const QByteArray props = cf.readStream({ QStringLiteral("   214"), QStringLiteral("Props") });
+    if (props.size() < 16) { std::printf("no   214/Props\n"); return 1; }
 
     QByteArray fontBases;
     for (int o = 16; o + 12 <= props.size(); ) {
@@ -42,7 +42,7 @@ int main(int argc, char **argv)
     if (fontBases.isEmpty()) { std::printf("no FONT_BASES key found\n"); return 1; }
 
     const int count = u16(fontBases, 0);
-    std::printf("FONT_BASES: %d bytes, count=%d\n", fontBases.size(), count);
+    std::printf("FONT_BASES: %d bytes, count=%d\n", int(fontBases.size()), count);
     int o = 2;
     for (int i = 0; i < count; ++i) {
         if (o + 68 > fontBases.size()) { std::printf("  [%d]: truncated!\n", i); break; }
@@ -52,7 +52,9 @@ int main(int argc, char **argv)
             if (ch == 0) break;
             name.append(QChar(ch));
         }
-        std::printf("  [%d]: %s\n", i, qPrintable(name));
+        std::printf("  [%d]: flags=0x%04x size=%u name=%s\n", i,
+                    unsigned(u16(fontBases, o)), unsigned(u16(fontBases, o + 2)),
+                    qPrintable(name));
         o += 68;
     }
     return 0;
