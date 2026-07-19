@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "mppio.h"
+#include "ole/compoundfile.h"
 
 #include <QDir>
 #include <QTest>
+#include <QtEndian>
 
 // Human-readable first-difference report so a failing round-trip names the
 // entity and field instead of a bare operator== FALSE.
@@ -179,6 +181,9 @@ class TstSemanticRoundtrip : public QObject
 private slots:
     void syntheticRoundTrip();
     void writerIsDeterministic();
+    void taskDisplayOrderOrdinalIsWritten();
+    void completedAssignmentStateIsWritten();
+    void fontBaseTableAndIndicesArePreserved();
     void realFixtures_data();
     void realFixtures();
 
@@ -300,6 +305,125 @@ void TstSemanticRoundtrip::writerIsDeterministic()
 
     // Our writer must be byte-stable across a re-save of the same model.
     QCOMPARE(c, b);
+}
+
+void TstSemanticRoundtrip::taskDisplayOrderOrdinalIsWritten()
+{
+    schedule::Project p = makeSampleProject();
+    // Deliberately make display order differ from unique-ID order. The MPP task
+    // records themselves are UID-ordered, while Fixed2Data+16 must carry ID+1
+    // so Microsoft Project can reconstruct the display outline.
+    p.tasks[0].uniqueId = 20;
+    p.tasks[0].id = 1;
+    p.tasks[1].uniqueId = 5;
+    p.tasks[1].id = 2;
+
+    MppIO io;
+    io.setProject(p);
+    const QByteArray bytes = io.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(io.errorString()));
+
+    CompoundFile cf;
+    QVERIFY2(cf.openFromData(bytes), qPrintable(cf.errorString()));
+    const QStringList base = { QStringLiteral("   114"), QStringLiteral("TBkndTask") };
+    const QByteArray meta = cf.readStream(base + QStringList{ QStringLiteral("Fixed2Meta") });
+    const QByteArray data = cf.readStream(base + QStringList{ QStringLiteral("Fixed2Data") });
+    QVERIFY(meta.size() >= 16 + 5 * 96);
+
+    const auto u32 = [](const QByteArray &b, int off) {
+        return qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(b.constData() + off));
+    };
+    const auto f64 = [](const QByteArray &b, int off) {
+        const quint64 bits = qFromLittleEndian<quint64>(
+            reinterpret_cast<const uchar *>(b.constData() + off));
+        double value;
+        memcpy(&value, &bits, sizeof(value));
+        return value;
+    };
+
+    // Items 0..2 are the format's placeholder rows. Item 3 is UID 5 (ID 2),
+    // item 4 is UID 20 (ID 1).
+    const int first = int(u32(meta, 16 + 3 * 96 + 4));
+    const int second = int(u32(meta, 16 + 4 * 96 + 4));
+    QCOMPARE(f64(data, first + 16), 3.0);
+    QCOMPARE(f64(data, second + 16), 2.0);
+}
+
+void TstSemanticRoundtrip::completedAssignmentStateIsWritten()
+{
+    schedule::Project p = makeSampleProject();
+    schedule::Assignment a;
+    a.uniqueId = 10;
+    a.taskUniqueId = p.tasks.first().uniqueId;
+    a.resourceUniqueId = p.resources.first().uniqueId;
+    a.units = 1.0;
+    a.workMillis = qint64(8) * 3600 * 1000;
+    a.actualWorkMillis = a.workMillis;
+    a.remainingWorkMillis = 0;
+    a.start = p.tasks.first().start;
+    a.finish = p.tasks.first().finish;
+    p.assignments = { a };
+
+    MppIO io;
+    io.setProject(p);
+    const QByteArray bytes = io.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(io.errorString()));
+
+    CompoundFile cf;
+    QVERIFY(cf.openFromData(bytes));
+    const QStringList base = { QStringLiteral("   114"), QStringLiteral("TBkndAssn") };
+    const QByteArray meta = cf.readStream(base + QStringList{ QStringLiteral("FixedMeta") });
+    const QByteArray data = cf.readStream(base + QStringList{ QStringLiteral("FixedData") });
+    QVERIFY(meta.size() >= 16 + 34);
+    const int off = int(qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar *>(meta.constData() + 20)));
+    const auto u16 = [&](int fieldOff) {
+        return qFromLittleEndian<quint16>(
+            reinterpret_cast<const uchar *>(data.constData() + off + fieldOff));
+    };
+    const auto u32 = [&](int fieldOff) {
+        return qFromLittleEndian<quint32>(
+            reinterpret_cast<const uchar *>(data.constData() + off + fieldOff));
+    };
+    const auto f64 = [&](int fieldOff) {
+        quint64 bits = qFromLittleEndian<quint64>(
+            reinterpret_cast<const uchar *>(data.constData() + off + fieldOff));
+        double value;
+        memcpy(&value, &bits, sizeof(value));
+        return value;
+    };
+
+    QCOMPARE(f64(20), f64(28));    // WORK == ACTUAL_WORK
+    QCOMPARE(f64(20), f64(36));    // WORK == REGULAR_WORK
+    QCOMPARE(f64(44), 0.0);        // REMAINING_WORK
+    QCOMPARE(u32(56), u32(60));    // FINISH == RESUME
+    QCOMPARE(u32(56), u32(104));   // FINISH == STOP
+    QCOMPARE(u16(92), quint16(7)); // LEVELING_DELAY_UNITS
+}
+
+void TstSemanticRoundtrip::fontBaseTableAndIndicesArePreserved()
+{
+    MppIO seedWriter;
+    seedWriter.setProject(makeSampleProject());
+    const QByteArray seedBytes = seedWriter.saveToData();
+    QVERIFY(!seedBytes.isEmpty());
+
+    MppIO seedReader;
+    QVERIFY(seedReader.openFromData(seedBytes));
+    schedule::Project p = seedReader.project();
+    QVERIFY(p.mppFontBases.size() > 2 + 10 * 68 + 6);
+    p.mppFontBases[2 + 10 * 68 + 4] = 'X'; // opaque unused-entry marker
+    p.viewStyles.text[schedule::ViewStyles::Critical].fontBaseIndex = 5;
+
+    MppIO writer;
+    writer.setProject(p);
+    const QByteArray bytes = writer.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(writer.errorString()));
+
+    MppIO reader;
+    QVERIFY(reader.openFromData(bytes));
+    QCOMPARE(reader.project().mppFontBases, p.mppFontBases);
+    QCOMPARE(reader.project().viewStyles.text[schedule::ViewStyles::Critical].fontBaseIndex, 5);
 }
 
 void TstSemanticRoundtrip::realFixtures_data()

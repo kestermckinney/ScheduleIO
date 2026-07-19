@@ -69,6 +69,11 @@ void appU16(QByteArray &b, quint16 v)
 { char t[2]; qToLittleEndian<quint16>(v, reinterpret_cast<uchar *>(t)); b.append(t, 2); }
 void appU32(QByteArray &b, quint32 v)
 { char t[4]; qToLittleEndian<quint32>(v, reinterpret_cast<uchar *>(t)); b.append(t, 4); }
+quint32 readLeU32(const QByteArray &b, int off)
+{
+    return off >= 0 && off + 4 <= b.size()
+        ? qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(b.constData() + off)) : 0;
+}
 void appDouble(QByteArray &b, double v)
 { quint64 bits; memcpy(&bits, &v, 8); char t[8];
   qToLittleEndian<quint64>(bits, reinterpret_cast<uchar *>(t)); b.append(t, 8); }
@@ -783,6 +788,27 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
         return false;
     });
 
+    // The view STYLE_DATA and COLUMN_PROPERTIES records refer to this table by
+    // byte-sized index. The embedded template has a different index layout
+    // from many real Project files, so retain the source payload whenever its
+    // fixed-size table matches the template item.
+    if (!in.mppFontBases.isEmpty()) {
+        QByteArray fontProps = tpl.readStream({ viewStorage, QStringLiteral("Props") });
+        for (int o = 16; o + 12 <= fontProps.size(); ) {
+            const quint32 len = readLeU32(fontProps, o);
+            const quint32 key = readLeU32(fontProps, o + 4);
+            o += 12;
+            if (len > quint32(fontProps.size() - o))
+                break;
+            if (key == 0x03400000u && len == quint32(in.mppFontBases.size())) {
+                pokeBytes(fontProps, o, in.mppFontBases);
+                cf.addStream({ viewStorage, QStringLiteral("Props") }, fontProps);
+                break;
+            }
+            o += int(len);
+        }
+    }
+
     if (patchViews && !ViewFormat::patch(tpl, cf, in)) {
         // No usable Gantt view in the template: fall back to the verbatim copy.
         cf.addStream({ viewStorage, QStringLiteral("CV_iew"), QStringLiteral("VarMeta") },
@@ -875,13 +901,9 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
         fixed.addRaw(metaItems(tTaskFM, kTaskMetaItem, 0, 3), tTaskFD.left(48));
         fixed2.addRaw(metaItems(tTaskF2M, kTaskF2MetaItem, 0, 3), tTaskF2D.left(192));
 
-        // Emit task rows in UNIQUE-ID order, the way real .mpp files lay them out.
-        // Microsoft Project associates each row's name/fields with its record by unique
-        // id, not by file position; the display ID field (23) carries the outline/sort
-        // position separately. Writing rows in display-ID order instead (as the model
-        // holds them after a reorder, where unique id != id) makes Project mis-match
-        // names to rows -- blank names -- and mis-read the outline of reordered tasks,
-        // which then trips a spurious circular-reference error on open.
+        // Emit task rows in UNIQUE-ID order. FixedData and VarMeta are correlated
+        // in that order by Microsoft Project; display order is carried separately
+        // in Fixed2Data (see the ID+1 value written below).
         QVector<const schedule::Task *> tasksByUid;
         tasksByUid.reserve(in.tasks.size());
         for (const schedule::Task &t : in.tasks)
@@ -946,7 +968,19 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             sink.putDuration(31, qMax<qint64>(0, t.durationMillis - t.actualDurationMillis));
             sink.putDate(35, t.start);                               // (scheduled) START
             sink.putDate(36, t.finish);                              // (scheduled) FINISH
+            // Project-authored completed tasks retain their calculated date
+            // quartet. If these remain at the project-summary template's
+            // sentinel, Project cannot recompute a completed auto task and
+            // collapses its finish/duration when reopening the file.
+            sink.putDate(37, t.start);                               // EARLY_START
+            sink.putDate(38, t.finish);                              // EARLY_FINISH
+            sink.putDate(39, t.lateStart.isValid() ? t.lateStart : t.start);   // LATE_START
+            sink.putDate(40, t.lateFinish.isValid() ? t.lateFinish : t.finish); // LATE_FINISH
             sink.putU16(32, encodePercent(t.percentComplete));       // PERCENT_COMPLETE
+            // Keep the work-progress scalar coherent with task progress. The
+            // current model has one progress value; emitting zero here for a
+            // completed task makes Project recalculate its duration to zero.
+            sink.putU16(33, encodePercent(t.percentComplete));       // PERCENT_WORK_COMPLETE
             sink.putU16(249, quint16(t.outlineLevel));               // OUTLINE_LEVEL
             // Row-category fields (decoded from summary-vs-leaf diffs of the
             // mpp_samples ground truth; without them every row inherited the
@@ -965,6 +999,12 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             if (t.manual) {
                 sink.putDate(kTaskStartManual, t.start);
                 sink.putDate(kTaskFinishManual, t.finish);
+                // Project reads a manually scheduled task's duration from the
+                // secondary record as well. Leaving the project-summary
+                // template values here makes Project reopen the task with its
+                // finish equal to its start and a zero duration.
+                sink.putDuration(1288, t.durationMillis);
+                sink.putU16(1289, quint16(t.durationFormat));
             }
             sink.putU16(MppFieldIds::taskInfo.priority, quint16(t.priority));
             sink.putU16(MppFieldIds::taskInfo.taskType, quint16(t.taskType));
@@ -1011,6 +1051,12 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
 
             // Task GUID heads the Fixed2Data block.
             pokeBytes(f2, 0, guidFor("task", t.uniqueId));
+            // Genuine Project 2016 rows store the display-order ordinal as a
+            // double at Fixed2Data+16. It is one-based relative to the task ID
+            // (project summary ID 0 -> 1, first visible task ID 1 -> 2).
+            // Leaving the template's zero here made Project ignore field 23 and
+            // rebuild the outline in unique-ID order.
+            pokeDouble(f2, 16, double(t.id + 1));
 
             // FixedMeta bit flags: MILESTONE int@10 & 0x02, EFFORT_DRIVEN int@13
             // & 0x08 (Project 2013/2016 tables). The tail starts at item byte 8.
@@ -1135,13 +1181,28 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // files; the reader's decodeWorkDouble is the inverse of this.
             sink.putDouble(8, double(a.workMillis) / 60.0, true);    // WORK
             sink.putDouble(10, double(a.actualWorkMillis) / 60.0, true);     // ACTUAL_WORK
+            // With no overtime split in the model, all assignment work is
+            // regular work. Project uses this together with the actual dates
+            // to retain completed auto-task durations on reopen.
+            sink.putDouble(11, double(a.workMillis) / 60.0, true);   // REGULAR_WORK
             sink.putDouble(12, double(a.remainingWorkMillis) / 60.0, true);  // REMAINING_WORK
             if (a.start.isValid())
                 sink.putU32(20, FieldDecoders::encodeMppTimestamp(a.start), true);   // START
             if (a.finish.isValid())
                 sink.putU32(21, FieldDecoders::encodeMppTimestamp(a.finish), true);  // FINISH
+            if (a.actualWorkMillis > 0 && a.remainingWorkMillis == 0) {
+                if (a.start.isValid())
+                    sink.putU32(22, FieldDecoders::encodeMppTimestamp(a.start), true); // ACTUAL_START
+                if (a.finish.isValid()) {
+                    const quint32 finish = FieldDecoders::encodeMppTimestamp(a.finish);
+                    sink.putU32(23, finish, true);                    // ACTUAL_FINISH
+                    sink.putU32(24, finish, true);                    // RESUME
+                    sink.putU32(264, finish, true);                   // STOP
+                }
+            }
             sink.putU32(25, quint32(FieldDecoders::encodeDurationTenthMinutes(a.delayMillis)),
                         true);                                       // DELAY
+            sink.putU16(55, 7, true);                                // LEVELING_DELAY_UNITS (days)
             sink.putDouble(MppFieldIds::assignmentCost.cost, a.cost);
             sink.putDouble(MppFieldIds::assignmentCost.actualCost, a.actualCost);
             sink.putDouble(MppFieldIds::assignmentCost.remainingCost, a.remainingCost);

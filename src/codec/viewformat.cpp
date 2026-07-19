@@ -19,6 +19,7 @@ const QString kCView = QStringLiteral("CV_iew");
 // Props9 item keys (MPXJ PropsKey).
 constexpr quint32 kKeyStyleData = 574619656u;         // STYLE_DATA
 constexpr quint32 kKeyColumnProperties = 574619660u;  // COLUMN_PROPERTIES
+constexpr quint32 kKeyFontBases = 54525952u;          // 0x03400000, in 214/Props
 
 constexpr quint16 kViewPropsType = 6;   // GanttChartView14.PROPERTIES
 // MPP view-type codes (u16@112 of the FixedData record). These do NOT match
@@ -264,6 +265,7 @@ QByteArray buildProps9(const Props9 &props)
 schedule::TextStyle readTextStyle(const QByteArray &d, int o)
 {
     schedule::TextStyle s;
+    s.fontBaseIndex = uchar(d.at(o));
     const int bits = uchar(d.at(o + 3));
     s.bold = (bits & 0x01) != 0;
     s.italic = (bits & 0x02) != 0;
@@ -277,6 +279,8 @@ schedule::TextStyle readTextStyle(const QByteArray &d, int o)
 
 void writeTextStyle(QByteArray &d, int o, const schedule::TextStyle &s)
 {
+    if (s.fontBaseIndex >= 0 && s.fontBaseIndex <= 255)
+        d[o] = char(s.fontBaseIndex);
     uchar bits = uchar(d.at(o + 3)) & ~0x0F;   // keep any unknown high bits
     bits |= (s.bold ? 0x01 : 0) | (s.italic ? 0x02 : 0)
         | (s.underline ? 0x04 : 0) | (s.strikethrough ? 0x08 : 0);
@@ -449,6 +453,7 @@ void readColumnProperties(const QByteArray &d, schedule::Project *out)
 
         const int bits = uchar(d.at(o + 11));
         schedule::TextStyle s;
+        s.fontBaseIndex = uchar(d.at(o + 8));
         s.bold = (mask & kChgBold) && (bits & 0x01);
         s.italic = (mask & kChgItalic) && (bits & 0x02);
         s.underline = (mask & kChgUnderline) && (bits & 0x04);
@@ -502,7 +507,8 @@ QByteArray buildColumnProperties(const schedule::Project &in)
             QByteArray rec(44, '\0');
             wrU32(rec, 0, quint32(t.uniqueId));
             wrU32(rec, 4, field);
-            rec[8] = 3;
+            rec[8] = char(s.fontBaseIndex >= 0 && s.fontBaseIndex <= 255
+                          ? s.fontBaseIndex : 3);
             rec[11] = char((s.bold ? 0x01 : 0) | (s.italic ? 0x02 : 0)
                            | (s.underline ? 0x04 : 0)
                            | (s.strikethrough ? 0x08 : 0));
@@ -556,6 +562,21 @@ void read(const CompoundFile &cf, schedule::Project *out)
 {
     if (!out || !cf.hasStorage({ kViewStorage, kCView }))
         return;
+
+    // Preserve the source font table together with the indices decoded below.
+    const QByteArray fontProps = cf.readStream({ kViewStorage, QStringLiteral("Props") });
+    for (int o = 16; o + 12 <= fontProps.size(); ) {
+        const quint32 len = rdU32(fontProps, o);
+        const quint32 key = rdU32(fontProps, o + 4);
+        o += 12;
+        if (len > quint32(fontProps.size() - o))
+            break;
+        if (key == kKeyFontBases) {
+            out->mppFontBases = fontProps.mid(o, int(len));
+            break;
+        }
+        o += int(len);
+    }
 
     const QByteArray fixedMeta = cf.readStream({ kViewStorage, kCView, QStringLiteral("FixedMeta") });
     const QByteArray fixedData = cf.readStream({ kViewStorage, kCView, QStringLiteral("FixedData") });

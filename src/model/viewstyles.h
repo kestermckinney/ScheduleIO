@@ -32,12 +32,16 @@ public:
     // while MPP-binary persistence of a per-row font is a known gap.
     QString fontName;
     int fontSize = 0;                // points; 0 = inherit
+    // Exact index into MPP's FONT_BASES table. Kept alongside the friendly
+    // fields so an MPP read/write can preserve undocumented font variants
+    // byte-for-byte even when two entries share the same family name.
+    int fontBaseIndex = -1;
 
     bool isDefault() const
     {
         return !bold && !italic && !underline && !strikethrough
             && color == kAutomatic && backColor == kAutomatic && backPattern == 0
-            && fontName.isEmpty() && fontSize == 0;
+            && fontName.isEmpty() && fontSize == 0 && fontBaseIndex < 0;
     }
 
     bool operator==(const TextStyle &o) const
