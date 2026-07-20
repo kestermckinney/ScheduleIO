@@ -15,6 +15,11 @@ Links a resource to a task. Value type; copyable and equality-comparable.
 | `resourceUniqueId` | `int` | Unique id of the assigned [`schedule::Resource`](Resource.md). |
 | `units` | `double` | Assigned units, as a ratio. `1.0` == 100%. |
 | `workMillis` | `qint64` | Assigned work, in milliseconds. |
+| `start`, `finish` | `QDateTime` | Scheduled assignment span; invalid means use the task span. |
+| `delayMillis` | `qint64` | Assignment delay in working milliseconds. |
+| `levelingDelayMillis` | `qint64` | Delay added by resource leveling. |
+| `actualWorkMillis` | `qint64` | Work completed. |
+| `remainingWorkMillis` | `qint64` | Work still scheduled. |
 | `notes` | `QString` | The assignment's notes as raw RTF source (empty if none). |
 | `cost` | `double` | Total cost, in the project's currency unit. |
 | `actualCost` | `double` | Cost incurred so far. |

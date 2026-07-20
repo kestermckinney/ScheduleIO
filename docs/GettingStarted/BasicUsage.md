@@ -130,14 +130,26 @@ if (io.openFromData(bytes))
     process(io.project());
 ```
 
-## A note on saving
+## Editing and saving
 
-`MppIO::save()` / `saveToData()` serialise the model to the library's **own** internal format, not
-the Microsoft binary `.mpp` layout. They exist so the model can be round-tripped (read → write →
-read) without loss. MppIO does **not** write Microsoft Project binary files.
+Copy the value model, edit it, put it back into the facade, and save. MPP14 is a native binary output
+format; an `Unknown` format version defaults to MPP14.
 
-To produce a file Microsoft Project can open, save the same model as **Microsoft Project compatible
-XML** with [`XmlIO`](../API/XmlIO.md) — it shares this object model, so it is a drop-in for output:
+```cpp
+schedule::Project edited = io.project();
+edited.title = "Updated schedule";
+edited.tasks[0].name = "Confirm requirements";
+
+io.setProject(edited);
+if (!io.save("Updated-schedule.mpp"))
+    qWarning() << io.errorString();
+```
+
+MPP12 files can be read, but selecting `FormatVersion::Mpp12` for output uses the legacy internal
+scaffold rather than a Microsoft-compatible MPP12 writer. Use MPP14 for native binary delivery.
+
+You can also save the same model as **Microsoft Project compatible XML** with
+[`XmlIO`](../API/XmlIO.md):
 
 ```cpp
 #include "xmlio.h"
@@ -147,4 +159,6 @@ xml.setProject(io.project());   // the model you just read from the .mpp
 xml.save("Schedule.xml");       // standard MSPDI; opens in Microsoft Project
 ```
 
-See [XML Interchange](XmlInterchange.md) for the full read/write API and `.mpp` ↔ `.xml` conversion.
+See [Editing and Scheduling](EditingAndScheduling.md) for construction, dependency scheduling,
+resource leveling, formatting, and output examples. See [XML Interchange](XmlInterchange.md) for the
+full XML API and `.mpp` ↔ `.xml` conversion.

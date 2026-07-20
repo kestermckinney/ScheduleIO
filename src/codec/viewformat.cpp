@@ -656,10 +656,14 @@ void readColumnProperties(const QByteArray &d, schedule::Project *out)
 QByteArray buildColumnProperties(const schedule::Project &in)
 {
     QByteArray d;
-    const auto appendRecord = [&](int uid, quint32 field, const schedule::TextStyle &s) {
+    const auto appendRecord = [&](int uid, quint32 field, const schedule::TextStyle &s,
+                                  bool explicitRowWeight = false) {
         const quint16 pat = s.backPattern == 0 ? 1 : quint16(s.backPattern);
         quint16 changeMask = 0;
-        if (s.bold) changeMask |= kChgBold;
+        // A Project-authored whole-row Font32Ex record always carries the bold
+        // change bit, even when its value is false. Without that explicit
+        // "normal weight" override, Project renders formatted task rows bold.
+        if (explicitRowWeight || s.bold) changeMask |= kChgBold;
         if (s.underline) changeMask |= kChgUnderline;
         if (s.italic) changeMask |= kChgItalic;
         if (s.color != schedule::TextStyle::kAutomatic) changeMask |= kChgColor;
@@ -687,8 +691,8 @@ QByteArray buildColumnProperties(const schedule::Project &in)
         const schedule::TextStyle &s = t.rowFormat;
         if (!s.isDefault()) {
             // MS Project writes an ID-column record plus a whole-row record.
-            appendRecord(t.uniqueId, kTaskFieldBase | kFieldId, s);
-            appendRecord(t.uniqueId, kFieldWholeRow, s);
+            appendRecord(t.uniqueId, kTaskFieldBase | kFieldId, s, true);
+            appendRecord(t.uniqueId, kFieldWholeRow, s, true);
         }
 
         QStringList keys = t.cellFormats.keys();

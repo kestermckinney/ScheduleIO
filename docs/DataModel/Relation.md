@@ -16,6 +16,7 @@ type; copyable and equality-comparable.
 | `successorTaskUid` | `int` | Unique id of the successor task. |
 | `type` | `int` | Link type — see `schedule::Relation::Type` below. |
 | `lagMillis` | `qint64` | Lag/lead between the tasks, in milliseconds. |
+| `lagFormat` | `int` | Microsoft Project display-unit code (`schedule::Duration::Unit`). |
 
 ## Type
 

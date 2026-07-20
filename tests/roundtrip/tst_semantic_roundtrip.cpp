@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "mppio.h"
+#include "codec/bkndvardata.h"
 #include "ole/compoundfile.h"
 
 #include <QDir>
@@ -193,6 +194,7 @@ private slots:
     void taskDisplayOrderOrdinalIsWritten();
     void completedAssignmentStateIsWritten();
     void fontBaseTableAndIndicesArePreserved();
+    void normalRowWeightIsWrittenExplicitly();
     void realFixtures_data();
     void realFixtures();
 
@@ -440,6 +442,77 @@ void TstSemanticRoundtrip::fontBaseTableAndIndicesArePreserved()
     QVERIFY(reader.openFromData(bytes));
     QCOMPARE(reader.project().mppFontBases, p.mppFontBases);
     QCOMPARE(reader.project().viewStyles.text[schedule::ViewStyles::Critical].fontBaseIndex, 5);
+}
+
+void TstSemanticRoundtrip::normalRowWeightIsWrittenExplicitly()
+{
+    schedule::Project p = makeSampleProject();
+    p.tasks[0].rowFormat.bold = false;
+
+    MppIO writer;
+    writer.setProject(p);
+    const QByteArray bytes = writer.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(writer.errorString()));
+
+    CompoundFile cf;
+    QVERIFY(cf.openFromData(bytes));
+    const QStringList base = { QStringLiteral("   214"), QStringLiteral("CV_iew") };
+    const QByteArray fixedMeta = cf.readStream(base + QStringList{ QStringLiteral("FixedMeta") });
+    const QByteArray fixedData = cf.readStream(base + QStringList{ QStringLiteral("FixedData") });
+    const auto u16 = [](const QByteArray &b, int off) {
+        return qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(b.constData() + off));
+    };
+    const auto u32 = [](const QByteArray &b, int off) {
+        return qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(b.constData() + off));
+    };
+
+    int ganttUid = -1;
+    int lastOffset = -1;
+    const int viewCount = int(u32(fixedMeta, 8));
+    for (int i = 0; i < viewCount; ++i) {
+        const int metaOff = 16 + i * 10;
+        const int offset = int(u16(fixedMeta, metaOff + 4));
+        if (offset <= lastOffset)
+            continue;
+        lastOffset = offset;
+        if (offset + 138 <= fixedData.size() && u16(fixedData, offset + 110) == 0
+            && u16(fixedData, offset + 112) == 1) {
+            ganttUid = int(u32(fixedData, offset));
+            break;
+        }
+    }
+    QVERIFY(ganttUid >= 0);
+
+    BkndVarData viewData;
+    QVERIFY(viewData.parse(cf.readStream(base + QStringList{ QStringLiteral("VarMeta") }),
+                           cf.readStream(base + QStringList{ QStringLiteral("Var2Data") })));
+    const QByteArray props = viewData.blobFor(quint32(ganttUid), 6);
+    QVERIFY(props.size() >= 16);
+
+    QByteArray columnProperties;
+    int itemOffset = 16;
+    const int itemCount = int(u16(props, 12));
+    for (int i = 0; i < itemCount && itemOffset + 12 <= props.size(); ++i) {
+        const int size = int(u32(props, itemOffset));
+        const quint32 key = u32(props, itemOffset + 4);
+        itemOffset += 12;
+        QVERIFY(itemOffset + size <= props.size());
+        if (key == 574619660u)
+            columnProperties = props.mid(itemOffset, size);
+        itemOffset += size + (size & 1);
+    }
+    QVERIFY(!columnProperties.isEmpty());
+
+    bool foundWholeRow = false;
+    for (int off = 0; off + 44 <= columnProperties.size(); off += 44) {
+        if (int(u32(columnProperties, off)) != p.tasks[0].uniqueId
+            || u32(columnProperties, off + 4) != 0xFFFFFFFFu)
+            continue;
+        foundWholeRow = true;
+        QCOMPARE(uchar(columnProperties.at(off + 11)) & 0x01, 0); // bold value: off
+        QVERIFY(u16(columnProperties, off + 40) & 0x01);           // bold override: explicit
+    }
+    QVERIFY(foundWholeRow);
 }
 
 void TstSemanticRoundtrip::realFixtures_data()

@@ -17,9 +17,9 @@ exports and imports as `.xml`. It reads such a file into an
 The class is non-copyable (`Q_DISABLE_COPY`). Create one per file you want to read or write.
 
 !!! note "How it differs from `MppIO::save()`"
-    Unlike [`MppIO::save()`](MppIO.md) — which serialises the library's own internal format —
-    `XmlIO::save()` writes a **standard MSPDI document that Microsoft Project can open**. `XmlIO` is
-    the supported path for producing a file you can hand back to Microsoft Project.
+    `XmlIO::save()` writes standard, text-based MSPDI. [`MppIO::save()`](MppIO.md) writes a native
+    binary MPP14 file when the model's format is `Mpp14` (or `Unknown`). Both outputs can be consumed
+    by Microsoft Project; choose XML for transparent interchange and MPP14 for native binary output.
 
 ## Member functions
 
@@ -105,21 +105,25 @@ succeeded.
 
 ## What is read and written
 
-`XmlIO` maps every field the [data model](../DataModel/Overview.md) holds:
+`XmlIO` maps the schedule-data portion of the [data model](../DataModel/Overview.md):
 
 | Area | MSPDI ↔ model |
 | :--- | :--- |
-| **Project** | `SaveVersion`, `Title`, `Author`, `StartDate`, `FinishDate` |
-| **Tasks** | UID, ID, `Name`, `WBS`, `OutlineLevel`, `Start`, `Finish`, `Duration`, `PercentComplete`, `Milestone`, `Summary`, `ConstraintType`/`ConstraintDate`, `Notes`, costs |
+| **Project** | `SaveVersion`, `Title`, `Author`, `StartDate`, `FinishDate`, `StatusDate`, `CalendarUID` |
+| **Tasks** | identity/outline, scheduled and actual dates, duration/work, completion, active/manual/task type, effort-driven, priority, deadline, calendar, constraints, notes, costs, earned value |
 | **Baselines** | task `<Baseline>` (number, start, finish, duration, work, cost) |
 | **Predecessor links** | `<PredecessorLink>` on the successor task ↔ `schedule::Project.relations` |
 | **Extended attributes** | `<ExtendedAttribute>` ↔ `customFields` (decoded to the field's natural Qt type) |
-| **Resources** | UID, ID, `Name`, `Initials`, `MaxUnits`, costs, notes, `<Rates>` ↔ cost-rate tables |
-| **Assignments** | UID, `TaskUID`, `ResourceUID`, `Units`, `Work`, costs, notes |
+| **Resources** | UID, ID, name/initials, max units, calendar, availability periods, costs, notes, and rate tables |
+| **Assignments** | identity/links, scheduled span, delay/leveling delay, units, work/actual/remaining work, costs, notes |
 | **Calendars** | `WeekDays` (working-day mask + working times) and `Exceptions` |
 
 Durations and work are written as ISO-8601 durations (e.g. `PT8H0M0S`), preserving Microsoft
 Project's sub-second precision. See [Field Coverage](../Reference/FieldCoverage.md).
+
+MPP view styles, row/cell formatting, font-base payloads, per-task bar colors, and the report accent
+are not serialized by `XmlIO`; use MPP14 when those supported binary presentation fields must be
+retained.
 
 ## C factory entry points
 

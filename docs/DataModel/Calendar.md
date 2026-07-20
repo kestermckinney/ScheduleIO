@@ -79,3 +79,7 @@ for (int d = 0; d < cal.workingTimes.size(); ++d)
 * A **derived** (e.g. resource) calendar leaves a weekday's `workingTimes` empty when that day simply
   inherits the base calendar — resolve it via `baseCalendarUniqueId`. A **base** calendar fills each
   working day, defaulting to 08:00–12:00 and 13:00–17:00 when the file stores no explicit hours.
+* `Calendar::microsoftDefaults()` constructs Microsoft's Standard, 24 Hours, and Night Shift base
+  calendars with UIDs 1, 2, and 3.
+* `WorkCalendar(project, uid)` resolves base-calendar inheritance and exceptions into query methods
+  such as `nextWorkStart()`, `addWork()`, and `workBetween()`.

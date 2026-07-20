@@ -1,21 +1,26 @@
 # Field Coverage
 
-This page summarises which fields MppIO decodes today. Every entry marked **read** is validated in
-the test suite against Microsoft Project's own XML export of the same file, across several real
-fixtures.
+This page summarises which fields MppIO decodes and which areas the native MPP14 writer regenerates.
+Every entry marked **read** is validated in the test suite against Microsoft Project's own XML export
+of the same file across several real fixtures. Binary write coverage is also exercised by semantic
+round trips and raw-stream tests.
 
-Every field listed here is also read **and written** as Microsoft Project compatible XML by
-[`XmlIO`](../API/XmlIO.md): the XML round-trip (read → write → read) is verified to be lossless for
-all of them on the same fixtures, and `XmlIO` reading a `.xml` is cross-checked against `MppIO`
-reading the matching `.mpp`. See [XML Interchange](../GettingStarted/XmlInterchange.md).
+Schedule fields such as dates, work, actuals, costs, calendars, availability, baselines, and custom
+fields are also read and written as Microsoft Project compatible XML by
+[`XmlIO`](../API/XmlIO.md). MPP view/row/cell formatting is binary-only and is not represented by
+the current MSPDI serializer. `XmlIO` reading a `.xml` is cross-checked against `MppIO` reading the
+matching `.mpp`. See [XML Interchange](../GettingStarted/XmlInterchange.md).
 
 ## Project
 
 | Field | Status |
 | :--- | :--- |
-| Title, Author | read (from the document summary information) |
-| Start date, Finish date | read |
-| Format version | read |
+| Title, Author | read / MPP14 write |
+| Start date, Finish date, Status date | read / MPP14 write |
+| Default project calendar | read / MPP14 write |
+| Format version | read; selects writer on save |
+| View text, line, and standard bar styles | read / MPP14 write for supported views/categories |
+| Report accent color | model/internal scaffold; MPP and MSPDI persistence not yet |
 
 ## Tasks
 
@@ -35,7 +40,12 @@ reading the matching `.mpp`. See [XML Interchange](../GettingStarted/XmlIntercha
 | Baselines 0–10 (cost, work, start, finish, duration) | read |
 | Custom fields (Text/Number/Cost/Date/Duration/Start/Finish/Flag/Outline Code) | read |
 | Notes | read (raw RTF source) |
-| Critical, slack | not yet (derived from the schedule) |
+| Manual/automatic mode, task type, effort-driven, priority, deadline | read / MPP14 write |
+| Task work, actual dates/duration/work, earned-value metrics | read / MPP14 write |
+| Active/inactive state | read / MPP14 write |
+| Row and per-cell font/color/background formatting | read / MPP14 write |
+| Per-task bar color | model/internal scaffold; MPP and MSPDI persistence not yet |
+| Critical, late dates, total/free slack | computed by `Scheduler`; stored-field coverage varies |
 
 ## Resources
 
@@ -49,6 +59,8 @@ reading the matching `.mpp`. See [XML Interchange](../GettingStarted/XmlIntercha
 | Custom fields | read |
 | Notes | read (raw RTF source) |
 | Cost-rate tables A–E (standard/overtime rate, cost-per-use, effective dates) | read |
+| Resource calendar | read / MPP14 write (via a derived per-resource calendar row) |
+| Availability table (time-phased max units) | read / MPP14 write |
 | Group, code, e-mail, type | not yet |
 
 ## Assignments
@@ -59,6 +71,8 @@ reading the matching `.mpp`. See [XML Interchange](../GettingStarted/XmlIntercha
 | Task / Resource unique id | read |
 | Units | read |
 | Work | read |
+| Start, finish, assignment/leveling delay | read / MPP14 write |
+| Actual and remaining work | read / MPP14 write |
 | Cost, Actual/Remaining cost, Cost variance | read |
 | Baselines 0–10 (cost, work, start, finish) | read |
 | Custom fields | read |
@@ -71,6 +85,7 @@ reading the matching `.mpp`. See [XML Interchange](../GettingStarted/XmlIntercha
 | Predecessor / successor task | read |
 | Link type | read |
 | Lag | read |
+| Lag display unit | read / MPP14 write |
 
 ## Calendars
 
@@ -82,6 +97,13 @@ reading the matching `.mpp`. See [XML Interchange](../GettingStarted/XmlIntercha
 | Working-day mask | read |
 | Working hours (per weekday) | read |
 | Exceptions (holidays / one-off days) | read |
+
+## Save preservation rule
+
+The MPP14 writer starts with ScheduleIO's embedded template and regenerates modeled entity and view
+data. This is not an in-place patch of the source file. Unsupported fields, custom views, macros, and
+other unmodeled source-only content should not be assumed to survive a read/edit/write cycle. See
+[MPP File Format and Storage](FileFormat.md) for the exact pipeline.
 
 ## Validation approach
 

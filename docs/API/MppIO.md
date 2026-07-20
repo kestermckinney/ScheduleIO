@@ -1,7 +1,7 @@
 # MppIO Class
 
-`MppIO` is the public facade for the library. It reads a Microsoft Project `.mpp` file into an
-[`schedule::Project`](../DataModel/Project.md) and gives access to the result.
+`MppIO` is the public facade for binary Microsoft Project files. It reads MPP12/MPP14 files into a
+[`schedule::Project`](../DataModel/Project.md) and writes native MPP14 files.
 
 ```cpp
 #include "mppio.h"
@@ -46,19 +46,28 @@ contents directly — handy for files received over the network or embedded in a
 
 Write the current project to `path`.
 
-!!! note
-    `save()` writes the library's **own internal format**, not the Microsoft binary `.mpp` layout.
-    It exists so a model can be round-tripped without loss. It does **not** produce a file that
-    Microsoft Project can open.
+* `Mpp14` writes a real template-based binary MPP14 container (Project 2010 and later family).
+* `Unknown` defaults to `Mpp14`, which is convenient for newly constructed projects.
+* `Mpp12` uses the legacy ScheduleIO scaffold and should only be used for internal round trips; it
+  is not a Microsoft Project-compatible MPP12 writer.
 
 * **Returns** `true` on success, `false` on failure.
+
+```cpp
+schedule::Project edited = io.project();
+edited.title = "Updated plan";
+
+io.setProject(edited);
+if (!io.save("Updated-plan.mpp"))
+    qWarning() << io.errorString();
+```
 
 ---
 
 ### `QByteArray saveToData()`
 
-Like `save()`, but returns the serialised bytes instead of writing a file. Returns an empty array on
-failure.
+Like `save()`, but returns the complete compound-file image instead of writing a file. Returns an
+empty array on failure.
 
 ---
 
@@ -77,8 +86,19 @@ for (const schedule::Task &t : p.tasks)
 
 ### `void setProject(const schedule::Project &project)`
 
-Replace the current in-memory project. Useful before `save()` / `saveToData()`, or to manipulate a
-project the host constructed itself.
+Replace the current in-memory project by value. The caller may safely modify or destroy its source
+object after this call. Use this before `save()` / `saveToData()` for a copied, edited, or newly
+constructed project.
+
+## Ownership and lifetime
+
+`open()` reads the complete source file and closes it before returning. `openFromData()` does not
+retain a reference to the caller's `QByteArray`. The reference from `project()` belongs to the
+`MppIO` instance and remains valid until that instance is destroyed, `setProject()` is called, or a
+later successful `open()` replaces the model.
+
+See [MPP File Format and Storage](../Reference/FileFormat.md) for the container layout, stream
+formats, read/write pipeline, and preservation boundaries.
 
 ---
 

@@ -3,27 +3,30 @@
 
 # ScheduleIO
 
-A cross-platform (Windows / macOS / Linux) Qt6 C++ library that reads Microsoft
-Project `.mpp` files into Qt data structures for manipulation. It also reads **and
-writes** Microsoft Project compatible XML (the MSPDI `.xml` format) over the same
-object model via the `XmlIO` class — so you can load a `.mpp` and save XML that
-Microsoft Project can open. Built as a **dynamically loaded** shared library.
+A cross-platform (Windows / macOS / Linux) Qt 6/C++17 library for Microsoft Project schedules.
+`MppIO` reads MPP12/MPP14 files and writes native template-based MPP14 files. `XmlIO` reads and
+writes Microsoft Project compatible MSPDI XML over the same `schedule::Project` value model. The
+library also provides working-calendar, dependency scheduling, critical-path, work/units, and
+resource-leveling utilities. Microsoft Project does not need to be installed.
 
 ## Status
 
-Scaffold. The full pipeline (`open` → `schedule::Project` → `save`) works end to end on
-a self-consistent encoding, and the lower layers are real:
+The full `open` → `schedule::Project` → edit/schedule → `save` pipeline is implemented:
 
-- **`src/ole/compoundfile`** — a working [MS-CFB] (OLE2 compound document)
-  reader/writer (FAT, mini-FAT, directory BST), the same container `.mpp` uses.
-- **`src/codec/fielddecoders`**, **`src/codec/streamquartet`** — reversible field
-  codecs and the `FixedMeta`/`VarMeta`/`FixedData`/`Var2Data` quartet model.
-- **`src/model/*`** — the Qt data structures (value types with `operator==`).
-- **`src/serializer/*`** — version dispatch (MPP.12 / MPP.14).
+- **Binary I/O** — a bounds-checked MS-CFB reader/writer plus decoded Props, field maps, fixed
+  records, variable blobs, and MPP view-format data.
+- **MPP14 writer** — regenerates tasks, resources, assignments, dependencies, calendars, project
+  properties, and supported formatting from an embedded real-file template.
+- **Model** — copyable Qt value types for schedule entities, costs, baselines, custom fields,
+  actuals, availability, calendars, and formatting.
+- **Scheduling** — working-time calendars, dependency forward/backward passes, critical path,
+  Work = Duration x Units behavior, and resource leveling.
+- **Validation** — low-level unit tests, semantic binary round trips, and oracle comparisons between
+  real MPP fixtures and Microsoft Project XML exports.
 
-**To be reverse-engineered against real fixtures:** the exact on-disk MPP field
-layouts inside the quartet streams. That seam is marked in
-`src/serializer/docserializer.cpp`. See `tests/fixtures/README.md`.
+MPP12 is readable; MPP12 output remains a ScheduleIO-only legacy scaffold. A binary save starts from
+the embedded MPP14 template rather than patching the source file in place, so unsupported source-only
+content is not guaranteed to survive. See the field-coverage and format/storage references below.
 
 ## Build
 
@@ -38,9 +41,9 @@ Qt Creator) or pass `-DCMAKE_PREFIX_PATH=<Qt>/<ver>/msvc2022_64`.
 
 ## Testing strategy
 
-See the layered strategy in the project plan. Layers 1 (unit), 5 (dynamic load)
-and the synthetic round-trip run with no external data; Layers 2–3 activate once
-real `.mpp` + `.xml` fixture pairs are added under `tests/fixtures/`.
+Run the complete suite with `ctest --test-dir build --output-on-failure`. Real `.mpp` + `.xml`
+fixture pairs under `tests/fixtures/` support cross-format oracle tests; generated fixtures cover
+focused formatting and scheduling cases.
 
 ## Documentation
 
@@ -56,6 +59,7 @@ mkdocs serve          # then open http://127.0.0.1:8000/
 ```
 
 Or build the static site with `mkdocs build` (output in `site/`). Start at `docs/index.md`; the data
-structures are under **Data Model**, the public classes (`MppIO` and `XmlIO`) under **API Reference**,
-reading/writing Microsoft Project XML under **Getting Started → XML Interchange**, and what is/isn't
-decoded under **Reference → Field Coverage**.
+structures are under **Data Model**, the I/O and scheduling APIs under **API Reference**, and complete
+examples under **Getting Started**. The detailed binary layout, compound storage behavior, ownership,
+and writer pipeline are under **Reference → MPP File Format and Storage**; preservation details are
+under **Reference → Field Coverage**.

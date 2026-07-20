@@ -5,12 +5,13 @@ hangs off it as `QList`s of value types.
 
 ```
 schedule::Project
-├── title, author, startDate, finishDate, formatVersion
+├── metadata, dates, default calendar, format version
 ├── tasks        : QList<schedule::Task>
 ├── resources    : QList<schedule::Resource>
 ├── assignments  : QList<schedule::Assignment>
 ├── relations    : QList<schedule::Relation>
-└── calendars    : QList<schedule::Calendar>
+├── calendars    : QList<schedule::Calendar>
+└── view styles  : Gantt, Resource Usage, Team Planner, Calendar
 ```
 
 ## Design principles
@@ -30,6 +31,9 @@ integer **unique ids**:
 | `schedule::Assignment` | `resourceUniqueId` | a `schedule::Resource.uniqueId` |
 | `schedule::Relation` | `predecessorTaskUid`, `successorTaskUid` | `schedule::Task.uniqueId` |
 | `schedule::Calendar` | `baseCalendarUniqueId` | another `schedule::Calendar.uniqueId` |
+| `schedule::Project` | `calendarUniqueId` | the project calendar |
+| `schedule::Task` | `calendarUniqueId` | an optional task calendar |
+| `schedule::Resource` | `calendarUniqueId` | an optional resource calendar |
 
 Build a `QHash<int, …>` keyed on `uniqueId` when you need fast lookups (see
 [Basic Usage](../GettingStarted/BasicUsage.md)).
@@ -47,6 +51,13 @@ outline level deeper.
 | `qint64` | durations and work, in **milliseconds** |
 | `double` | ratios such as assignment units and resource max units (`1.0` == 100%) |
 | `int` | unique ids, display ids, outline levels, enum-like codes |
+
+## Editing the model
+
+The I/O classes do not retain pointers into these lists. Copy a project, edit its public fields, and
+pass the value back with `setProject()`. Use `TaskScheduling`, `Scheduler`, `ResourceLeveling`, and
+`WorkCalendar` when an edit needs Microsoft Project-like recalculation. See
+[Editing and Scheduling](../GettingStarted/EditingAndScheduling.md).
 
 ## Per-type reference
 

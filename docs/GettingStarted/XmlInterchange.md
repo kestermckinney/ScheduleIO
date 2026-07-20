@@ -84,17 +84,17 @@ if (in.open("Schedule.xml"))
     analyse(in.project());
 ```
 
-!!! note "Writing binary `.mpp` is not supported"
-    `XmlIO` produces Microsoft Project compatible **XML**. Writing the binary `.mpp` layout is not
-    supported by this library (or by anything other than Microsoft Project itself). When you need a
-    file Microsoft Project can open, write `.xml` with `XmlIO`.
+!!! note "XML and binary output"
+    `XmlIO` produces Microsoft Project compatible **XML**. For a native binary Project 2010+ file,
+    pass the same model to `MppIO` and save it as MPP14.
 
 ## Round-tripping
 
-`XmlIO` is a lossless reader/writer for the modelled fields: reading a document, writing it, and
-reading it again yields an identical `schedule::Project`. This is verified against real Microsoft Project
-exports in the test suite (`tst_xml_roundtrip`), and a second test (`tst_xml_mpp_crosscheck`) loads
-the same project both ways — `.mpp` via `MppIO` and `.xml` via `XmlIO` — and confirms they agree.
+`XmlIO` is a lossless reader/writer for the schedule-data fields it maps: reading a document, writing
+it, and reading it again preserves those fields. This is verified against real Microsoft Project
+exports in `tst_xml_roundtrip`; `tst_xml_mpp_crosscheck` also loads the same project from MPP and XML
+and compares their shared schedule data. MPP view/row/cell formatting and font-base payloads are not
+represented in MSPDI output.
 
 ## Loading at run time
 

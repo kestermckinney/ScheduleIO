@@ -16,6 +16,7 @@ copyable and equality-comparable.
 | `name` | `QString` | Resource name. |
 | `initials` | `QString` | Resource initials. |
 | `maxUnits` | `double` | Maximum units available, as a ratio. `1.0` == 100%. |
+| `calendarUniqueId` | `int` | Resource calendar UID, or `-1` when none is recorded. |
 | `notes` | `QString` | The resource's notes as raw RTF source (empty if none). |
 | `cost` | `double` | Total cost, in the project's currency unit (rolled up from assignments when not stored). |
 | `actualCost` | `double` | Cost incurred so far. |
@@ -24,6 +25,7 @@ copyable and equality-comparable.
 | `baselines` | `QList<schedule::Baseline>` | Saved baselines (cost and work only; see [`schedule::Baseline`](Baseline.md)). |
 | `customFields` | `QList<schedule::CustomField>` | Populated custom/extended fields (see [`schedule::CustomField`](CustomField.md)). |
 | `costRates` | `QList<schedule::CostRate>` | Cost-rate tables A–E with time-phased rates (see [`schedule::CostRate`](CostRate.md)). |
+| `availabilityTable` | `QList<schedule::AvailabilityPeriod>` | Time-phased maximum-unit rows; invalid endpoints mean an open range. |
 
 ## Notes
 

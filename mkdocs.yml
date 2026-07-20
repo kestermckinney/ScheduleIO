@@ -9,11 +9,13 @@ nav:
   - 'Getting Started':
     - 'Building': GettingStarted/Building.md
     - 'Basic Usage': GettingStarted/BasicUsage.md
+    - 'Editing and Scheduling': GettingStarted/EditingAndScheduling.md
     - 'XML Interchange': GettingStarted/XmlInterchange.md
     - 'Dynamic Loading': GettingStarted/DynamicLoading.md
   - 'API Reference':
     - 'MppIO Class': API/MppIO.md
     - 'XmlIO Class': API/XmlIO.md
+    - 'Scheduling Utilities': API/Scheduling.md
   - 'Data Model':
     - 'Overview': DataModel/Overview.md
     - 'Project': DataModel/Project.md
@@ -27,7 +29,7 @@ nav:
     - 'CostRate': DataModel/CostRate.md
   - 'Reference':
     - 'Field Coverage': Reference/FieldCoverage.md
-    - 'File Format Notes': Reference/FileFormat.md
+    - 'MPP File Format and Storage': Reference/FileFormat.md
 
 markdown_extensions:
   - tables
