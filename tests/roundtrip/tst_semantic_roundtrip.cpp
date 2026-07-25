@@ -531,11 +531,20 @@ void TstSemanticRoundtrip::realFixtures()
 
     QFETCH(QString, path);
 
+    QFile source(path);
+    QVERIFY2(source.open(QIODevice::ReadOnly), qPrintable(source.errorString()));
+    const QByteArray originalBytes = source.readAll();
+    QVERIFY(!originalBytes.isEmpty());
+
     MppIO reader;
-    if (!reader.open(path))
-        QSKIP(qPrintable(QStringLiteral("parser cannot yet read this fixture: %1 "
-                                         "(expected until the MPP field mapping is filled in)")
-                             .arg(reader.errorString())));
+    QVERIFY2(reader.openFromData(originalBytes),
+             qPrintable(QStringLiteral("%1: %2").arg(path, reader.errorString())));
+
+    // An unchanged document must retain every opaque stream and every byte of
+    // physical Compound File layout, not merely reconstruct the same model.
+    const QByteArray unchangedBytes = reader.saveToData();
+    QVERIFY2(!unchangedBytes.isEmpty(), qPrintable(reader.errorString()));
+    QCOMPARE(unchangedBytes, originalBytes);
 
     const schedule::Project m1 = reader.project();
     MppIO writer;

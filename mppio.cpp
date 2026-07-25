@@ -10,6 +10,9 @@
 
 struct MppIO::Private {
     schedule::Project project;
+    schedule::Project sourceProject;
+    QByteArray sourceData;
+    bool hasSource = false;
     QString error;
 };
 
@@ -48,6 +51,9 @@ bool MppIO::openFromData(const QByteArray &bytes)
         return false;
 
     d->project = parsed;
+    d->sourceProject = parsed;
+    d->sourceData = bytes;
+    d->hasSource = true;
     return true;
 }
 
@@ -71,6 +77,12 @@ QByteArray MppIO::saveToData()
 {
     d->error.clear();
 
+    // The semantic Project deliberately omits opaque streams and physical OLE
+    // layout.  If a loaded document is still unchanged, returning its in-memory
+    // source image is the only way to guarantee an exact binary round trip.
+    if (d->hasSource && d->project == d->sourceProject)
+        return d->sourceData;
+
     schedule::Project::FormatVersion v = d->project.formatVersion;
     if (v == schedule::Project::FormatVersion::Unknown)
         v = schedule::Project::FormatVersion::Mpp14;   // sensible default for new files
@@ -88,7 +100,13 @@ QByteArray MppIO::saveToData()
 }
 
 const schedule::Project &MppIO::project() const { return d->project; }
-void MppIO::setProject(const schedule::Project &project) { d->project = project; }
+void MppIO::setProject(const schedule::Project &project)
+{
+    d->project = project;
+    d->sourceProject = schedule::Project();
+    d->sourceData.clear();
+    d->hasSource = false;
+}
 QString MppIO::errorString() const { return d->error; }
 
 // ---- C factory --------------------------------------------------------------
