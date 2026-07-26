@@ -9,6 +9,7 @@
 #include "codec/propsreader.h"
 #include "codec/viewformat.h"
 #include "ole/compoundfile.h"
+#include "serializer/mpp14manifest.h"
 
 #include <QFile>
 #include <QHash>
@@ -57,10 +58,21 @@ const QString kDataStorage = QStringLiteral("   114");
 // model is byte-identical. Arbitrary but fixed.
 const QUuid kGuidNs("{7a1f5b7e-30d2-4c8a-9a51-6e6c1f0e5a2d}");
 
+// Project's sentinel GUID for the synthetic "unassigned resource" used by
+// task-only assignments. Unlike a normal resource GUID it has no resource row.
+const QByteArray kUnassignedResourceGuid = QByteArray::fromHex(
+    "788bcba08c2a6d4300000000000000ff");
+
 QByteArray guidFor(const char *kind, int uid)
 {
     return encodeGuid(QUuid::createUuidV5(
         kGuidNs, QStringLiteral("scheduleio-%1-%2").arg(QLatin1String(kind)).arg(uid)));
+}
+
+qint64 amountAtPercent(qint64 total, quint16 percent)
+{
+    total = qMax<qint64>(0, total);
+    return qRound64(double(total) * double(percent) / 100.0);
 }
 
 // ---- little-endian appends / pokes ------------------------------------------
@@ -967,6 +979,47 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
 
         for (const schedule::Task *taskPtr : tasksByUid) {
             const schedule::Task &t = *taskPtr;
+            const quint16 percentComplete = encodePercent(t.percentComplete);
+
+            // Percent complete is the value users edit in Schedule Vault and
+            // is the authoritative progress scalar in this model.  Project
+            // also stores actual/remaining values and reconciles conflicting
+            // copies when opening a file.  In particular, a stale full Actual
+            // Duration makes Project change a task to 100%, while a stale
+            // Actual Start pins an otherwise automatic task so predecessors no
+            // longer move it.  The zero remaining-duration copy also makes a
+            // leaf row acquire summary/roll-up-like rendering.
+            //
+            // Preserve genuine actuals (their exact rolled-up values can differ
+            // slightly from percent * duration), but replace the complete set
+            // when it represents a different integer completion percentage.
+            const qint64 completedDuration = amountAtPercent(t.durationMillis, percentComplete);
+            const qint64 remainingDuration = qMax<qint64>(0, t.durationMillis - completedDuration);
+            const qint64 completedWork = amountAtPercent(t.workMillis, percentComplete);
+            bool progressContradictsPercent = false;
+            if (t.actualDurationMillis != 0) {
+                if (t.durationMillis <= 0) {
+                    progressContradictsPercent = true;
+                } else {
+                    const int actualDurationPercent = qBound(
+                        0, int(qRound64(double(t.actualDurationMillis) * 100.0
+                                        / double(t.durationMillis))), 100);
+                    progressContradictsPercent |= actualDurationPercent != percentComplete;
+                }
+            }
+            QDateTime actualStart = t.actualStart;
+            QDateTime actualFinish = t.actualFinish;
+            qint64 actualDuration = t.actualDurationMillis;
+            qint64 actualWork = t.actualWorkMillis;
+            if (progressContradictsPercent) {
+                actualStart = percentComplete > 0
+                    ? (t.actualStart.isValid() ? t.actualStart : t.start) : QDateTime();
+                actualFinish = percentComplete == 100
+                    ? (t.actualFinish.isValid() ? t.actualFinish : t.finish) : QDateTime();
+                actualDuration = completedDuration;
+                actualWork = completedWork;
+            }
+
             QByteArray rec = taskRecTpl;
             QByteArray f2 = taskF2Tpl;
             EntitySink sink;
@@ -984,7 +1037,7 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // every row as a project-summary and render ALL task text in the
             // bold Calibri-12 ProjectSummary text style (proved by
             // byte-bisecting 03_hierarchy_dependencies).
-            sink.putDuration(31, qMax<qint64>(0, t.durationMillis - t.actualDurationMillis));
+            sink.putDuration(31, remainingDuration);
             sink.putDate(35, t.start);                               // (scheduled) START
             sink.putDate(36, t.finish);                              // (scheduled) FINISH
             // Project-authored completed tasks retain their calculated date
@@ -995,11 +1048,11 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             sink.putDate(38, t.finish);                              // EARLY_FINISH
             sink.putDate(39, t.lateStart.isValid() ? t.lateStart : t.start);   // LATE_START
             sink.putDate(40, t.lateFinish.isValid() ? t.lateFinish : t.finish); // LATE_FINISH
-            sink.putU16(32, encodePercent(t.percentComplete));       // PERCENT_COMPLETE
+            sink.putU16(32, percentComplete);                        // PERCENT_COMPLETE
             // Keep the work-progress scalar coherent with task progress. The
             // current model has one progress value; emitting zero here for a
             // completed task makes Project recalculate its duration to zero.
-            sink.putU16(33, encodePercent(t.percentComplete));       // PERCENT_WORK_COMPLETE
+            sink.putU16(33, percentComplete);                        // PERCENT_WORK_COMPLETE
             sink.putU16(249, quint16(t.outlineLevel));               // OUTLINE_LEVEL
             // Row-category fields (decoded from summary-vs-leaf diffs of the
             // mpp_samples ground truth; without them every row inherited the
@@ -1012,18 +1065,34 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // 01/03/06/09 exactly; Average Project also shows 0x09 on some
             // leaves, meaning of that bit still unidentified).
             sink.putU16(181, t.manual ? 0x35 : (t.summary ? 0x15 : 0x07));
+            // Internal task-state word at fixed offset 168. Project-authored
+            // ordinary task rows carry bit 0x2000 in addition to the scaffold
+            // summary's 0x0080. Without it Project treats scheduled rows as
+            // already materialized/custom: zero-duration milestones acquire
+            // actual dates and linked successors stop responding to edits.
+            sink.putU32(201, 0x00002080u);
             sink.putU16(17, quint16(t.constraintType));              // CONSTRAINT_TYPE
             sink.putDate(18, t.constraintDate);                      // CONSTRAINT_DATE
-            // Manual-mode dates (block 1); template default is "no date".
+            // Block 1 carries the manually scheduled tuple. Writing scheduled
+            // values here for an automatic task makes Project regard the bar
+            // as manually/custom formatted; on a zero-duration task it also
+            // creates actual dates and marks the milestone complete. Leave the
+            // scaffold defaults intact for automatic rows.
             if (t.manual) {
                 sink.putDate(kTaskStartManual, t.start);
                 sink.putDate(kTaskFinishManual, t.finish);
-                // Project reads a manually scheduled task's duration from the
-                // secondary record as well. Leaving the project-summary
-                // template values here makes Project reopen the task with its
-                // finish equal to its start and a zero duration.
                 sink.putDuration(1288, t.durationMillis);
                 sink.putU16(1289, quint16(t.durationFormat));
+            } else {
+                // Project-authored automatic rows retain only a cached start
+                // (not a complete manual span), a zero manual duration, and
+                // the automatic-duration unit marker 0x15. The project-summary
+                // scaffold carries different sentinels; copying those to a
+                // zero-duration leaf makes Project infer completed actuals.
+                sink.putDate(kTaskStartManual, t.summary ? QDateTime() : t.start);
+                sink.putDate(kTaskFinishManual, QDateTime());
+                sink.putDuration(1288, 0);
+                sink.putU16(1289, 0x15);
             }
             sink.putU16(MppFieldIds::taskInfo.priority, quint16(t.priority));
             sink.putU16(MppFieldIds::taskInfo.taskType, quint16(t.taskType));
@@ -1039,10 +1108,10 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                                 t.levelingDelayMillis)));
                 sink.putVarBlob(MppFieldIds::taskInfo.levelingDelay, lvl);
             }
-            sink.putDate(MppFieldIds::taskActual.start, t.actualStart);
-            sink.putDate(MppFieldIds::taskActual.finish, t.actualFinish);
-            sink.putDuration(MppFieldIds::taskActual.duration, t.actualDurationMillis);
-            sink.putWork(MppFieldIds::taskActual.work, t.actualWorkMillis);
+            sink.putDate(MppFieldIds::taskActual.start, actualStart);
+            sink.putDate(MppFieldIds::taskActual.finish, actualFinish);
+            sink.putDuration(MppFieldIds::taskActual.duration, actualDuration);
+            sink.putWork(MppFieldIds::taskActual.work, actualWork);
             sink.putDouble(MppFieldIds::taskCost.cost, t.cost);
             sink.putDouble(MppFieldIds::taskCost.fixedCost, t.fixedCost);
             sink.putDouble(MppFieldIds::taskCost.actualCost, t.actualCost);
@@ -1080,6 +1149,16 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // FixedMeta bit flags: MILESTONE int@10 & 0x02, EFFORT_DRIVEN int@13
             // & 0x08 (Project 2013/2016 tables). The tail starts at item byte 8.
             QByteArray metaTail = taskMetaTailTpl;
+            // The only full task row in the embedded scaffold is its project
+            // summary. Three undocumented bits on that row are not harmless
+            // defaults: copying them to ordinary rows makes Project classify
+            // their bars as custom/summary-formatted and can turn an unstarted
+            // zero-duration milestone into a completed task. Clear the two
+            // summary-only bits and use the normal automatic-task value seen
+            // on Project-authored MPP14 leaf and milestone rows.
+            metaTail[1] = char(quint8(metaTail[1]) & ~0x40);
+            metaTail[5] = char(quint8(metaTail[5]) & ~0x10);
+            metaTail[9] = char(quint8(metaTail[9]) | 0x04);
             metaTail[2] = char(t.milestone ? (quint8(metaTail[2]) | 0x02)
                                            : (quint8(metaTail[2]) & ~0x02));
             metaTail[5] = char(t.effortDriven ? (quint8(metaTail[5]) | 0x08)
@@ -1170,7 +1249,12 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                 metaTail[27] = char(quint8(metaTail[27]) | 0x40);
             }
             fixed.addItem(0x00080000u, rec, metaTail);
-            fixed2.addItem(0, QByteArray(kRscF2Block, '\0'));
+            QByteArray f2(kRscF2Block, '\0');
+            // RESOURCE_GUID (Fixed2 field 728). Assignment Fixed2 rows refer
+            // back to this value; zeroing it leaves Project unable to bind the
+            // assignment to its resource reliably.
+            pokeBytes(f2, 0, guidFor("rsc", r.uniqueId));
+            fixed2.addItem(0, f2);
         }
         writeQuartet("TBkndRsc", fixed, fixed2, vars);
     }
@@ -1179,12 +1263,35 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     {
         FixedBuilder fixed(kAssnMetaItem), fixed2(kAssnF2MetaItem);
         VarBuilder vars;
-        // Real assignment rows have no placeholder prefix; the meta tail bytes
-        // are the constant bit-flag pattern observed in Project 2016 files.
-        static const quint8 assnTail[8] = { 0xF1, 0xFF, 0x3B, 0xF0, 0x69, 0x81, 0xC7, 0x03 };
-        const QByteArray assnMetaTail(reinterpret_cast<const char *>(assnTail), 8);
+        QHash<int, const schedule::Task *> taskByUid;
+        for (const schedule::Task &task : in.tasks)
+            taskByUid.insert(task.uniqueId, &task);
+        // Assignment metadata carries progress state separately from the work
+        // fields. In particular, a zero-work milestone is distinguishable as
+        // unstarted only through this metadata; using the completed-row pattern
+        // makes Project synthesize task actuals and pin downstream links.
+        static const quint8 assnUnstartedTail[8] =
+            { 0xF1, 0xFF, 0x23, 0xF0, 0x69, 0x81, 0xC3, 0x03 };
+        static const quint8 assnProgressTail[8] =
+            { 0xF1, 0xFF, 0x3B, 0xF0, 0x69, 0x81, 0xC7, 0x03 };
 
         for (const schedule::Assignment &a : in.assignments) {
+            QDateTime assignmentStart = a.start;
+            QDateTime assignmentFinish = a.finish;
+            const schedule::Task *task = taskByUid.value(a.taskUniqueId, nullptr);
+            if (task && task->start.isValid() && task->finish.isValid()
+                && assignmentStart.isValid() && assignmentFinish.isValid()
+                && (assignmentStart < task->start || assignmentStart > task->finish
+                    || assignmentFinish < task->start || assignmentFinish > task->finish
+                    || assignmentFinish < assignmentStart)) {
+                // A task may have been rescheduled after its assignments were
+                // loaded. Project treats an assignment span outside its task
+                // as authoritative progress and can turn the moved task into
+                // a completed zero-day milestone. Keep valid delayed spans,
+                // but re-anchor a wholly stale span to its task.
+                assignmentStart = task->start;
+                assignmentFinish = task->finish;
+            }
             QByteArray rec(kAssnRecSize, '\0');
             EntitySink sink;
             sink.loc = &assnLoc;
@@ -1205,19 +1312,27 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // to retain completed auto-task durations on reopen.
             sink.putDouble(11, double(a.workMillis) / 60.0, true);   // REGULAR_WORK
             sink.putDouble(12, double(a.remainingWorkMillis) / 60.0, true);  // REMAINING_WORK
-            if (a.start.isValid())
-                sink.putU32(20, FieldDecoders::encodeMppTimestamp(a.start), true);   // START
-            if (a.finish.isValid())
-                sink.putU32(21, FieldDecoders::encodeMppTimestamp(a.finish), true);  // FINISH
+            if (assignmentStart.isValid())
+                sink.putU32(20, FieldDecoders::encodeMppTimestamp(assignmentStart), true);   // START
+            if (assignmentFinish.isValid())
+                sink.putU32(21, FieldDecoders::encodeMppTimestamp(assignmentFinish), true);  // FINISH
             if (a.actualWorkMillis > 0 && a.remainingWorkMillis == 0) {
-                if (a.start.isValid())
-                    sink.putU32(22, FieldDecoders::encodeMppTimestamp(a.start), true); // ACTUAL_START
-                if (a.finish.isValid()) {
-                    const quint32 finish = FieldDecoders::encodeMppTimestamp(a.finish);
+                if (assignmentStart.isValid())
+                    sink.putU32(22, FieldDecoders::encodeMppTimestamp(assignmentStart), true); // ACTUAL_START
+                if (assignmentFinish.isValid()) {
+                    const quint32 finish = FieldDecoders::encodeMppTimestamp(assignmentFinish);
                     sink.putU32(23, finish, true);                    // ACTUAL_FINISH
                     sink.putU32(24, finish, true);                    // RESUME
                     sink.putU32(264, finish, true);                   // STOP
                 }
+            } else if (assignmentStart.isValid()) {
+                // Project-authored unstarted assignments carry Stop/Resume at
+                // their scheduled start. Leaving both absent makes Project
+                // synthesize actual dates; a zero-work milestone is then
+                // silently changed to 100% complete and stops propagating links.
+                const quint32 start = FieldDecoders::encodeMppTimestamp(assignmentStart);
+                sink.putU32(24, start, true);                         // RESUME
+                sink.putU32(264, start, true);                        // STOP
             }
             sink.putU32(25, quint32(FieldDecoders::encodeDurationTenthMinutes(a.delayMillis)),
                         true);                                       // DELAY
@@ -1241,8 +1356,25 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             }
             flushVars(sink, vars, MppFieldIds::kAssignmentHigh);
 
-            fixed.addItem(0x000C0000u, rec, assnMetaTail);
-            fixed2.addItem(0, QByteArray(kAssnF2Block, '\0'));
+            const bool unstarted = a.actualWorkMillis == 0
+                && (!task || task->percentComplete <= 0.0);
+            const quint8 *tailBytes = unstarted ? assnUnstartedTail : assnProgressTail;
+            const QByteArray metaTail(reinterpret_cast<const char *>(tailBytes), 8);
+            fixed.addItem(0x000C0000u, rec, metaTail);
+            // Assignment Fixed2Data is three GUIDs: assignment, task and
+            // resource. Project uses these links in addition to the integer
+            // UIDs. Missing links can make zero-work milestones appear
+            // completed and prevent dependency recalculation after editing.
+            QByteArray f2 = guidFor("assn", a.uniqueId)
+                + guidFor("task", a.taskUniqueId)
+                + (a.resourceUniqueId < 0
+                       ? kUnassignedResourceGuid
+                       : guidFor("rsc", a.resourceUniqueId));
+            QByteArray f2Tail(kAssnF2MetaItem - 8, '\0');
+            // Field-presence bit carried by every Project-authored assignment
+            // Fixed2 row examined (the GUID triplet is present).
+            f2Tail[27] = char(0x10);
+            fixed2.addItem(0, f2, f2Tail);
         }
         writeQuartet("TBkndAssn", fixed, fixed2, vars);
     }
@@ -1353,6 +1485,23 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                 vars.add(quint32(c.uniqueId), kCalData, kCalHigh, calData);
         }
         writeQuartet("TBkndCal", fixed, fixed2, vars);
+    }
+
+    // Project's backend opens each child rowset through duplicated bookkeeping
+    // in the parent Props streams.  Reconcile this only after every 114 rowset
+    // and any patched 214 view data have reached their final sizes.
+    QString manifestError;
+    if (!Mpp14Manifest::reconcile(cf, &manifestError)) {
+        if (error)
+            *error = manifestError;
+        return false;
+    }
+    const QStringList manifestIssues = Mpp14Manifest::audit(cf);
+    if (!manifestIssues.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("inconsistent MPP14 rowset manifest: %1")
+                         .arg(manifestIssues.join(QStringLiteral("; ")));
+        return false;
     }
 
     return true;

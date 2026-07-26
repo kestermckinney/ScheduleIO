@@ -3,7 +3,9 @@
 
 #include "mppio.h"
 #include "codec/bkndvardata.h"
+#include "codec/fielddecoders.h"
 #include "ole/compoundfile.h"
+#include "serializer/mpp14manifest.h"
 
 #include <QDir>
 #include <QTest>
@@ -192,9 +194,11 @@ private slots:
     void syntheticRoundTrip();
     void writerIsDeterministic();
     void taskDisplayOrderOrdinalIsWritten();
+    void inconsistentProgressIsCanonicalizedForProject();
     void completedAssignmentStateIsWritten();
     void fontBaseTableAndIndicesArePreserved();
     void normalRowWeightIsWrittenExplicitly();
+    void parentRowsetManifestsAreConsistent();
     void realFixtures_data();
     void realFixtures();
 
@@ -444,6 +448,140 @@ void TstSemanticRoundtrip::fontBaseTableAndIndicesArePreserved()
     QCOMPARE(reader.project().viewStyles.text[schedule::ViewStyles::Critical].fontBaseIndex, 5);
 }
 
+void TstSemanticRoundtrip::inconsistentProgressIsCanonicalizedForProject()
+{
+    schedule::Project p = makeSampleProject();
+    schedule::Task &partial = p.tasks[0];
+    partial.percentComplete = 0.4;
+    partial.actualStart = partial.start;
+    partial.actualFinish = partial.finish;                 // stale completed state
+    partial.actualDurationMillis = partial.durationMillis; // contradicts 40%
+    partial.actualWorkMillis = partial.workMillis;         // contradicts 40%
+
+    schedule::Task &unstarted = p.tasks[1];
+    unstarted.start = QDateTime(QDate(2026, 1, 12), QTime(9, 0), Qt::UTC);
+    unstarted.finish = QDateTime(QDate(2026, 1, 12), QTime(17, 0), Qt::UTC);
+    unstarted.durationMillis = 8LL * 3600 * 1000;
+    unstarted.workMillis = 8LL * 3600 * 1000;
+    unstarted.percentComplete = 0.0;
+
+    schedule::Assignment staleAssignment;
+    staleAssignment.uniqueId = 10;
+    staleAssignment.taskUniqueId = unstarted.uniqueId;
+    staleAssignment.resourceUniqueId = -65535;
+    staleAssignment.workMillis = unstarted.workMillis;
+    staleAssignment.remainingWorkMillis = staleAssignment.workMillis;
+    staleAssignment.start = unstarted.start.addMonths(-2);
+    staleAssignment.finish = unstarted.finish.addMonths(-2);
+    p.assignments.append(staleAssignment);
+
+    MppIO writer;
+    writer.setProject(p);
+    const QByteArray bytes = writer.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(writer.errorString()));
+
+    // Project consults the remaining-duration copy when categorising and
+    // scheduling a row, so verify the binary field itself rather than relying
+    // only on ScheduleIO's reader (which intentionally does not model it).
+    CompoundFile cf;
+    QVERIFY2(cf.openFromData(bytes), qPrintable(cf.errorString()));
+    const QStringList base = { QStringLiteral("   114"), QStringLiteral("TBkndTask") };
+    const QByteArray meta = cf.readStream(base + QStringList{ QStringLiteral("FixedMeta") });
+    const QByteArray data = cf.readStream(base + QStringList{ QStringLiteral("FixedData") });
+    const auto u16 = [](const QByteArray &b, int off) {
+        return qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(b.constData() + off));
+    };
+    const auto u32 = [](const QByteArray &b, int off) {
+        return qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(b.constData() + off));
+    };
+    auto recordForUid = [&](quint32 wanted, int *metaItem) {
+        const int count = int(u32(meta, 8));
+        for (int i = 0; i < count; ++i) {
+            const int item = 16 + i * 47;
+            const int off = int(u32(meta, item + 4));
+            if (off + 202 <= data.size() && u32(data, off + 4) == wanted) {
+                if (metaItem)
+                    *metaItem = item;
+                return data.mid(off, 202);
+            }
+        }
+        return QByteArray();
+    };
+
+    int partialMeta = -1;
+    const QByteArray partialRecord = recordForUid(quint32(partial.uniqueId), &partialMeta);
+    QCOMPARE(partialRecord.size(), 202);
+    QCOMPARE(u32(partialRecord, 88), quint32(2880)); // 60% of 8h, tenth-minutes
+    QCOMPARE(u16(partialRecord, 92), quint16(40));
+    QCOMPARE(u16(partialRecord, 140), quint16(0));   // leaf, not summary
+    QCOMPARE(u16(partialRecord, 164), quint16(0x07)); // automatic leaf state
+    QCOMPARE(u32(partialRecord, 168), quint32(0x00002080));
+    QVERIFY(partialMeta >= 0);
+    QCOMPARE(uchar(meta.at(partialMeta + 12)) & 0x0c, 0); // neither Rollup nor Summary
+    QCOMPARE(uchar(meta.at(partialMeta + 9)) & 0x40, 0);  // no project-summary status bit
+    QCOMPARE(uchar(meta.at(partialMeta + 13)) & 0x10, 0); // no project-summary format bit
+    QVERIFY(uchar(meta.at(partialMeta + 17)) & 0x04);      // normal automatic-task state
+
+    int unstartedMeta = -1;
+    const QByteArray unstartedRecord = recordForUid(quint32(unstarted.uniqueId), &unstartedMeta);
+    QCOMPARE(unstartedRecord.size(), 202);
+    QCOMPARE(u32(unstartedRecord, 88), quint32(4800)); // full 8h remains
+    QCOMPARE(u16(unstartedRecord, 92), quint16(0));
+    QVERIFY(unstartedMeta >= 16);
+
+    const QStringList assnBase = { QStringLiteral("   114"), QStringLiteral("TBkndAssn") };
+    const QByteArray assnMeta = cf.readStream(assnBase + QStringList{ QStringLiteral("FixedMeta") });
+    const QByteArray assnData = cf.readStream(assnBase + QStringList{ QStringLiteral("FixedData") });
+    const QByteArray assnF2Meta = cf.readStream(assnBase + QStringList{ QStringLiteral("Fixed2Meta") });
+    const QByteArray assnF2Data = cf.readStream(assnBase + QStringList{ QStringLiteral("Fixed2Data") });
+    QByteArray staleAssnRecord;
+    int staleAssnIndex = -1;
+    const int assnCount = (assnMeta.size() - 16) / 34;
+    for (int i = 0; i < assnCount; ++i) {
+        const int item = 16 + i * 34;
+        const int off = int(u32(assnMeta, item + 4));
+        if (off + 110 <= assnData.size() && u32(assnData, off) == 10) {
+            staleAssnRecord = assnData.mid(off, 110);
+            QCOMPARE(u32(assnMeta, item), quint32(0x000C0000));
+            QCOMPARE(uchar(assnMeta.at(item + 10)), uchar(0x23));
+            staleAssnIndex = i;
+            break;
+        }
+    }
+    QCOMPARE(staleAssnRecord.size(), 110);
+    const quint32 assignmentStart = FieldDecoders::encodeMppTimestamp(unstarted.start);
+    QCOMPARE(u32(staleAssnRecord, 60), assignmentStart);  // Resume
+    QCOMPARE(u32(staleAssnRecord, 104), assignmentStart); // Stop
+    QVERIFY(staleAssnIndex >= 0);
+    const int assnF2Item = 16 + staleAssnIndex * 53;
+    const int assnF2Off = int(u32(assnF2Meta, assnF2Item + 4));
+    const QByteArray assnF2 = assnF2Data.mid(assnF2Off, 48);
+    QCOMPARE(assnF2.size(), 48);
+    QVERIFY(assnF2.left(16) != QByteArray(16, '\0')); // assignment GUID
+    QVERIFY(assnF2.mid(16, 16) != QByteArray(16, '\0')); // task GUID
+    QCOMPARE(assnF2.mid(32, 16), QByteArray::fromHex("788bcba08c2a6d4300000000000000ff"));
+    QCOMPARE(uchar(assnF2Meta.at(assnF2Item + 35)), uchar(0x10));
+
+    MppIO reader;
+    QVERIFY2(reader.openFromData(bytes), qPrintable(reader.errorString()));
+    const schedule::Task &readPartial = reader.project().tasks.at(0);
+    QCOMPARE(readPartial.percentComplete, 0.4);
+    QCOMPARE(readPartial.actualDurationMillis, qint64(192) * 60000); // 40% of 8h
+    QCOMPARE(readPartial.actualWorkMillis, qint64(384) * 60000); // 40% of 16h work
+    QVERIFY(!readPartial.actualFinish.isValid());
+
+    const schedule::Task &readUnstarted = reader.project().tasks.at(1);
+    QCOMPARE(readUnstarted.percentComplete, 0.0);
+    QVERIFY(!readUnstarted.actualStart.isValid());
+    QCOMPARE(reader.project().assignments.constLast().start, unstarted.start);
+    QCOMPARE(reader.project().assignments.constLast().finish, unstarted.finish);
+    QVERIFY(!readUnstarted.actualFinish.isValid());
+    QCOMPARE(readUnstarted.actualDurationMillis, qint64(0));
+    QCOMPARE(readUnstarted.actualWorkMillis, qint64(0));
+    QVERIFY(!readUnstarted.summary);
+    QVERIFY(!readUnstarted.manual);
+}
+
 void TstSemanticRoundtrip::normalRowWeightIsWrittenExplicitly()
 {
     schedule::Project p = makeSampleProject();
@@ -513,6 +651,47 @@ void TstSemanticRoundtrip::normalRowWeightIsWrittenExplicitly()
         QVERIFY(u16(columnProperties, off + 40) & 0x01);           // bold override: explicit
     }
     QVERIFY(foundWholeRow);
+}
+
+void TstSemanticRoundtrip::parentRowsetManifestsAreConsistent()
+{
+    MppIO writer;
+    writer.setProject(makeSampleProject()); // also grows CV_iew Var2Data
+    const QByteArray bytes = writer.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(writer.errorString()));
+
+    CompoundFile cf;
+    QVERIFY2(cf.openFromData(bytes), qPrintable(cf.errorString()));
+    const QStringList issues = Mpp14Manifest::audit(cf);
+    QVERIFY2(issues.isEmpty(), qPrintable(issues.join(QStringLiteral("\n"))));
+
+    // Prove the auditor catches the exact stale-template failure that made a
+    // populated task collection render as an empty schedule in Project.
+    QByteArray props = cf.readStream({ QStringLiteral("   114"), QStringLiteral("Props") });
+    int offset = 16;
+    bool patched = false;
+    while (offset + 12 <= props.size()) {
+        const quint32 length = qFromLittleEndian<quint32>(
+            reinterpret_cast<const uchar *>(props.constData() + offset));
+        const quint32 key = qFromLittleEndian<quint32>(
+            reinterpret_cast<const uchar *>(props.constData() + offset + 4));
+        offset += 12;
+        QVERIFY(offset + int(length) <= props.size());
+        if (key == 0x01000001u && length >= 4) {
+            qToLittleEndian<quint32>(4u,
+                reinterpret_cast<uchar *>(props.data() + offset));
+            patched = true;
+            break;
+        }
+        offset += int(length);
+    }
+    QVERIFY(patched);
+    cf.addStream({ QStringLiteral("   114"), QStringLiteral("Props") }, props);
+    const QStringList brokenIssues = Mpp14Manifest::audit(cf);
+    QVERIFY(std::any_of(brokenIssues.cbegin(), brokenIssues.cend(), [](const QString &issue) {
+        return issue.contains(QStringLiteral("TBkndTask"))
+            && issue.contains(QStringLiteral("declares 4 rows"));
+    }));
 }
 
 void TstSemanticRoundtrip::realFixtures_data()

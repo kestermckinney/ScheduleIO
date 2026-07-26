@@ -49,6 +49,7 @@ set(SCHEDULEIO_SOURCES
     src/serializer/docserializer.cpp
     src/serializer/mpp12serializer.cpp
     src/serializer/mpp14serializer.cpp
+    src/serializer/mpp14manifest.cpp
     src/serializer/mpp14writer.cpp
     scheduleio.qrc
 )
@@ -85,6 +86,7 @@ set(SCHEDULEIO_HEADERS
     src/serializer/docserializer.h
     src/serializer/mpp12serializer.h
     src/serializer/mpp14serializer.h
+    src/serializer/mpp14manifest.h
     src/serializer/mpp14writer.h
 )
 
