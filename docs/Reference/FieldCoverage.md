@@ -17,6 +17,7 @@ matching `.mpp`. See [XML Interchange](../GettingStarted/XmlInterchange.md).
 | :--- | :--- |
 | Title, Author | read / MPP14 write |
 | Start date, Finish date, Status date | read / MPP14 write |
+| Scheduling direction (start/finish) | read / MPP14 write; MSPDI read/write |
 | Default project calendar | read / MPP14 write |
 | Format version | read; selects writer on save |
 | View text, line, and standard bar styles | read / MPP14 write for supported views/categories |
@@ -31,18 +32,21 @@ matching `.mpp`. See [XML Interchange](../GettingStarted/XmlInterchange.md).
 | WBS | read (derived from the outline) |
 | Outline level | read |
 | Start, Finish | read (automatic **and** manual scheduling) |
-| Duration | read |
+| Duration and duration units (including elapsed units) | read / MPP14 write; MSPDI read/write; elapsed scheduling calculated continuously |
 | Percent complete | read (leaf tasks exact; summary tasks use Microsoft Project's rolled-up value) |
 | Milestone | read |
 | Summary | read (derived from the outline) |
 | Constraint type, Constraint date | read |
 | Cost, Fixed/Actual/Remaining cost, Cost variance | read |
+| Start/Finish/Duration/Work variance | derived from Baseline 0; MSPDI Start/Finish/Work variance read/write |
 | Baselines 0–10 (cost, work, start, finish, duration) | read |
 | Custom fields (Text/Number/Cost/Date/Duration/Start/Finish/Flag/Outline Code) | read |
 | Notes | read (raw RTF source) |
+| Hyperlink display text, address, subaddress | read / MPP14 write; MSPDI read/write |
 | Manual/automatic mode, task type, effort-driven, priority, deadline | read / MPP14 write |
 | Task work, actual dates/duration/work, earned-value metrics | read / MPP14 write |
 | Active/inactive state | read / MPP14 write |
+| Task calendar and ignore-resource-calendar flag | read / MPP14 write; used by scheduling |
 | Row and per-cell font/color/background formatting | read / MPP14 write |
 | Per-task bar color | model/internal scaffold; MPP and MSPDI persistence not yet |
 | Critical, late dates, total/free slack | computed by `Scheduler`; stored-field coverage varies |
@@ -59,9 +63,10 @@ matching `.mpp`. See [XML Interchange](../GettingStarted/XmlInterchange.md).
 | Custom fields | read |
 | Notes | read (raw RTF source) |
 | Cost-rate tables A–E (standard/overtime rate, cost-per-use, effective dates) | read |
-| Resource calendar | read / MPP14 write (via a derived per-resource calendar row) |
-| Availability table (time-phased max units) | read / MPP14 write |
-| Group, code, e-mail, type | not yet |
+| Resource calendar | read / MPP14 write; used in assignment scheduling and leveling |
+| Availability table (time-phased max units) | read / MPP14 write; used for dated capacity and leveling |
+| Group, code, e-mail | not yet |
+| Resource type and material label | read / MPP14 write |
 
 ## Assignments
 
@@ -71,8 +76,12 @@ matching `.mpp`. See [XML Interchange](../GettingStarted/XmlInterchange.md).
 | Task / Resource unique id | read |
 | Units | read |
 | Work | read |
-| Start, finish, assignment/leveling delay | read / MPP14 write |
+| Start, finish, stop, resume, assignment/leveling delay | read / MPP14 write |
 | Actual and remaining work | read / MPP14 write |
+| Time-phased regular actual, remaining/planned, and actual overtime work, including material quantities | read / MPP14 write |
+| Assignment cost-rate table, material rate units, and work contour 0â€“8 | read / MPP14 write |
+| Overtime work/cost aggregates | read / MPP14 write |
+| Time-phased cost and baseline values | not yet |
 | Cost, Actual/Remaining cost, Cost variance | read |
 | Baselines 0–10 (cost, work, start, finish) | read |
 | Custom fields | read |

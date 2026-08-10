@@ -60,7 +60,7 @@ QHash<int, QHash<int, TstBaselineOracle::XmlBaseline>> TstBaselineOracle::parse(
             else if (inTask && n == u"UID" && uid < 0 && !inBaseline) uid = xml.readElementText().toInt();
             else if (inTask && n == u"Baseline") { inBaseline = true; cur = XmlBaseline(); }
             else if (inBaseline && n == u"Number") cur.number = xml.readElementText().toInt();
-            else if (inBaseline && n == u"Cost") { cur.cost = xml.readElementText().toDouble(); cur.costSeen = true; }
+            else if (inBaseline && n == u"Cost") { cur.cost = xml.readElementText().toDouble() / 100.0; cur.costSeen = true; }
             else if (inBaseline && n == u"Work") cur.workMs = isoDur(xml.readElementText());
             else if (inBaseline && n == u"Duration") cur.durMs = isoDur(xml.readElementText());
             else if (inBaseline && n == u"Start") cur.start = QDateTime::fromString(xml.readElementText(), Qt::ISODate);

@@ -56,6 +56,7 @@ mapping. See [XML Interchange](GettingStarted/XmlInterchange.md).
 * [API Reference — MppIO Class](API/MppIO.md) — the binary `.mpp` facade.
 * [API Reference — XmlIO Class](API/XmlIO.md) — the Microsoft Project XML facade.
 * [Scheduling Utilities](API/Scheduling.md) — duration, calendar, scheduling, slack, and leveling APIs.
+* [Project Reconciliation](API/Reconciliation.md) — authoritative work/cost buckets, rollups, and invariant checks.
 * [MPP File Format and Storage](Reference/FileFormat.md) — the compound container, entity streams,
   field maps, ownership, and read/write pipelines.
 

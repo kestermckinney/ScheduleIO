@@ -18,11 +18,15 @@ int main(int argc, char **argv)
         fprintf(stderr, "read failed: %s\n", qPrintable(io.errorString()));
         return 1;
     }
-    const schedule::Project &p = io.project();
+    const schedule::Project p = io.project();
     printf("read: %lld tasks, %lld resources, %lld assignments, %lld relations, %lld calendars\n",
            (long long)p.tasks.size(), (long long)p.resources.size(),
            (long long)p.assignments.size(), (long long)p.relations.size(),
            (long long)p.calendars.size());
+    // Force the semantic writer. MppIO intentionally returns the untouched
+    // source bytes when a loaded project is unchanged, which is correct for
+    // production but defeats this writer diagnostic.
+    io.setProject(p);
     if (!io.save(QString::fromLocal8Bit(argv[2]))) {
         fprintf(stderr, "save failed: %s\n", qPrintable(io.errorString()));
         return 1;

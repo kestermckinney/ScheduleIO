@@ -20,12 +20,17 @@ A single task (a row in the Gantt chart). Value type; copyable and equality-comp
 | `durationFormat` | `int` | Microsoft Project display-unit code (`schedule::Duration::Unit`). |
 | `workMillis` | `qint64` | Task-level work in milliseconds. |
 | `percentComplete` | `double` | Completion ratio, `0.0`–`1.0`. |
+| `physicalPercentComplete` | `double` | Independent physical completion ratio, `0.0`–`1.0`. |
+| `earnedValueMethod` | `int` | `0` uses `% Complete`; `1` uses Physical `% Complete` for earned value. |
 | `milestone` | `bool` | `true` if the task is a milestone. |
 | `summary` | `bool` | `true` if the task has child tasks (or is the project summary). |
+| `recurring` | `bool` | `true` when the task is a recurring-task summary. MSPDI preserves the flag; native MPP recurrence metadata is not yet decoded. |
+| `segments` | `QList<schedule::TaskSegment>` | Explicit contiguous portions of a split task. Empty for an unsplit task. |
 | `constraintType` | `int` | Scheduling constraint code (`0` = *As Soon As Possible*). |
 | `constraintDate` | `QDateTime` | Constraint date, when the constraint type requires one; otherwise invalid. |
 | `wbs` | `QString` | Work Breakdown Structure code (the dotted outline number, e.g. `1.2.1`). |
 | `notes` | `QString` | The task's notes as raw RTF source (empty if none). |
+| `hyperlink`, `hyperlinkAddress`, `hyperlinkSubAddress` | `QString` | Microsoft Project task hyperlink display text, destination, and optional bookmark/fragment. |
 | `active` | `bool` | `false` for an inactive task excluded from scheduling and rollups. |
 | `manual` | `bool` | Whether the task is manually scheduled. |
 | `levelingDelayMillis` | `qint64` | Working-time delay added by resource leveling. |
@@ -34,6 +39,7 @@ A single task (a row in the Gantt chart). Value type; copyable and equality-comp
 | `priority` | `int` | Leveling priority from 0 to 1000. |
 | `deadline` | `QDateTime` | Deadline, or invalid when unset. |
 | `calendarUniqueId` | `int` | Task calendar UID, or `-1` to use the project calendar. |
+| `ignoreResourceCalendar` | `bool` | When a task calendar is set, schedule without intersecting assigned work-resource calendars. |
 | `lateStart`, `lateFinish` | `QDateTime` | Backward-pass dates computed by `Scheduler::computeSlack()`. |
 | `totalSlackMillis`, `freeSlackMillis` | `qint64` | Computed slack in working milliseconds. |
 | `critical` | `bool` | Whether total slack is zero or negative. |
@@ -45,6 +51,8 @@ A single task (a row in the Gantt chart). Value type; copyable and equality-comp
 | `actualCost` | `double` | Cost incurred so far. |
 | `remainingCost` | `double` | Cost still to be incurred. |
 | `costVariance` | `double` | Cost minus baseline cost. |
+| `startVarianceMillis` / `finishVarianceMillis` | `qint64` | Signed task-calendar working-time delta from Baseline 0 dates. |
+| `durationVarianceMillis` / `workVarianceMillis` | `qint64` | Signed current-minus-Baseline-0 duration and work. |
 | `baselines` | `QList<schedule::Baseline>` | Saved baselines (see [`schedule::Baseline`](Baseline.md)); empty if none saved. |
 | `customFields` | `QList<schedule::CustomField>` | Populated custom/extended fields (see [`schedule::CustomField`](CustomField.md)). |
 | `rowFormat` | `schedule::TextStyle` | Per-row font, emphasis, foreground/background, and pattern. |
@@ -57,9 +65,15 @@ A single task (a row in the Gantt chart). Value type; copyable and equality-comp
   are correct for both automatically- and manually-scheduled tasks.
 * **Summary and WBS are derived.** Microsoft Project computes a task's summary flag and WBS from the
   outline hierarchy rather than storing them; MppIO derives them the same way, in `id` order.
+* **Split portions** contain absolute start/finish values. Scheduling translates their complete span
+  when dependencies move the task. MSPDI Stop/Resume preserves the first interruption; gapped
+  assignment time-phased work carries the portion pattern into the native writer.
 * **Constraint type** mirrors Microsoft Project's constraint enumeration (0 ASAP, 1 ALAP, 2 Must
   Start On, 3 Must Finish On, 4 Start No Earlier Than, 5 Start No Later Than, 6 Finish No Earlier
   Than, 7 Finish No Later Than).
+* **Elapsed duration units** (`ElapsedMinutes`, `ElapsedHours`, `ElapsedDays`, `ElapsedWeeks`, and
+  `ElapsedMonths`) use wall-clock time. They can start in nonworking time and ignore project, task,
+  and resource calendar gaps when calculating start/finish in either scheduling direction.
 * **Cost** values are plain currency amounts (not cents) in the project's currency. Summary-task
   costs are Microsoft Project's rolled-up totals.
 * **Baselines** are only present when the file has saved them. `baselines` may hold any subset of
@@ -68,6 +82,9 @@ A single task (a row in the Gantt chart). Value type; copyable and equality-comp
   `{\rtf1\ansi ...}`). MppIO does not strip it to plain text; use an RTF parser if you need that.
 * **Scheduling results are explicit fields.** Call `Scheduler::reschedule()` after dependency/date
   edits and `Scheduler::computeSlack()` when late dates and critical-path values must be refreshed.
+* **Calendar selection.** Automatic assigned work uses the task calendar (or project calendar)
+  intersected with each work resource's calendar. `ignoreResourceCalendar` disables only the
+  resource-calendar part.
 * **Formatting colors** are `0xRRGGBB`; `TextStyle::kAutomatic` means inherit the view default.
 
 ## Example

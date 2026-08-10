@@ -73,7 +73,10 @@ int main(int argc, char **argv)
             const quint32 len = u32(props, o), key = u32(props, o + 4), flags = u32(props, o + 8);
             o += 12;
             if (len > quint32(props.size() - o)) break;
-            std::printf("key=%u (0x%08x) len=%u flags=0x%08x\n", key, key, len, flags);
+            std::printf("key=%u (0x%08x) len=%u flags=0x%08x", key, key, len, flags);
+            for (quint32 i = 0; i < len && i < 8; ++i)
+                std::printf(" %02x", uchar(props.at(o + int(i))));
+            std::printf("\n");
             o += int(len);
         }
         return 0;

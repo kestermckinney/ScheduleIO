@@ -18,10 +18,19 @@ namespace schedule {
 class SCHEDULEIO_EXPORT Resource
 {
 public:
+    enum class Type {
+        Material = 0,
+        Work = 1,
+        Cost = 2
+    };
+
     int uniqueId = 0;
     int id = 0;
     QString name;
     QString initials;
+    Type type = Type::Work;
+    bool budget = false;       // budget resource assigned only to the project summary
+    QString materialLabel;
     double maxUnits = 1.0;   // 1.0 == 100%
     QString notes;           // raw RTF source of the resource's notes (empty if none)
     int calendarUniqueId = -1;   // the resource's own calendar; -1 = none recorded
@@ -31,6 +40,8 @@ public:
     double actualCost = 0.0;
     double remainingCost = 0.0;
     double costVariance = 0.0;
+    double budgetCost = 0.0;
+    qint64 budgetWorkMillis = 0;
 
     QList<Baseline> baselines;        // resource baselines store cost + work
     QList<CustomField> customFields;

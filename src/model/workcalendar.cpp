@@ -41,6 +41,21 @@ QVector<WorkCalendar::Period> toPeriods(const QList<TimeRange> &times)
     return out;
 }
 
+QVector<WorkCalendar::Period> intersectPeriods(const QVector<WorkCalendar::Period> &left,
+                                                const QVector<WorkCalendar::Period> &right)
+{
+    QVector<WorkCalendar::Period> out;
+    for (const WorkCalendar::Period &a : left) {
+        for (const WorkCalendar::Period &b : right) {
+            const qint64 begin = qMax(a.begin, b.begin);
+            const qint64 end = qMin(a.end, b.end);
+            if (end > begin)
+                out.append({ begin, end });
+        }
+    }
+    return out;
+}
+
 // True when the calendar carries its own weekly definition (base calendars
 // always do; resource calendars usually inherit the whole week instead).
 bool definesWeek(const Calendar &c)
@@ -51,6 +66,49 @@ bool definesWeek(const Calendar &c)
         if (!day.isEmpty())
             return true;
     return false;
+}
+
+bool recurrenceMatches(const WorkCalendar::Exception &e, const QDate &date)
+{
+    if (date < e.from || (e.to.isValid() && date > e.to)) return false;
+    const int interval = qMax(1, e.interval);
+    bool match = false;
+    switch (e.recurrence) {
+    case CalendarException::Recurrence::None: match = true; break;
+    case CalendarException::Recurrence::Daily:
+        match = e.from.daysTo(date) % interval == 0; break;
+    case CalendarException::Recurrence::Weekly: {
+        const int weeks = e.from.daysTo(date) / 7;
+        match = weeks % interval == 0
+            && (e.weekDayMask & (1u << (date.dayOfWeek() - 1)));
+        break;
+    }
+    case CalendarException::Recurrence::MonthlyByDate: {
+        const int months = (date.year() - e.from.year()) * 12 + date.month() - e.from.month();
+        match = months >= 0 && months % interval == 0 && date.day() == e.dayOfMonth;
+        break;
+    }
+    case CalendarException::Recurrence::MonthlyByPosition:
+    case CalendarException::Recurrence::YearlyByPosition: {
+        const int months = (date.year() - e.from.year()) * 12 + date.month() - e.from.month();
+        if (e.recurrence == CalendarException::Recurrence::YearlyByPosition && date.month() != e.month) break;
+        if (e.recurrence == CalendarException::Recurrence::MonthlyByPosition && (months < 0 || months % interval)) break;
+        if (!(e.weekDayMask & (1u << (date.dayOfWeek() - 1)))) break;
+        const int position = (date.day() - 1) / 7 + 1;
+        const bool last = date.addDays(7).month() != date.month();
+        match = e.weekPosition == 5 ? last : position == e.weekPosition;
+        break;
+    }
+    case CalendarException::Recurrence::YearlyByDate:
+        match = date.month() == e.month && date.day() == e.dayOfMonth; break;
+    }
+    if (!match || e.occurrences <= 0) return match;
+    int seen = 0;
+    for (QDate d = e.from; d <= date; d = d.addDays(1)) {
+        WorkCalendar::Exception unlimited = e; unlimited.occurrences = 0;
+        if (recurrenceMatches(unlimited, d) && ++seen > e.occurrences) return false;
+    }
+    return seen <= e.occurrences;
 }
 
 } // namespace
@@ -110,6 +168,13 @@ WorkCalendar::WorkCalendar(const Project &project, int calendarUniqueId)
             e.from = x.fromDate;
             e.to = x.toDate;
             e.working = x.working;
+            e.recurrence = x.recurrence;
+            e.interval = x.interval;
+            e.weekDayMask = x.weekDayMask;
+            e.dayOfMonth = x.dayOfMonth;
+            e.month = x.month;
+            e.weekPosition = x.weekPosition;
+            e.occurrences = x.occurrences;
             if (x.working) {
                 e.periods = toPeriods(x.workingTimes);
                 if (e.periods.isEmpty())
@@ -120,10 +185,38 @@ WorkCalendar::WorkCalendar(const Project &project, int calendarUniqueId)
     }
 }
 
+WorkCalendar WorkCalendar::intersection(const QList<WorkCalendar> &calendars)
+{
+    if (calendars.isEmpty())
+        return WorkCalendar();
+    if (calendars.size() == 1)
+        return calendars.first();
+
+    WorkCalendar out = calendars.first();
+    out.m_exceptions.clear();
+    out.m_intersectionCalendars.clear();
+    for (const WorkCalendar &calendar : calendars)
+        out.m_intersectionCalendars.append(QSharedPointer<WorkCalendar>::create(calendar));
+    for (int day = 0; day < 7; ++day) {
+        QVector<Period> periods = calendars.first().m_week[day];
+        for (int i = 1; i < calendars.size(); ++i)
+            periods = intersectPeriods(periods, calendars.at(i).m_week[day]);
+        out.m_week[day] = periods;
+    }
+    return out;
+}
+
 const QVector<WorkCalendar::Period> &WorkCalendar::periodsFor(const QDate &d) const
 {
+    if (!m_intersectionCalendars.isEmpty()) {
+        m_intersectionScratch = m_intersectionCalendars.first()->periodsFor(d);
+        for (int i = 1; i < m_intersectionCalendars.size(); ++i)
+            m_intersectionScratch = intersectPeriods(
+                m_intersectionScratch, m_intersectionCalendars.at(i)->periodsFor(d));
+        return m_intersectionScratch;
+    }
     for (const Exception &e : m_exceptions)
-        if (d >= e.from && d <= e.to)
+        if (recurrenceMatches(e, d))
             return e.working ? e.periods : m_none;
     return m_week[d.dayOfWeek() - 1];
 }

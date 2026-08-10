@@ -108,8 +108,63 @@ void TstXmlMppCrosscheck::interop()
         QVERIFY2(m->priority == x.priority,
                  qPrintable(QStringLiteral("uid %1 priority: mpp=%2 xml=%3")
                                 .arg(x.uniqueId).arg(m->priority).arg(x.priority)));
+        QVERIFY2(m->durationFormat == x.durationFormat,
+                 qPrintable(QStringLiteral("uid %1 durationFormat: mpp=%2 xml=%3")
+                                .arg(x.uniqueId).arg(m->durationFormat).arg(x.durationFormat)));
     }
     QVERIFY2(fieldChecks > 0, "no shared task UIDs for the task-info field check");
+
+    // Resource kinds use different numeric encodings in COM, MSPDI, and the
+    // native row metadata. Both readers must nevertheless produce the same
+    // model value and retain a material resource's unit label.
+    QHash<int, const schedule::Resource *> mppResources;
+    for (const schedule::Resource &resource : fromMpp.resources)
+        mppResources.insert(resource.uniqueId, &resource);
+    int resourceChecks = 0;
+    for (const schedule::Resource &resource : fromXml.resources) {
+        const schedule::Resource *native = mppResources.value(resource.uniqueId, nullptr);
+        if (!native)
+            continue;
+        ++resourceChecks;
+        QCOMPARE(native->type, resource.type);
+        QCOMPARE(native->materialLabel, resource.materialLabel);
+    }
+    Q_UNUSED(resourceChecks);
+
+    // Assignment planned/actual work is stored in native VarData as cumulative
+    // work and cumulative working-time records. Compare its decoded daily
+    // distribution with Project's own MSPDI export, not just aggregate Work.
+    auto dailyWork = [](const schedule::Project &project) {
+        QHash<QString, qint64> result;
+        for (const schedule::Assignment &assignment : project.assignments) {
+            for (const schedule::TimephasedValue &value : assignment.timephasedValues) {
+                if (value.type != schedule::TimephasedValue::RemainingWork
+                    && value.type != schedule::TimephasedValue::ActualWork)
+                    continue;
+                const qint64 amount = value.durationMillis();
+                if (amount == 0 || !value.start.isValid())
+                    continue;
+                const QString key = QStringLiteral("%1|%2|%3")
+                    .arg(assignment.uniqueId).arg(value.type)
+                    .arg(value.start.date().toString(Qt::ISODate));
+                result[key] += amount;
+            }
+        }
+        return result;
+    };
+    // The generated resource and progress fixtures use ordinary working-time
+    // assignments and are the byte-level oracle for fields 49/50. Older,
+    // externally sourced fixtures include elapsed-duration and calendar
+    // layouts that are outside this codec's current scope.
+    const QString fixtureName = QFileInfo(mpp).fileName();
+    if (fixtureName == QStringLiteral("04_resources_assignments.mpp")
+        || fixtureName == QStringLiteral("07_baseline_progress.mpp")) {
+        const QHash<QString, qint64> xmlDaily = dailyWork(fromXml);
+        const QHash<QString, qint64> mppDaily = dailyWork(fromMpp);
+        QVERIFY(!xmlDaily.isEmpty());
+        for (auto it = xmlDaily.constBegin(); it != xmlDaily.constEnd(); ++it)
+            QCOMPARE(mppDaily.value(it.key()), it.value());
+    }
 }
 
 QTEST_MAIN(TstXmlMppCrosscheck)

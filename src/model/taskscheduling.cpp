@@ -2,8 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "model/taskscheduling.h"
+#include "model/duration.h"
+#include "model/materialcosting.h"
+#include "model/projectreconciliation.h"
+#include "model/schedulingcalendar.h"
 #include "model/scheduler.h"
 #include "model/workcalendar.h"
+#include "model/workcontouring.h"
 
 #include <QtGlobal>
 #include <cmath>
@@ -13,6 +18,7 @@ namespace schedule {
 namespace {
 
 constexpr double kMinUnits = 0.01;   // 1% floor keeps the triangle solvable
+constexpr qint64 kHour = 3600LL * 1000LL;
 
 Task *taskByUid(Project &p, int uid)
 {
@@ -30,21 +36,31 @@ Assignment *assignmentByUid(Project &p, int uid)
     return nullptr;
 }
 
-// Real resource assignments of a task ("unassigned" placeholder rows with a
-// negative resource uid do not take part in scheduling).
+const Resource *resourceByUid(const Project &p, int uid)
+{
+    for (const Resource &r : p.resources)
+        if (r.uniqueId == uid)
+            return &r;
+    return nullptr;
+}
+
+bool isWorkAssignment(const Project &p, const Assignment &a)
+{
+    const Resource *resource = resourceByUid(p, a.resourceUniqueId);
+    return a.resourceUniqueId >= 0 && resource
+        && resource->type == Resource::Type::Work;
+}
+
+// Only Work resources participate in the duration/work/units scheduling
+// triangle. Material quantities and Cost assignments are retained on the task
+// but do not create labor or change its scheduled span.
 QList<Assignment *> assignmentsOf(Project &p, int taskUid)
 {
     QList<Assignment *> out;
     for (Assignment &a : p.assignments)
-        if (a.taskUniqueId == taskUid && a.resourceUniqueId >= 0)
+        if (a.taskUniqueId == taskUid && isWorkAssignment(p, a))
             out.append(&a);
     return out;
-}
-
-WorkCalendar calendarFor(const Project &p, const Task &t)
-{
-    return t.calendarUniqueId >= 0 ? WorkCalendar(p, t.calendarUniqueId)
-                                   : Scheduler::projectCalendar(p);
 }
 
 qint64 assignmentSpan(const Assignment &a)
@@ -57,7 +73,7 @@ qint64 assignmentSpan(const Assignment &a)
 void sync(Project &p, Task &t)
 {
     const QList<Assignment *> assns = assignmentsOf(p, t.uniqueId);
-    const WorkCalendar cal = calendarFor(p, t);
+    const bool elapsed = Duration::isElapsed(t.durationFormat);
 
     if (!assns.isEmpty()) {
         qint64 span = 0;
@@ -69,18 +85,56 @@ void sync(Project &p, Task &t)
         t.durationMillis = span;
         t.workMillis = work;   // keep the task-level total mirroring its assignments
     }
-    if (t.start.isValid())
-        t.finish = t.durationMillis > 0 ? cal.addWork(t.start, t.durationMillis) : t.start;
+    if (t.start.isValid() && !assns.isEmpty() && !elapsed)
+        t.start = SchedulingCalendar::nextStart(p, t, t.start);
+    if (t.start.isValid() && assns.isEmpty()) {
+        t.finish = SchedulingCalendar::finish(p, t, t.start);
+    }
 
+    QDateTime latestAssignmentFinish;
     for (Assignment *a : assns) {
+        const WorkCalendar cal = SchedulingCalendar::assignment(p, t, *a);
         a->remainingWorkMillis = qMax<qint64>(0, a->workMillis - a->actualWorkMillis);
         if (!t.start.isValid())
             continue;
-        const QDateTime s = a->delayMillis + a->levelingDelayMillis != 0
-            ? cal.addWork(t.start, a->delayMillis + a->levelingDelayMillis)
-            : t.start;
+        QDateTime s = elapsed ? t.start : cal.nextWorkStart(t.start);
+        if (a->delayMillis + a->levelingDelayMillis != 0)
+            s = elapsed ? s.addMSecs(a->delayMillis + a->levelingDelayMillis)
+                        : cal.addWork(s, a->delayMillis + a->levelingDelayMillis);
         a->start = s;
-        a->finish = a->workMillis > 0 ? cal.addWork(s, assignmentSpan(*a)) : s;
+        a->finish = a->workMillis > 0
+            ? (elapsed ? s.addMSecs(assignmentSpan(*a)) : cal.addWork(s, assignmentSpan(*a)))
+            : s;
+        if (!latestAssignmentFinish.isValid() || a->finish > latestAssignmentFinish)
+            latestAssignmentFinish = a->finish;
+        bool hasRemainingBuckets = false;
+        for (const TimephasedValue &value : a->timephasedValues)
+            if (value.type == TimephasedValue::RemainingWork) {
+                hasRemainingBuckets = true;
+                break;
+            }
+        if (a->workContour != WorkContouring::Contoured
+            && (a->workContour != WorkContouring::Flat || hasRemainingBuckets))
+            WorkContouring::regenerate(p, a->uniqueId);
+    }
+    if (latestAssignmentFinish.isValid())
+        t.finish = latestAssignmentFinish;
+
+    for (Assignment &a : p.assignments) {
+        if (a.taskUniqueId != t.uniqueId || a.resourceUniqueId < 0
+            || isWorkAssignment(p, a))
+            continue;
+        const Resource *resource = resourceByUid(p, a.resourceUniqueId);
+        if (resource && resource->type == Resource::Type::Material
+            && a.timephasedValues.isEmpty()) {
+            a.workMillis = a.variableRateUnits == 0
+                ? qint64(std::llround(a.units * double(kHour)))
+                : MaterialCosting::quantityMillisForDuration(
+                      t.durationMillis, a.units, a.variableRateUnits);
+        }
+        a.remainingWorkMillis = qMax<qint64>(0, a.workMillis - a.actualWorkMillis);
+        a.start = t.start;
+        a.finish = t.finish;
     }
 
     // With no real resources, any "unassigned" placeholder row read from a file
@@ -100,6 +154,7 @@ void sync(Project &p, Task &t)
             a.finish = t.finish;
         }
     }
+    ProjectReconciliation::reconcile(p);
 }
 
 } // namespace
@@ -109,7 +164,7 @@ qint64 TaskScheduling::taskWork(const Project &p, int taskUid)
     qint64 total = 0;
     bool any = false;
     for (const Assignment &a : p.assignments)
-        if (a.taskUniqueId == taskUid && a.resourceUniqueId >= 0) {
+        if (a.taskUniqueId == taskUid && isWorkAssignment(p, a)) {
             total += a.workMillis;
             any = true;
         }
@@ -215,6 +270,12 @@ void TaskScheduling::setAssignmentUnits(Project &p, int assignmentUid, double un
         return;
     units = qMax(kMinUnits, units);
 
+    if (!isWorkAssignment(p, *a)) {
+        a->units = units;
+        sync(p, *t);
+        return;
+    }
+
     if (t->taskType == 1) {
         // Fixed Duration: work follows the new units over the fixed span.
         a->units = units;
@@ -236,6 +297,18 @@ void TaskScheduling::setAssignmentWork(Project &p, int assignmentUid, qint64 wor
         return;
     a->workMillis = qMax<qint64>(0, workMillis);
 
+    if (!isWorkAssignment(p, *a)) {
+        if (const Resource *resource = resourceByUid(p, a->resourceUniqueId))
+            if (resource->type == Resource::Type::Material) {
+                a->units = double(a->workMillis) / double(kHour);
+                a->variableRateUnits = 0;
+            }
+        a->remainingWorkMillis = qMax<qint64>(
+            0, a->workMillis - a->actualWorkMillis);
+        sync(p, *t);
+        return;
+    }
+
     if (t->taskType == 1) {
         // Fixed Duration: units absorb the new work.
         if (t->durationMillis > 0)
@@ -245,15 +318,42 @@ void TaskScheduling::setAssignmentWork(Project &p, int assignmentUid, qint64 wor
     sync(p, *t);
 }
 
+void TaskScheduling::setMaterialRate(Project &p, int assignmentUid, double units,
+                                     int rateUnits, int costRateTable)
+{
+    Assignment *a = assignmentByUid(p, assignmentUid);
+    if (!a)
+        return;
+    const Resource *resource = resourceByUid(p, a->resourceUniqueId);
+    Task *task = taskByUid(p, a->taskUniqueId);
+    if (!resource || resource->type != Resource::Type::Material || !task)
+        return;
+    a->units = qMax(0.0, units);
+    a->variableRateUnits = qBound(0, rateUnits, 7);
+    a->costRateTable = qBound(0, costRateTable, 4);
+    a->timephasedValues.clear();
+    a->actualWorkMillis = 0;
+    a->remainingWorkMillis = 0;
+    sync(p, *task);
+}
+
+bool TaskScheduling::setWorkContour(Project &p, int assignmentUid, int contour)
+{
+    Assignment *assignment = assignmentByUid(p, assignmentUid);
+    if (!assignment || !isWorkAssignment(p, *assignment))
+        return false;
+    return WorkContouring::apply(p, assignmentUid, contour);
+}
+
 int TaskScheduling::addAssignment(Project &p, int taskUid, int resourceUid, double units)
 {
     Task *t = taskByUid(p, taskUid);
     if (!t)
         return -1;
-    bool haveResource = false;
+    const Resource *resource = nullptr;
     for (const Resource &r : p.resources)
-        if (r.uniqueId == resourceUid) { haveResource = true; break; }
-    if (!haveResource)
+        if (r.uniqueId == resourceUid) { resource = &r; break; }
+    if (!resource)
         return -1;
     for (const Assignment &a : p.assignments)
         if (a.taskUniqueId == taskUid && a.resourceUniqueId == resourceUid)
@@ -283,6 +383,15 @@ int TaskScheduling::addAssignment(Project &p, int taskUid, int resourceUid, doub
     a.units = units;
     p.assignments.append(a);
     Assignment *added = &p.assignments.last();
+
+    if (resource->type != Resource::Type::Work) {
+        if (resource->type == Resource::Type::Material)
+            added->workMillis = qint64(std::llround(units * double(kHour)));
+        added->start = t->start;
+        added->finish = t->finish;
+        sync(p, *t);
+        return added->uniqueId;
+    }
 
     if (effortDriven && hadAssignments && oldTotal > 0) {
         // Total work stays put; every assignment gets its units' share.
@@ -327,6 +436,12 @@ void TaskScheduling::removeAssignment(Project &p, int assignmentUid)
     p.assignments.removeAt(idx);
     if (!t)
         return;
+
+    const Resource *removedResource = resourceByUid(p, removed.resourceUniqueId);
+    if (removedResource && removedResource->type != Resource::Type::Work) {
+        sync(p, *t);
+        return;
+    }
 
     const bool effortDriven = t->effortDriven || t->taskType == 2;
     const QList<Assignment *> assns = assignmentsOf(p, t->uniqueId);

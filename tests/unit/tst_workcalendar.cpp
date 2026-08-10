@@ -53,6 +53,7 @@ private slots:
     void holidayException();
     void workingException();
     void inheritsBaseChain();
+    void intersectsCalendarsAndExceptions();
     void unknownIdFallsBack();
 };
 
@@ -155,6 +156,35 @@ void TstWorkCalendar::inheritsBaseChain()
     QVERIFY(!cal.isWorkingDay(QDate(2026, 7, 6)));   // own exception applies
     QVERIFY(!cal.isWorkingDay(QDate(2026, 7, 7)));
     QVERIFY(cal.isWorkingDay(QDate(2026, 7, 8)));    // Wednesday works again
+}
+
+void TstWorkCalendar::intersectsCalendarsAndExceptions()
+{
+    Project p;
+    Calendar standard;
+    standard.uniqueId = 1;
+    standard.workingDayMask = 0x1F;
+    standard.workingTimes.resize(7);
+    for (int i = 0; i < 5; ++i)
+        standard.workingTimes[i] = { range(8, 0, 12, 0), range(13, 0, 17, 0) };
+    p.calendars.append(standard);
+
+    Calendar resource = fourTens();
+    CalendarException vacation;
+    vacation.fromDate = QDate(2026, 7, 6);
+    vacation.toDate = QDate(2026, 7, 6);
+    vacation.working = false;
+    resource.exceptions.append(vacation);
+    p.calendars.append(resource);
+
+    const WorkCalendar combined = WorkCalendar::intersection(
+        { WorkCalendar(p, 1), WorkCalendar(p, 3) });
+    QVERIFY(!combined.isWorkingDay(QDate(2026, 7, 6)));
+    QCOMPARE(combined.workBetween(dt(2026, 7, 7, 0), dt(2026, 7, 8, 0)),
+             8 * kHour);
+    QCOMPARE(combined.addWork(dt(2026, 7, 6, 8), 8 * kHour),
+             dt(2026, 7, 7, 17));
+    QVERIFY(!combined.isWorkingDay(QDate(2026, 7, 10))); // resource Friday off
 }
 
 void TstWorkCalendar::unknownIdFallsBack()

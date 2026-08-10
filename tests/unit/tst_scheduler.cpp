@@ -3,7 +3,9 @@
 
 #include "model/duration.h"
 #include "model/scheduler.h"
+#include "mppio.h"
 
+#include <QFile>
 #include <QtTest>
 
 using namespace schedule;
@@ -59,6 +61,16 @@ private slots:
     void reachability();
     void slackAndCriticalPath();
     void deadlineCapsLateFinish();
+    void scheduleFromFinishChain();
+    void alapConsumesFloat();
+    void backwardLagAndExplicitAsap();
+    void backwardOtherLinkTypes();
+    void backwardConstraints();
+    void backwardOracleArtifactRoundTrips();
+    void elapsedTaskRunsContinuously();
+    void elapsedBackwardFromFinish();
+    void elapsedAssignedTaskIgnoresCalendar();
+    void elapsedOracleArtifactRoundTrips();
 };
 
 void tst_scheduler::workingTimeMath()
@@ -287,6 +299,252 @@ void tst_scheduler::deadlineCapsLateFinish()
     Scheduler::computeSlack(p);
     QVERIFY(p.tasks[2].totalSlackMillis < 0);
     QVERIFY(p.tasks[2].critical);
+}
+
+void tst_scheduler::scheduleFromFinishChain()
+{
+    Project p;
+    p.scheduleFromStart = false;
+    p.finishDate = QDateTime(kMon.addDays(11), QTime(17, 0)); // Fri 17 July
+    p.tasks << makeTask(1, QDateTime(kMon, QTime(8, 0)), kDay)
+            << makeTask(2, QDateTime(kMon, QTime(8, 0)), 2 * kDay);
+    p.tasks[0].constraintType = 1; // ALAP is the finish-project default
+    p.tasks[1].constraintType = 1;
+    p.relations << link(1, 2);
+
+    Scheduler::reschedule(p);
+
+    QCOMPARE(p.tasks[1].start, QDateTime(kMon.addDays(10), QTime(8, 0)));
+    QCOMPARE(p.tasks[1].finish, p.finishDate);
+    QCOMPARE(p.tasks[0].start, QDateTime(kMon.addDays(9), QTime(8, 0)));
+    QCOMPARE(p.tasks[0].finish, QDateTime(kMon.addDays(9), QTime(17, 0)));
+
+    Scheduler::computeSlack(p);
+    QCOMPARE(p.tasks[0].totalSlackMillis, qint64(0));
+    QCOMPARE(p.tasks[1].totalSlackMillis, qint64(0));
+    QVERIFY(p.tasks[0].critical);
+    QVERIFY(p.tasks[1].critical);
+}
+
+void tst_scheduler::alapConsumesFloat()
+{
+    Project p;
+    p.tasks << makeTask(1, QDateTime(kMon, QTime(8, 0)), kDay)
+            << makeTask(2, QDateTime(kMon, QTime(8, 0)), 3 * kDay)
+            << makeTask(3, QDateTime(kMon, QTime(8, 0)), kDay)
+            << makeTask(4, QDateTime(kMon, QTime(8, 0)), kDay);
+    p.tasks[2].constraintType = 1; // ALAP on the short parallel branch
+    p.relations << link(1, 2) << link(1, 3) << link(2, 4) << link(3, 4);
+
+    Scheduler::reschedule(p);
+
+    QCOMPARE(p.tasks[3].finish, QDateTime(kMon.addDays(4), QTime(17, 0)));
+    QCOMPARE(p.tasks[2].start, QDateTime(kMon.addDays(3), QTime(8, 0)));
+    QCOMPARE(p.tasks[2].finish, QDateTime(kMon.addDays(3), QTime(17, 0)));
+}
+
+void tst_scheduler::backwardLagAndExplicitAsap()
+{
+    Project p;
+    p.scheduleFromStart = false;
+    p.finishDate = QDateTime(kMon.addDays(11), QTime(17, 0));
+    p.tasks << makeTask(1, QDateTime(kMon, QTime(8, 0)), kDay)
+            << makeTask(2, QDateTime(kMon, QTime(8, 0)), kDay)
+            << makeTask(3, QDateTime(kMon, QTime(8, 0)), kDay);
+    p.tasks[0].constraintType = 1;
+    p.tasks[1].constraintType = 1;
+    // T3 remains explicitly ASAP even though the project schedules from finish.
+    p.tasks[2].constraintType = 0;
+    p.relations << link(1, 2, Relation::FinishToStart, kDay);
+
+    Scheduler::reschedule(p);
+
+    QCOMPARE(p.tasks[1].start, QDateTime(kMon.addDays(11), QTime(8, 0)));
+    QCOMPARE(p.tasks[0].start, QDateTime(kMon.addDays(9), QTime(8, 0)));
+    QCOMPARE(p.tasks[2].start, QDateTime(kMon, QTime(8, 0)));
+}
+
+void tst_scheduler::backwardOtherLinkTypes()
+{
+    const QList<int> types = {
+        Relation::FinishToStart, Relation::StartToStart,
+        Relation::FinishToFinish, Relation::StartToFinish
+    };
+    for (const int type : types) {
+        Project p;
+        p.scheduleFromStart = false;
+        p.finishDate = QDateTime(kMon.addDays(11), QTime(17, 0));
+        p.tasks << makeTask(1, QDateTime(kMon, QTime(8, 0)), kDay)
+                << makeTask(2, QDateTime(kMon, QTime(8, 0)), kDay);
+        p.tasks[0].constraintType = 1;
+        p.tasks[1].constraintType = 1;
+        p.relations << link(1, 2, type);
+
+        Scheduler::reschedule(p);
+
+        QCOMPARE(p.tasks[1].finish, p.finishDate);
+        if (type == Relation::FinishToStart)
+            QCOMPARE(p.tasks[0].start, QDateTime(kMon.addDays(10), QTime(8, 0)));
+        else
+            QCOMPARE(p.tasks[0].start, QDateTime(kMon.addDays(11), QTime(8, 0)));
+        QVERIFY2(p.tasks[0].finish <= p.finishDate, "backward task exceeded project finish");
+    }
+}
+
+void tst_scheduler::backwardConstraints()
+{
+    Project p;
+    p.scheduleFromStart = false;
+    p.finishDate = QDateTime(kMon.addDays(11), QTime(17, 0));
+    p.tasks << makeTask(1, QDateTime(kMon, QTime(8, 0)), kDay)
+            << makeTask(2, QDateTime(kMon, QTime(8, 0)), kDay)
+            << makeTask(3, QDateTime(kMon, QTime(8, 0)), kDay);
+    p.tasks[0].constraintType = 2; // MSO
+    p.tasks[0].constraintDate = QDateTime(kMon.addDays(2), QTime(8, 0));
+    p.tasks[1].constraintType = 3; // MFO
+    p.tasks[1].constraintDate = QDateTime(kMon.addDays(3), QTime(17, 0));
+    p.tasks[2].constraintType = 7; // FNLT
+    p.tasks[2].constraintDate = QDateTime(kMon.addDays(4), QTime(17, 0));
+
+    Scheduler::reschedule(p);
+
+    QCOMPARE(p.tasks[0].start, p.tasks[0].constraintDate);
+    QCOMPARE(p.tasks[1].finish, p.tasks[1].constraintDate);
+    QCOMPARE(p.tasks[2].finish, p.tasks[2].constraintDate);
+}
+
+void tst_scheduler::backwardOracleArtifactRoundTrips()
+{
+    Project p;
+    p.title = QStringLiteral("Backward Scheduling Oracle");
+    p.startDate = QDateTime(kMon, QTime(8, 0));
+    p.scheduleFromStart = false;
+    p.finishDate = QDateTime(kMon.addDays(11), QTime(17, 0));
+    p.tasks << makeTask(1, QDateTime(kMon, QTime(8, 0)), kDay)
+            << makeTask(2, QDateTime(kMon, QTime(8, 0)), 2 * kDay)
+            << makeTask(3, QDateTime(kMon, QTime(8, 0)), kDay);
+    p.tasks[0].name = QStringLiteral("ALAP predecessor");
+    p.tasks[1].name = QStringLiteral("ALAP terminal");
+    p.tasks[2].name = QStringLiteral("Explicit ASAP");
+    p.tasks[0].constraintType = 1;
+    p.tasks[1].constraintType = 1;
+    p.tasks[2].constraintType = 0;
+    p.relations << link(1, 2);
+    Scheduler::reschedule(p);
+    Scheduler::computeSlack(p);
+
+    MppIO writer;
+    writer.setProject(p);
+    const QByteArray bytes = writer.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(writer.errorString()));
+
+    MppIO reader;
+    QVERIFY2(reader.openFromData(bytes), qPrintable(reader.errorString()));
+    QVERIFY(!reader.project().scheduleFromStart);
+    QCOMPARE(reader.project().finishDate.date(), p.finishDate.date());
+    QCOMPARE(reader.project().tasks.at(0).start.date(), p.tasks.at(0).start.date());
+    QCOMPARE(reader.project().tasks.at(1).finish.date(), p.tasks.at(1).finish.date());
+
+    const QString artifactPath = qEnvironmentVariable("SCHEDULEIO_BACKWARD_ORACLE_MPP");
+    if (!artifactPath.isEmpty()) {
+        QFile artifact(artifactPath);
+        QVERIFY(artifact.open(QIODevice::WriteOnly));
+        QCOMPARE(artifact.write(bytes), bytes.size());
+    }
+}
+
+void tst_scheduler::elapsedTaskRunsContinuously()
+{
+    Project p;
+    p.tasks << makeTask(1, QDateTime(kMon.addDays(3), QTime(8, 0)), 2 * kDay)
+            << makeTask(2, QDateTime(kMon, QTime(8, 0)),
+                        2 * Duration::kMillisPerElapsedDay)
+            << makeTask(3, QDateTime(kMon, QTime(8, 0)), kDay);
+    p.tasks[1].durationFormat = Duration::ElapsedDays;
+    p.relations << link(1, 2) << link(2, 3);
+
+    Scheduler::reschedule(p);
+
+    QCOMPARE(p.tasks[0].finish, QDateTime(kMon.addDays(4), QTime(17, 0))); // Friday
+    QCOMPARE(p.tasks[1].start, QDateTime(kMon.addDays(4), QTime(17, 0)));
+    QCOMPARE(p.tasks[1].finish, QDateTime(kMon.addDays(6), QTime(17, 0))); // Sunday
+    QCOMPARE(p.tasks[2].start, QDateTime(kMon.addDays(7), QTime(8, 0)));  // Monday
+}
+
+void tst_scheduler::elapsedBackwardFromFinish()
+{
+    Project p;
+    p.scheduleFromStart = false;
+    p.finishDate = QDateTime(kMon.addDays(7), QTime(17, 0)); // Monday
+    p.tasks << makeTask(1, QDateTime(kMon, QTime(8, 0)),
+                        2 * Duration::kMillisPerElapsedDay);
+    p.tasks[0].durationFormat = Duration::ElapsedDays;
+    p.tasks[0].constraintType = 1;
+
+    Scheduler::reschedule(p);
+
+    QCOMPARE(p.tasks[0].start, QDateTime(kMon.addDays(5), QTime(17, 0))); // Saturday
+    QCOMPARE(p.tasks[0].finish, p.finishDate);
+}
+
+void tst_scheduler::elapsedAssignedTaskIgnoresCalendar()
+{
+    Project p;
+    p.tasks << makeTask(1, QDateTime(kMon.addDays(4), QTime(17, 0)),
+                        2 * Duration::kMillisPerElapsedDay);
+    p.tasks[0].durationFormat = Duration::ElapsedDays;
+    Resource resource;
+    resource.uniqueId = 10;
+    resource.id = 1;
+    resource.name = QStringLiteral("Continuous resource");
+    p.resources << resource;
+    Assignment assignment;
+    assignment.uniqueId = 100;
+    assignment.taskUniqueId = 1;
+    assignment.resourceUniqueId = 10;
+    assignment.units = 1.0;
+    assignment.workMillis = 2 * Duration::kMillisPerElapsedDay;
+    p.assignments << assignment;
+
+    Scheduler::reschedule(p);
+
+    QCOMPARE(p.tasks[0].start, QDateTime(kMon.addDays(4), QTime(17, 0)));
+    QCOMPARE(p.tasks[0].finish, QDateTime(kMon.addDays(6), QTime(17, 0)));
+}
+
+void tst_scheduler::elapsedOracleArtifactRoundTrips()
+{
+    Project p;
+    p.title = QStringLiteral("Elapsed Duration Oracle");
+    p.startDate = QDateTime(kMon.addDays(3), QTime(8, 0));
+    p.tasks << makeTask(1, p.startDate, 2 * kDay)
+            << makeTask(2, p.startDate, 2 * Duration::kMillisPerElapsedDay)
+            << makeTask(3, p.startDate, kDay);
+    p.tasks[0].name = QStringLiteral("Working predecessor");
+    p.tasks[1].name = QStringLiteral("Two elapsed days");
+    p.tasks[2].name = QStringLiteral("Working successor");
+    p.tasks[1].durationFormat = Duration::ElapsedDays;
+    p.relations << link(1, 2) << link(2, 3);
+    Scheduler::reschedule(p);
+    Scheduler::computeSlack(p);
+
+    MppIO writer;
+    writer.setProject(p);
+    const QByteArray bytes = writer.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(writer.errorString()));
+    MppIO reader;
+    QVERIFY2(reader.openFromData(bytes), qPrintable(reader.errorString()));
+    QCOMPARE(reader.project().tasks.at(1).durationFormat, int(Duration::ElapsedDays));
+    QCOMPARE(reader.project().tasks.at(1).durationMillis,
+             2 * Duration::kMillisPerElapsedDay);
+    QCOMPARE(reader.project().tasks.at(1).finish.date(), p.tasks.at(1).finish.date());
+
+    const QString artifactPath = qEnvironmentVariable("SCHEDULEIO_ELAPSED_ORACLE_MPP");
+    if (!artifactPath.isEmpty()) {
+        QFile artifact(artifactPath);
+        QVERIFY(artifact.open(QIODevice::WriteOnly));
+        QCOMPARE(artifact.write(bytes), bytes.size());
+    }
 }
 
 QTEST_APPLESS_MAIN(tst_scheduler)

@@ -6,6 +6,7 @@
 
 #include <QVector>
 #include <QtGlobal>
+#include "scheduleio_export.h"
 
 // Field-id tables for cost, baseline and custom ("extended") fields, ported from
 // MPXJ's MPPTaskField / MPPResourceField / MPPAssignmentField FIELD_ARRAY
@@ -71,6 +72,9 @@ struct TaskInfoFields {
     quint16 deadline;   // DEADLINE = 437 (MPP timestamp)
     quint16 work;       // WORK = 0 (double, thousandths-of-minute, like ACTUAL_WORK)
     quint16 levelingDelay;   // LEVELING_DELAY = 92 (u32 tenths-of-a-minute)
+    quint16 calendarUniqueId; // CALENDAR_UNIQUE_ID = 401 (u32; -1 means none)
+    quint16 physicalPercentComplete; // PHYSICAL_PERCENT_COMPLETE = 1119 (u16, 0..100)
+    quint16 earnedValueMethod;       // EARNED_VALUE_METHOD = 1122 (u16: 0/1)
 };
 
 // Task earned-value (PMI/EVM) fields Microsoft Project stores per task. All are
@@ -101,15 +105,15 @@ extern const TaskActualFields taskActual;
 extern const TaskEvmFields taskEvm;
 extern const TaskInfoFields taskInfo;
 extern const BaselineSet taskBaselines[kBaselineCount];
-const QVector<CustomFieldDef> &taskCustomFields();
+SCHEDULEIO_EXPORT const QVector<CustomFieldDef> &taskCustomFields();
 
 extern const CostFields resourceCost;
 extern const BaselineSet resourceBaselines[kBaselineCount];
-const QVector<CustomFieldDef> &resourceCustomFields();
+SCHEDULEIO_EXPORT const QVector<CustomFieldDef> &resourceCustomFields();
 
 extern const CostFields assignmentCost;
 extern const BaselineSet assignmentBaselines[kBaselineCount];
-const QVector<CustomFieldDef> &assignmentCustomFields();
+SCHEDULEIO_EXPORT const QVector<CustomFieldDef> &assignmentCustomFields();
 
 } // namespace MppFieldIds
 

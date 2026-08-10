@@ -60,6 +60,7 @@ int main(int argc, char **argv)
             : quint32(data.size());
         if (recOff >= quint32(data.size()) || next <= recOff) continue;
         const QByteArray b = data.mid(int(recOff), int(next - recOff));
+        std::printf("meta[%d]=%s\n", loop, meta.mid(metaPos, 34).toHex(' ').constData());
 
         const int uid = i32(b, off.value(0, -1));
         const int task = i32(b, off.value(1, -1));
@@ -81,7 +82,51 @@ int main(int argc, char **argv)
                     i32(b, off.value(25, -1)),
                     off.value(55, -1) >= 0 && off.value(55, -1) + 2 <= b.size()
                         ? qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(b.constData()) + off.value(55, -1)) : -1);
+        if (shown < 10)
+            std::printf("  raw=%s\n", b.toHex(' ').constData());
         ++shown;
+    }
+
+    auto dumpFixed2 = [&](const QString &entity, int itemSize) {
+        const QStringList base{ QStringLiteral("   114"), entity };
+        const QByteArray m = cf.readStream(base + QStringList{QStringLiteral("Fixed2Meta")});
+        const QByteArray d = cf.readStream(base + QStringList{QStringLiteral("Fixed2Data")});
+        const int n = itemSize > 0 ? (m.size() - 16) / itemSize : 0;
+        std::printf("-- %s Fixed2 rows=%d data=%d\n", qPrintable(entity), n, int(d.size()));
+        for (int i = 0; i < n; ++i) {
+            const int p = 16 + i * itemSize;
+            if (p + 8 > m.size()) break;
+            const quint32 recOff = qFromLittleEndian<quint32>(
+                reinterpret_cast<const uchar *>(m.constData()) + p + 4);
+            const quint32 next = (i + 1 < n)
+                ? qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(m.constData()) + p + itemSize + 4)
+                : quint32(d.size());
+            if (recOff >= quint32(d.size()) || next <= recOff) continue;
+            const QByteArray row = d.mid(int(recOff), int(next - recOff));
+            std::printf("f2[%d] last=%02x meta=%s row=%s\n", i,
+                        unsigned(quint8(m.at(p + itemSize - 1))),
+                        m.mid(p, itemSize).toHex(' ').constData(),
+                        row.toHex(' ').constData());
+        }
+    };
+    dumpFixed2(QStringLiteral("TBkndRsc"), 51);
+    dumpFixed2(QStringLiteral("TBkndAssn"), 53);
+
+    const QStringList rscBase{QStringLiteral("   114"), QStringLiteral("TBkndRsc")};
+    const QByteArray rscMeta = cf.readStream(rscBase + QStringList{QStringLiteral("FixedMeta")});
+    const QByteArray rscData = cf.readStream(rscBase + QStringList{QStringLiteral("FixedData")});
+    const int rscCount = qMax(0, (rscMeta.size() - 16) / 37);
+    std::printf("-- TBkndRsc Fixed rows=%d data=%d\n", rscCount, int(rscData.size()));
+    for (int i = 0; i < rscCount; ++i) {
+        const QByteArray item = rscMeta.mid(16 + i * 37, 37);
+        const int recOff = item.size() >= 8 ? int(i32(item, 4)) : -1;
+        const int nextOff = i + 1 < rscCount
+            ? int(i32(rscMeta, 16 + (i + 1) * 37 + 4)) : rscData.size();
+        const QByteArray row = recOff >= 0 && nextOff > recOff
+            ? rscData.mid(recOff, nextOff - recOff) : QByteArray();
+        std::printf("rsc[%d] o146=%d o150=%d o154=%d o158=%d o162=%d meta=%s row=%s\n",
+                    i, i32(row, 146), i32(row, 150), i32(row, 154), i32(row, 158),
+                    i32(row, 162), item.toHex(' ').constData(), row.toHex(' ').constData());
     }
     return 0;
 }

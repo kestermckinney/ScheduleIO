@@ -14,8 +14,9 @@ const CostFields taskCost = { 5, 8, 7, 10, 9 };
 const TaskActualFields taskActual = { 41, 42, 28, 2 };   // start, finish, duration, work
 const TaskEvmFields taskEvm = { 11, 12, 120, 83, 13, 537, 538, 541, 542 };
     // bcwp(EV), bcws(PV), acwp(AC), cv, sv, cpi, spi, eac, tcpi
-const TaskInfoFields taskInfo = { 25, 128, 437, 0, 92 };
-    // priority, taskType, deadline, work, levelingDelay
+const TaskInfoFields taskInfo = { 25, 128, 437, 0, 92, 401, 1119, 1122 };
+    // priority, taskType, deadline, work, levelingDelay, calendarUniqueId,
+    // physicalPercentComplete, earnedValueMethod
 const BaselineSet taskBaselines[kBaselineCount] = {
     { 6, 1, 43, 44, 27 },  // baseline 0
     { 484, 485, 482, 483, 487 },  // baseline 1

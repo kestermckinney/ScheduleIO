@@ -140,10 +140,13 @@ int main(int argc, char **argv)
         for (int from = 0; (from = v2.indexOf(needle16, from)) >= 0; from += 2)
             std::printf("  occurs at Var2Data offset %d (blob len-prefix at %d)\n", from, from - 4);
         // Decode each VarMeta record's blob; report records whose text == needle.
-        for (int o = 32; o + 12 <= vm.size(); o += 12) {
-            const quint16 code = qFromLittleEndian<quint16>(vp + o);
-            const quint16 item = qFromLittleEndian<quint16>(vp + o + 4);
-            const quint32 off  = qFromLittleEndian<quint32>(vp + o + 8);
+        for (int o = 24; o + 12 <= vm.size(); o += 12) {
+            const quint32 item = qFromLittleEndian<quint32>(vp + o);
+            const quint32 off  = qFromLittleEndian<quint32>(vp + o + 4);
+            const quint16 code = qFromLittleEndian<quint16>(vp + o + 8);
+            if (off + 4 <= quint32(v2.size())
+                && v2.mid(int(off + 4), needle16.size()) == needle16)
+                std::printf("  --> record: fieldCode=%u itemUid=%u offset=%u\n", code, item, off);
             if (off + 4 > quint32(v2.size())) continue;
             const quint32 len = qFromLittleEndian<quint32>(v2p + off);
             if (len < 4 || len > 400 || off + 4 + len > quint32(v2.size())) continue;

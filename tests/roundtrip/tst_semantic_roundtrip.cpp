@@ -22,6 +22,7 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
     if (a.author != b.author) d << QStringLiteral("author '%1' vs '%2'").arg(a.author, b.author);
     if (a.startDate != b.startDate) d << QStringLiteral("startDate %1 vs %2").arg(a.startDate.toString(Qt::ISODate), b.startDate.toString(Qt::ISODate));
     if (a.finishDate != b.finishDate) d << QStringLiteral("finishDate %1 vs %2").arg(a.finishDate.toString(Qt::ISODate), b.finishDate.toString(Qt::ISODate));
+    if (a.scheduleFromStart != b.scheduleFromStart) d << QStringLiteral("scheduleFromStart");
     if (a.statusDate != b.statusDate) d << QStringLiteral("statusDate");
     if (a.calendarUniqueId != b.calendarUniqueId)
         d << QStringLiteral("calendarUniqueId %1 vs %2").arg(a.calendarUniqueId).arg(b.calendarUniqueId);
@@ -40,6 +41,10 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
         if (x.finish != y.finish) f << QStringLiteral("finish %1/%2").arg(x.finish.toString(Qt::ISODate), y.finish.toString(Qt::ISODate));
         if (x.durationMillis != y.durationMillis) f << QStringLiteral("duration %1/%2").arg(x.durationMillis).arg(y.durationMillis);
         if (x.percentComplete != y.percentComplete) f << QStringLiteral("pct");
+        if (x.physicalPercentComplete != y.physicalPercentComplete)
+            f << QStringLiteral("physicalPct");
+        if (x.earnedValueMethod != y.earnedValueMethod)
+            f << QStringLiteral("earnedValueMethod");
         if (x.milestone != y.milestone) f << QStringLiteral("milestone");
         if (x.summary != y.summary) f << QStringLiteral("summary");
         if (x.constraintType != y.constraintType) f << QStringLiteral("constraintType");
@@ -51,6 +56,8 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
         if (x.taskType != y.taskType) f << QStringLiteral("taskType %1/%2").arg(x.taskType).arg(y.taskType);
         if (x.priority != y.priority) f << QStringLiteral("priority %1/%2").arg(x.priority).arg(y.priority);
         if (x.deadline != y.deadline) f << QStringLiteral("deadline");
+        if (x.ignoreResourceCalendar != y.ignoreResourceCalendar)
+            f << QStringLiteral("ignoreResourceCalendar");
         if (x.actualStart != y.actualStart) f << QStringLiteral("actualStart");
         if (x.actualFinish != y.actualFinish) f << QStringLiteral("actualFinish");
         if (x.actualDurationMillis != y.actualDurationMillis) f << QStringLiteral("actualDuration");
@@ -151,7 +158,54 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
         if (x.taskUniqueId != y.taskUniqueId) f << QStringLiteral("taskUid");
         if (x.resourceUniqueId != y.resourceUniqueId) f << QStringLiteral("resourceUid");
         if (x.units != y.units) f << QStringLiteral("units %1/%2").arg(x.units).arg(y.units);
+        if (x.costRateTable != y.costRateTable)
+            f << QStringLiteral("costRateTable %1/%2").arg(x.costRateTable).arg(y.costRateTable);
+        if (x.variableRateUnits != y.variableRateUnits)
+            f << QStringLiteral("variableRateUnits %1/%2").arg(x.variableRateUnits).arg(y.variableRateUnits);
+        if (x.workContour != y.workContour)
+            f << QStringLiteral("workContour %1/%2").arg(x.workContour).arg(y.workContour);
         if (x.workMillis != y.workMillis) f << QStringLiteral("work %1/%2").arg(x.workMillis).arg(y.workMillis);
+        if (x.actualWorkMillis != y.actualWorkMillis)
+            f << QStringLiteral("actualWork %1/%2").arg(x.actualWorkMillis).arg(y.actualWorkMillis);
+        if (x.remainingWorkMillis != y.remainingWorkMillis)
+            f << QStringLiteral("remainingWork %1/%2").arg(x.remainingWorkMillis).arg(y.remainingWorkMillis);
+        if (x.start != y.start)
+            f << QStringLiteral("start %1/%2").arg(x.start.toString(Qt::ISODate), y.start.toString(Qt::ISODate));
+        if (x.finish != y.finish)
+            f << QStringLiteral("finish %1/%2").arg(x.finish.toString(Qt::ISODate), y.finish.toString(Qt::ISODate));
+        if (x.stop != y.stop)
+            f << QStringLiteral("stop %1/%2").arg(x.stop.toString(Qt::ISODate), y.stop.toString(Qt::ISODate));
+        if (x.resume != y.resume)
+            f << QStringLiteral("resume %1/%2").arg(x.resume.toString(Qt::ISODate), y.resume.toString(Qt::ISODate));
+        if (x.timephasedValues != y.timephasedValues) {
+            f << QStringLiteral("timephasedValues (%1/%2)")
+                     .arg(x.timephasedValues.size()).arg(y.timephasedValues.size());
+            if (x.timephasedValues.size() != y.timephasedValues.size()) {
+                const auto &xv = x.timephasedValues.constLast();
+                const QString yLast = y.timephasedValues.isEmpty()
+                    ? QStringLiteral("<none>")
+                    : QStringLiteral("%1..%2 %3")
+                          .arg(y.timephasedValues.constLast().start.toString(Qt::ISODate),
+                               y.timephasedValues.constLast().finish.toString(Qt::ISODate),
+                               y.timephasedValues.constLast().value);
+                f << QStringLiteral("  last type%1 %2..%3 %4 / %5")
+                         .arg(xv.type)
+                         .arg(xv.start.toString(Qt::ISODate),
+                              xv.finish.toString(Qt::ISODate), xv.value, yLast);
+            }
+            for (int n = 0; n < qMin(x.timephasedValues.size(), y.timephasedValues.size()); ++n) {
+                const auto &xv = x.timephasedValues.at(n);
+                const auto &yv = y.timephasedValues.at(n);
+                if (!(xv == yv)) {
+                    f << QStringLiteral("  tp#%1 type %2/%3 start %4/%5 finish %6/%7 value %8/%9")
+                             .arg(n).arg(xv.type).arg(yv.type)
+                             .arg(xv.start.toString(Qt::ISODate), yv.start.toString(Qt::ISODate))
+                             .arg(xv.finish.toString(Qt::ISODate), yv.finish.toString(Qt::ISODate))
+                             .arg(xv.value, yv.value);
+                    break;
+                }
+            }
+        }
         if (x.notes != y.notes) f << QStringLiteral("notes");
         if (x.cost != y.cost) f << QStringLiteral("cost %1/%2").arg(x.cost).arg(y.cost);
         if (x.actualCost != y.actualCost) f << QStringLiteral("actualCost");
@@ -196,6 +250,10 @@ private slots:
     void taskDisplayOrderOrdinalIsWritten();
     void inconsistentProgressIsCanonicalizedForProject();
     void completedAssignmentStateIsWritten();
+    void timephasedAssignmentRoundTrip();
+    void nativeParityMetadataRoundTrip();
+    void nativeCostRateHeaderIsWritten();
+    void nativePhysicalProgressFieldsAreWritten();
     void fontBaseTableAndIndicesArePreserved();
     void normalRowWeightIsWrittenExplicitly();
     void parentRowsetManifestsAreConsistent();
@@ -214,6 +272,7 @@ schedule::Project TstSemanticRoundtrip::makeSampleProject()
     p.author = QStringLiteral("Paul");
     p.startDate = QDateTime(QDate(2026, 1, 2), QTime(8, 0), Qt::UTC);
     p.finishDate = QDateTime(QDate(2026, 3, 31), QTime(17, 0), Qt::UTC);
+    p.scheduleFromStart = false;
 
     schedule::Task t1;
     t1.uniqueId = 1; t1.id = 1; t1.outlineLevel = 1;
@@ -222,8 +281,11 @@ schedule::Project TstSemanticRoundtrip::makeSampleProject()
     t1.finish = QDateTime(QDate(2026, 1, 9), QTime(17, 0), Qt::UTC);
     t1.durationMillis = qint64(8) * 3600 * 1000;   // divisible by the duration unit
     t1.percentComplete = 0.5;
+    t1.physicalPercentComplete = 0.35;
+    t1.earnedValueMethod = 1;
     t1.workMillis = qint64(16) * 3600 * 1000;                // task-level Work
     t1.levelingDelayMillis = qint64(4) * 3600 * 1000;        // resource-leveling delay
+    t1.ignoreResourceCalendar = true;
     // Notes are stored as their 8-bit raw RTF source in the real format, so the
     // sample keeps to ASCII (Project itself escapes non-ANSI as \uN in RTF).
     t1.notes = QStringLiteral("{\\rtf1\\ansi Design note - keep it raw.}");
@@ -369,6 +431,30 @@ void TstSemanticRoundtrip::taskDisplayOrderOrdinalIsWritten()
     const int second = int(u32(meta, 16 + 4 * 96 + 4));
     QCOMPARE(f64(data, first + 16), 3.0);
     QCOMPARE(f64(data, second + 16), 2.0);
+
+    const QStringList resourceBase = {
+        QStringLiteral("   114"), QStringLiteral("TBkndRsc") };
+    const QByteArray resourceMeta = cf.readStream(
+        resourceBase + QStringList{QStringLiteral("Fixed2Meta")});
+    const QByteArray resourceData = cf.readStream(
+        resourceBase + QStringList{QStringLiteral("Fixed2Data")});
+    const QByteArray resourceFixedMeta = cf.readStream(
+        resourceBase + QStringList{QStringLiteral("FixedMeta")});
+    const QByteArray resourceFixedData = cf.readStream(
+        resourceBase + QStringList{QStringLiteral("FixedData")});
+    QVERIFY(resourceMeta.size() >= 16 + 5 * 51);
+    const int resourceOffset = int(u32(resourceMeta, 16 + 4 * 51 + 4));
+    QVERIFY(resourceOffset + 40 <= resourceData.size());
+    const QByteArray resourceRecord = resourceData.mid(resourceOffset, 40);
+    QVERIFY(resourceRecord.left(16) != QByteArray(16, '\0'));
+    QCOMPARE(quint8(resourceRecord.at(6)) & 0xF0u, quint8(0x10)); // UUID v1
+    QCOMPARE(resourceRecord.mid(4, 12),
+             QByteArray::fromHex("81a411f1913532894ab24c0f"));
+    QCOMPARE(f64(resourceRecord, 16), double(p.resources.first().id + 1));
+    QCOMPARE(resourceRecord.mid(24, 16), resourceRecord.left(16));
+    const int resourceFixedOffset = int(u32(resourceFixedMeta, 16 + 4 * 37 + 4));
+    QCOMPARE(u32(resourceFixedData, resourceFixedOffset + 154),
+             quint32(p.resources.first().id + 2));
 }
 
 void TstSemanticRoundtrip::completedAssignmentStateIsWritten()
@@ -388,6 +474,7 @@ void TstSemanticRoundtrip::completedAssignmentStateIsWritten()
 
     MppIO io;
     io.setProject(p);
+    QCOMPARE(io.project().assignments.first().overtimeWorkMillis, qint64(0));
     const QByteArray bytes = io.saveToData();
     QVERIFY2(!bytes.isEmpty(), qPrintable(io.errorString()));
 
@@ -396,9 +483,9 @@ void TstSemanticRoundtrip::completedAssignmentStateIsWritten()
     const QStringList base = { QStringLiteral("   114"), QStringLiteral("TBkndAssn") };
     const QByteArray meta = cf.readStream(base + QStringList{ QStringLiteral("FixedMeta") });
     const QByteArray data = cf.readStream(base + QStringList{ QStringLiteral("FixedData") });
-    QVERIFY(meta.size() >= 16 + 34);
+    QVERIFY(meta.size() >= 16 + 4 * 34);
     const int off = int(qFromLittleEndian<quint32>(
-        reinterpret_cast<const uchar *>(meta.constData() + 20)));
+        reinterpret_cast<const uchar *>(meta.constData() + 16 + 3 * 34 + 4)));
     const auto u16 = [&](int fieldOff) {
         return qFromLittleEndian<quint16>(
             reinterpret_cast<const uchar *>(data.constData() + off + fieldOff));
@@ -421,6 +508,208 @@ void TstSemanticRoundtrip::completedAssignmentStateIsWritten()
     QCOMPARE(u32(56), u32(60));    // FINISH == RESUME
     QCOMPARE(u32(56), u32(104));   // FINISH == STOP
     QCOMPARE(u16(92), quint16(7)); // LEVELING_DELAY_UNITS
+}
+
+void TstSemanticRoundtrip::nativeCostRateHeaderIsWritten()
+{
+    schedule::Project project = makeSampleProject();
+    schedule::CostRate rate;
+    rate.table = 0;
+    rate.standardRate = 100.0;
+    rate.overtimeRate = 150.0;
+    rate.costPerUse = 25.0;
+    project.resources[0].costRates = { rate };
+
+    MppIO io;
+    io.setProject(project);
+    const QByteArray bytes = io.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(io.errorString()));
+
+    CompoundFile cf;
+    QVERIFY2(cf.openFromData(bytes), qPrintable(cf.errorString()));
+    const QStringList base = { QStringLiteral("   114"), QStringLiteral("TBkndRsc") };
+    BkndVarData varData;
+    QVERIFY(varData.parse(
+        cf.readStream(base + QStringList{ QStringLiteral("VarMeta") }),
+        cf.readStream(base + QStringList{ QStringLiteral("Var2Data") })));
+    const QByteArray blob = varData.blobFor(1, 61);
+    QCOMPARE(blob.size(), 60);
+    QCOMPARE(qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(blob.constData())),
+             quint16(1));
+    QCOMPARE(qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(blob.constData() + 2)),
+             quint16(4));
+    QCOMPARE(qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(blob.constData() + 4)),
+             quint16(16));
+}
+
+void TstSemanticRoundtrip::nativePhysicalProgressFieldsAreWritten()
+{
+    const schedule::Project project = makeSampleProject();
+    const schedule::Task &task = project.tasks.first();
+
+    MppIO io;
+    io.setProject(project);
+    const QByteArray bytes = io.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(io.errorString()));
+
+    CompoundFile cf;
+    QVERIFY2(cf.openFromData(bytes), qPrintable(cf.errorString()));
+    const QStringList base = { QStringLiteral("   114"), QStringLiteral("TBkndTask") };
+    BkndVarData varData;
+    QVERIFY(varData.parse(
+        cf.readStream(base + QStringList{ QStringLiteral("VarMeta") }),
+        cf.readStream(base + QStringList{ QStringLiteral("Var2Data") })));
+    const QByteArray physical = varData.blobFor(task.uniqueId, 1119);
+    const QByteArray method = varData.blobFor(task.uniqueId, 1122);
+    QCOMPARE(physical.size(), 2);
+    QCOMPARE(method.size(), 2);
+    QCOMPARE(qFromLittleEndian<quint16>(
+                 reinterpret_cast<const uchar *>(physical.constData())), quint16(35));
+    QCOMPARE(qFromLittleEndian<quint16>(
+                 reinterpret_cast<const uchar *>(method.constData())), quint16(1));
+}
+
+void TstSemanticRoundtrip::timephasedAssignmentRoundTrip()
+{
+    schedule::Project p = makeSampleProject();
+    schedule::Assignment assignment;
+    assignment.uniqueId = 10;
+    assignment.taskUniqueId = p.tasks.first().uniqueId;
+    assignment.resourceUniqueId = p.resources.first().uniqueId;
+    assignment.units = 1.0;
+    assignment.workMillis = 20LL * 3600 * 1000;
+    assignment.actualWorkMillis = 4LL * 3600 * 1000;
+    assignment.remainingWorkMillis = 16LL * 3600 * 1000;
+    assignment.start = QDateTime(QDate(2026, 1, 5), QTime(8, 0), Qt::UTC);
+    assignment.stop = QDateTime(QDate(2026, 1, 5), QTime(12, 0), Qt::UTC);
+    assignment.resume = QDateTime(QDate(2026, 1, 6), QTime(8, 0), Qt::UTC);
+    assignment.finish = QDateTime(QDate(2026, 1, 7), QTime(17, 0), Qt::UTC);
+
+    auto addBucket = [&](int type, const QDate &day, int hours,
+                         const QTime &finish = QTime(17, 0)) {
+        schedule::TimephasedValue value;
+        value.type = type;
+        value.uniqueId = assignment.uniqueId;
+        value.start = QDateTime(day, QTime(8, 0), Qt::UTC);
+        value.finish = QDateTime(day, finish, Qt::UTC);
+        value.unit = 1;
+        value.value = QStringLiteral("PT%1H0M0S").arg(hours);
+        assignment.timephasedValues.append(value);
+    };
+    addBucket(schedule::TimephasedValue::ActualWork, QDate(2026, 1, 5), 4, QTime(12, 0));
+    addBucket(schedule::TimephasedValue::RemainingWork, QDate(2026, 1, 6), 6);
+    addBucket(schedule::TimephasedValue::RemainingWork, QDate(2026, 1, 7), 10);
+    // Match a daily Resource Usage edit: replace the Jan 6 cell while preserving
+    // Jan 5 actuals and Jan 7 remaining work.
+    QVERIFY(assignment.setTimephasedWorkInPeriod(
+        schedule::TimephasedValue::RemainingWork,
+        QDateTime(QDate(2026, 1, 6), QTime(0, 0), Qt::UTC),
+        QDateTime(QDate(2026, 1, 7), QTime(0, 0), Qt::UTC),
+        8LL * 3600 * 1000));
+    QCOMPARE(assignment.remainingWorkMillis, 18LL * 3600 * 1000);
+    QCOMPARE(assignment.workMillis, 22LL * 3600 * 1000);
+    p.assignments = { assignment };
+
+    MppIO writer;
+    writer.setProject(p);
+    const QByteArray bytes = writer.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(writer.errorString()));
+
+    MppIO reader;
+    QVERIFY2(reader.openFromData(bytes), qPrintable(reader.errorString()));
+    QCOMPARE(reader.project().assignments.size(), 1);
+    const schedule::Assignment &decoded = reader.project().assignments.first();
+    QCOMPARE(decoded.stop, assignment.stop);
+    QCOMPARE(decoded.resume, assignment.resume);
+
+    QHash<QString, qint64> daily;
+    for (const schedule::TimephasedValue &value : decoded.timephasedValues) {
+        const QString key = QStringLiteral("%1|%2")
+            .arg(value.type).arg(value.start.date().toString(Qt::ISODate));
+        daily[key] += value.durationMillis();
+    }
+    QCOMPARE(daily.value(QStringLiteral("2|2026-01-05")), 4LL * 3600 * 1000);
+    QCOMPARE(daily.value(QStringLiteral("1|2026-01-06")), 8LL * 3600 * 1000);
+    QCOMPARE(daily.value(QStringLiteral("1|2026-01-07")), 10LL * 3600 * 1000);
+}
+
+void TstSemanticRoundtrip::nativeParityMetadataRoundTrip()
+{
+    schedule::Project p = makeSampleProject();
+    p.multipleCriticalPaths = true;
+    schedule::CalendarException exception;
+    exception.name = QStringLiteral("Biweekly shutdown");
+    exception.fromDate = QDate(2026, 1, 7);
+    exception.toDate = QDate(2026, 3, 31);
+    exception.recurrence = schedule::CalendarException::Recurrence::Weekly;
+    exception.interval = 2;
+    exception.weekDayMask = 1u << 2; // Wednesday
+    exception.occurrences = 5;
+    p.calendars.first().exceptions.append(exception);
+
+    schedule::Resource &resource = p.resources.first();
+    resource.budget = true;
+    resource.budgetWorkMillis = 40LL * 3600 * 1000;
+    resource.budgetCost = 12000.0;
+    schedule::Assignment assignment;
+    assignment.uniqueId = 20;
+    assignment.taskUniqueId = 0;
+    assignment.resourceUniqueId = resource.uniqueId;
+    assignment.budget = true;
+    assignment.budgetWorkMillis = resource.budgetWorkMillis;
+    assignment.budgetCost = resource.budgetCost;
+    assignment.start = p.startDate;
+    assignment.finish = p.finishDate;
+    schedule::TimephasedValue work;
+    work.type = schedule::TimephasedValue::BaselineWork;
+    work.uniqueId = assignment.uniqueId;
+    work.baselineNumber = 2;
+    work.start = QDateTime(QDate(2026, 1, 5), QTime(8, 0), Qt::UTC);
+    work.finish = QDateTime(QDate(2026, 1, 5), QTime(12, 0), Qt::UTC);
+    work.unit = 1;
+    work.value = QStringLiteral("PT4H0M0S");
+    schedule::TimephasedValue cost = work;
+    cost.type = schedule::TimephasedValue::BaselineCost;
+    cost.unit = 2;
+    cost.value = QStringLiteral("375.5");
+    assignment.timephasedValues = {work, cost};
+    p.assignments = {assignment};
+
+    MppIO writer;
+    writer.setProject(p);
+    const QByteArray bytes = writer.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(writer.errorString()));
+    MppIO reader;
+    QVERIFY2(reader.openFromData(bytes), qPrintable(reader.errorString()));
+    const schedule::Project &decoded = reader.project();
+    QVERIFY(decoded.multipleCriticalPaths);
+    QVERIFY(decoded.resources.first().budget);
+    QCOMPARE(decoded.resources.first().budgetWorkMillis, resource.budgetWorkMillis);
+    QCOMPARE(decoded.resources.first().budgetCost, resource.budgetCost);
+    QCOMPARE(decoded.assignments.first().budgetWorkMillis, assignment.budgetWorkMillis);
+    QCOMPARE(decoded.assignments.first().budgetCost, assignment.budgetCost);
+    QCOMPARE(decoded.budgetCost, assignment.budgetCost);
+    const auto &decodedException = decoded.calendars.first().exceptions.first();
+    QCOMPARE(decodedException.recurrence,
+             schedule::CalendarException::Recurrence::Weekly);
+    QCOMPARE(decodedException.interval, 2);
+    QCOMPARE(decodedException.weekDayMask, quint8(1u << 2));
+    QCOMPARE(decodedException.occurrences, 5);
+    bool foundWork = false, foundCost = false;
+    for (const auto &value : decoded.assignments.first().timephasedValues) {
+        if (value.type == schedule::TimephasedValue::BaselineWork
+            && value.baselineNumber == 2) {
+            QCOMPARE(value.durationMillis(), 4LL * 3600 * 1000);
+            foundWork = true;
+        }
+        if (value.type == schedule::TimephasedValue::BaselineCost
+            && value.baselineNumber == 2) {
+            QCOMPARE(value.value.toDouble(), 375.5);
+            foundCost = true;
+        }
+    }
+    QVERIFY(foundWork);
+    QVERIFY(foundCost);
 }
 
 void TstSemanticRoundtrip::fontBaseTableAndIndicesArePreserved()
@@ -537,13 +826,19 @@ void TstSemanticRoundtrip::inconsistentProgressIsCanonicalizedForProject()
     QByteArray staleAssnRecord;
     int staleAssnIndex = -1;
     const int assnCount = (assnMeta.size() - 16) / 34;
+    QCOMPARE(assnCount, 4); // three native placeholders plus one live row
+    QCOMPARE(int(u32(assnF2Meta, 8)), 4);
+    QCOMPARE(u32(assnF2Meta, 16 + 0 * 53 + 4), quint32(0));
+    QCOMPARE(u32(assnF2Meta, 16 + 1 * 53 + 4), quint32(48));
+    QCOMPARE(u32(assnF2Meta, 16 + 2 * 53 + 4), quint32(96));
     for (int i = 0; i < assnCount; ++i) {
         const int item = 16 + i * 34;
         const int off = int(u32(assnMeta, item + 4));
         if (off + 110 <= assnData.size() && u32(assnData, off) == 10) {
             staleAssnRecord = assnData.mid(off, 110);
-            QCOMPARE(u32(assnMeta, item), quint32(0x000C0000));
+            QCOMPARE(u32(assnMeta, item), quint32(0x00090000));
             QCOMPARE(uchar(assnMeta.at(item + 10)), uchar(0x23));
+            QCOMPARE(uchar(assnMeta.at(item + 32)), uchar(0x40));
             staleAssnIndex = i;
             break;
         }
@@ -554,6 +849,8 @@ void TstSemanticRoundtrip::inconsistentProgressIsCanonicalizedForProject()
     QCOMPARE(u32(staleAssnRecord, 104), assignmentStart); // Stop
     QVERIFY(staleAssnIndex >= 0);
     const int assnF2Item = 16 + staleAssnIndex * 53;
+    QCOMPARE(u32(assnF2Meta, assnF2Item), quint32(0));
+    QCOMPARE(u32(assnF2Meta, assnF2Item + 8), quint32(0x0000084F));
     const int assnF2Off = int(u32(assnF2Meta, assnF2Item + 4));
     const QByteArray assnF2 = assnF2Data.mid(assnF2Off, 48);
     QCOMPARE(assnF2.size(), 48);

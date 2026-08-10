@@ -16,6 +16,7 @@ The top-level document. A successful `MppIO::open()` fills one of these; reach i
 | `author` | `QString` | Project author. |
 | `startDate` | `QDateTime` | Project start date (UTC). |
 | `finishDate` | `QDateTime` | Project finish date (UTC). |
+| `scheduleFromStart` | `bool` | `true` schedules forward from `startDate`; `false` schedules backward from `finishDate`. |
 | `statusDate` | `QDateTime` | As-of date for progress and earned-value calculations. |
 | `calendarUniqueId` | `int` | Project calendar UID; `-1` selects the calendar named `Standard`. |
 | `tasks` | `QList<schedule::Task>` | All tasks. See [schedule::Task](Task.md). |

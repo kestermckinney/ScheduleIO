@@ -16,14 +16,21 @@ Links a resource to a task. Value type; copyable and equality-comparable.
 | `units` | `double` | Assigned units, as a ratio. `1.0` == 100%. |
 | `workMillis` | `qint64` | Assigned work, in milliseconds. |
 | `start`, `finish` | `QDateTime` | Scheduled assignment span; invalid means use the task span. |
+| `stop`, `resume` | `QDateTime` | Boundary between completed and remaining work for a partially progressed assignment. |
 | `delayMillis` | `qint64` | Assignment delay in working milliseconds. |
 | `levelingDelayMillis` | `qint64` | Delay added by resource leveling. |
 | `actualWorkMillis` | `qint64` | Work completed. |
 | `remainingWorkMillis` | `qint64` | Work still scheduled. |
+| `overtimeWorkMillis`, `actualOvertimeWorkMillis`, `remainingOvertimeWorkMillis` | `qint64` | Overtime subsets of total, actual, and remaining work. |
+| `timephasedValues` | `QList<schedule::TimephasedValue>` | Dated assignment values. Planned/remaining, actual, and actual overtime work round-trip through MSPDI and native MPP14. |
+| `costRateTable` | `int` | Selected resource cost-rate table A–E (`0`–`4`). |
+| `variableRateUnits` | `int` | Material consumption denominator; `0` is fixed, otherwise Microsoft minute/hour/day/week/month/year code. |
+| `workContour` | `int` | Assignment work distribution: `0` Flat through `7` Turtle; `8` is Contoured/custom. |
 | `notes` | `QString` | The assignment's notes as raw RTF source (empty if none). |
 | `cost` | `double` | Total cost, in the project's currency unit. |
 | `actualCost` | `double` | Cost incurred so far. |
 | `remainingCost` | `double` | Cost still to be incurred. |
+| `overtimeCost`, `actualOvertimeCost`, `remainingOvertimeCost` | `double` | Cost of overtime work at the resource's applicable overtime rate. |
 | `costVariance` | `double` | Cost minus baseline cost. |
 | `baselines` | `QList<schedule::Baseline>` | Saved baselines (cost, work, start, finish; see [`schedule::Baseline`](Baseline.md)). |
 | `customFields` | `QList<schedule::CustomField>` | Populated custom/extended fields (see [`schedule::CustomField`](CustomField.md)). |
@@ -53,3 +60,18 @@ for (const schedule::Assignment &a : project.assignments) {
 * A `.mpp` file can contain more assignment records than appear in a filtered Microsoft Project
   export (deleted or internal rows). MppIO returns the records it finds; filter by valid
   `taskUniqueId` / `resourceUniqueId` if you only want live assignments.
+* Native MPP14 maps regular actual work, remaining/planned work, and actual overtime work.
+  Time-phased cost and baseline streams are not yet decoded or written.
+* `setTimephasedWorkInPeriod()` replaces one actual/remaining-work interval, preserves bucket
+  portions outside it, and reconciles aggregate assignment work values for usage-grid editing.
+* `setTimephasedMaterialInPeriod()` and `timephasedMaterialInPeriod()` expose Microsoft Project's
+  material convention: one duration-hour in the assignment stream represents one material unit.
+  This keeps fractional, dated quantities compatible with MSPDI and native MPP while callers work
+  in real quantities.
+* `MaterialCosting::recalculate()` applies the selected material standard rate and cost-per-use,
+  splits actual versus remaining cost from the quantity buckets, and rolls costs up to tasks and
+  resources.
+* `WorkContouring` expands the predefined contours across ten working-time segments and writes
+  authoritative remaining-work buckets. Custom contour buckets are retained exactly. Native MPP14
+  stores predefined identity in the remaining-work stream header and the custom state in assignment
+  metadata.

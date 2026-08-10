@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "model/taskscheduling.h"
+#include "model/calendar.h"
+#include "model/duration.h"
+#include "mppio.h"
 
+#include <QFile>
 #include <QTest>
 
 using schedule::Assignment;
@@ -79,7 +83,26 @@ private slots:
     void addToEmptyTask_bringsOwnWork();
     void workOnResourcelessTask_holdsOnTask();
     void assignAfterWork_inheritsTaskWork();
+    void materialConsumptionDoesNotCreateLaborOrDuration();
+    void resourceCalendarMovesAssignmentAndTask();
+    void ignoreResourceCalendarUsesTaskCalendarOnly();
+    void calendarOracleArtifactRoundTrips();
+    void elapsedDurationIgnoresResourceCalendar();
 };
+
+void TstTaskScheduling::elapsedDurationIgnoresResourceCalendar()
+{
+    Project p = makeProject(0, false); // Fixed Units, one assigned work resource
+    task(p).start = QDateTime(QDate(2026, 7, 10), QTime(17, 0)); // Friday
+    task(p).durationFormat = schedule::Duration::ElapsedDays;
+
+    TaskScheduling::setDuration(p, 1, 2 * schedule::Duration::kMillisPerElapsedDay);
+
+    QCOMPARE(task(p).durationFormat, int(schedule::Duration::ElapsedDays));
+    QCOMPARE(task(p).finish, QDateTime(QDate(2026, 7, 12), QTime(17, 0))); // Sunday
+    QCOMPARE(assn(p, 100)->start, task(p).start);
+    QCOMPARE(assn(p, 100)->finish, task(p).finish);
+}
 
 void TstTaskScheduling::baselineSync()
 {
@@ -208,6 +231,174 @@ void TstTaskScheduling::assignAfterWork_inheritsTaskWork()
     QCOMPARE(assn(p, newUid)->workMillis, 16 * kHour);
     QCOMPARE(TaskScheduling::taskWork(p, 1), 16 * kHour);
     QCOMPARE(task(p).durationMillis, 16 * kHour);
+}
+
+void TstTaskScheduling::materialConsumptionDoesNotCreateLaborOrDuration()
+{
+    Project p = makeProject(0, false);
+    Resource material;
+    material.uniqueId = 12;
+    material.name = QStringLiteral("Concrete");
+    material.type = Resource::Type::Material;
+    material.materialLabel = QStringLiteral("tons");
+    p.resources.append(material);
+
+    const int materialUid = TaskScheduling::addAssignment(p, 1, 12, 1.0);
+    QVERIFY(materialUid > 0);
+    QCOMPARE(assn(p, materialUid)->workMillis, kHour);
+    QCOMPARE(TaskScheduling::taskWork(p, 1), 40 * kHour);
+    QCOMPARE(task(p).durationMillis, 40 * kHour);
+
+    TaskScheduling::setAssignmentWork(p, materialUid, qint64(12.5 * kHour));
+    QCOMPARE(assn(p, materialUid)->workMillis, qint64(12.5 * kHour));
+    QCOMPARE(TaskScheduling::taskWork(p, 1), 40 * kHour);
+    QCOMPARE(task(p).workMillis, 40 * kHour);
+    QCOMPARE(task(p).durationMillis, 40 * kHour);
+
+    TaskScheduling::setDuration(p, 1, 24 * kHour);
+    QCOMPARE(assn(p, materialUid)->workMillis, qint64(12.5 * kHour));
+    QCOMPARE(assn(p, 100)->workMillis, 24 * kHour);
+    QCOMPARE(TaskScheduling::taskWork(p, 1), 24 * kHour);
+}
+
+void TstTaskScheduling::resourceCalendarMovesAssignmentAndTask()
+{
+    Project p = makeProject(0, false);
+    p.calendars = schedule::Calendar::microsoftDefaults();
+    p.calendarUniqueId = 1;
+    schedule::Calendar resourceCalendar;
+    resourceCalendar.uniqueId = 4;
+    resourceCalendar.name = QStringLiteral("Ann");
+    resourceCalendar.baseCalendarUniqueId = 1;
+    schedule::CalendarException vacation;
+    vacation.fromDate = QDate(2026, 7, 6);
+    vacation.toDate = QDate(2026, 7, 6);
+    vacation.working = false;
+    resourceCalendar.exceptions.append(vacation);
+    p.calendars.append(resourceCalendar);
+    p.resources[0].calendarUniqueId = 4;
+    p.assignments[0].workMillis = 8 * kHour;
+    p.tasks[0].durationMillis = 8 * kHour;
+
+    TaskScheduling::syncTask(p, 1);
+    QCOMPARE(task(p).start, QDateTime(QDate(2026, 7, 7), QTime(8, 0)));
+    QCOMPARE(task(p).finish, QDateTime(QDate(2026, 7, 7), QTime(17, 0)));
+    QCOMPARE(assn(p, 100)->start, task(p).start);
+    QCOMPARE(assn(p, 100)->finish, task(p).finish);
+}
+
+void TstTaskScheduling::ignoreResourceCalendarUsesTaskCalendarOnly()
+{
+    Project p = makeProject(0, false);
+    p.calendars = schedule::Calendar::microsoftDefaults();
+    p.calendarUniqueId = 1;
+    p.tasks[0].calendarUniqueId = 2; // 24 Hours
+    p.tasks[0].ignoreResourceCalendar = true;
+    p.tasks[0].start = QDateTime(QDate(2026, 7, 6), QTime(0, 0));
+    p.tasks[0].durationMillis = 8 * kHour;
+    p.assignments[0].workMillis = 8 * kHour;
+    p.resources[0].calendarUniqueId = 1; // Standard would not start until 08:00
+
+    TaskScheduling::syncTask(p, 1);
+    QCOMPARE(task(p).start, QDateTime(QDate(2026, 7, 6), QTime(0, 0)));
+    QCOMPARE(task(p).finish, QDateTime(QDate(2026, 7, 6), QTime(8, 0)));
+}
+
+void TstTaskScheduling::calendarOracleArtifactRoundTrips()
+{
+    Project p;
+    p.formatVersion = Project::FormatVersion::Mpp14;
+    p.title = QStringLiteral("Resource Calendar Oracle");
+    p.calendars = schedule::Calendar::microsoftDefaults();
+    p.calendarUniqueId = 1;
+    p.startDate = QDateTime(QDate(2026, 7, 6), QTime(0, 0));
+
+    schedule::Calendar annCalendar;
+    annCalendar.uniqueId = 4;
+    annCalendar.name = QStringLiteral("Ann");
+    annCalendar.baseCalendarUniqueId = 1;
+    schedule::CalendarException vacation;
+    vacation.name = QStringLiteral("Monday vacation");
+    vacation.fromDate = QDate(2026, 7, 6);
+    vacation.toDate = QDate(2026, 7, 6);
+    vacation.working = false;
+    annCalendar.exceptions.append(vacation);
+    p.calendars.append(annCalendar);
+
+    Resource ann;
+    ann.uniqueId = 10;
+    ann.id = 1;
+    ann.name = QStringLiteral("Ann");
+    ann.calendarUniqueId = 4;
+    schedule::AvailabilityPeriod availability;
+    availability.startDate = QDateTime(QDate(2026, 7, 7), QTime(0, 0), Qt::UTC);
+    availability.endDate = QDateTime(QDate(2026, 7, 31), QTime(23, 59), Qt::UTC);
+    availability.units = 1.0;
+    ann.availabilityTable = { availability };
+    p.resources.append(ann);
+
+    Task intersected;
+    intersected.uniqueId = 1;
+    intersected.id = 1;
+    intersected.name = QStringLiteral("Calendar intersection");
+    intersected.start = QDateTime(QDate(2026, 7, 6), QTime(8, 0));
+    intersected.durationMillis = 8 * kHour;
+    p.tasks.append(intersected);
+    Assignment a1;
+    a1.uniqueId = 100;
+    a1.taskUniqueId = 1;
+    a1.resourceUniqueId = 10;
+    a1.units = 1.0;
+    a1.workMillis = 8 * kHour;
+    p.assignments.append(a1);
+    TaskScheduling::syncTask(p, 1);
+    QCOMPARE(p.tasks[0].start, QDateTime(QDate(2026, 7, 7), QTime(8, 0)));
+
+    Resource ben;
+    ben.uniqueId = 11;
+    ben.id = 2;
+    ben.name = QStringLiteral("Ben");
+    ben.calendarUniqueId = 1;
+    p.resources.append(ben);
+    Task ignored;
+    ignored.uniqueId = 2;
+    ignored.id = 2;
+    ignored.name = QStringLiteral("Ignore resource calendar");
+    // Start at 08:00 rather than midnight: Project's task fixed-data timestamp
+    // uses midnight as an NA sentinel in this row shape. The 24 Hours calendar
+    // is still proven by the uninterrupted 08:00-16:00 eight-hour span.
+    ignored.start = QDateTime(QDate(2026, 7, 6), QTime(8, 0));
+    ignored.durationMillis = 8 * kHour;
+    ignored.calendarUniqueId = 2;
+    ignored.ignoreResourceCalendar = true;
+    p.tasks.append(ignored);
+    Assignment a2;
+    a2.uniqueId = 101;
+    a2.taskUniqueId = 2;
+    a2.resourceUniqueId = 11;
+    a2.units = 1.0;
+    a2.workMillis = 8 * kHour;
+    p.assignments.append(a2);
+    TaskScheduling::syncTask(p, 2);
+    QCOMPARE(p.tasks[1].finish, QDateTime(QDate(2026, 7, 6), QTime(16, 0)));
+
+    MppIO writer;
+    writer.setProject(p);
+    const QByteArray bytes = writer.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(writer.errorString()));
+    MppIO reader;
+    QVERIFY2(reader.openFromData(bytes), qPrintable(reader.errorString()));
+    QCOMPARE(reader.project().tasks.at(0).start.date(), p.tasks.at(0).start.date());
+    QCOMPARE(reader.project().tasks.at(0).start.time(), p.tasks.at(0).start.time());
+    QVERIFY(reader.project().tasks.at(1).ignoreResourceCalendar);
+    QCOMPARE(reader.project().resources.at(0).availabilityTable, ann.availabilityTable);
+
+    const QString artifactPath = qEnvironmentVariable("SCHEDULEIO_CALENDAR_ORACLE_MPP");
+    if (!artifactPath.isEmpty()) {
+        QFile artifact(artifactPath);
+        QVERIFY(artifact.open(QIODevice::WriteOnly));
+        QCOMPARE(artifact.write(bytes), bytes.size());
+    }
 }
 
 QTEST_MAIN(TstTaskScheduling)

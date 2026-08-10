@@ -47,6 +47,14 @@ public:
     // The user edited one assignment's work.
     static void setAssignmentWork(Project &p, int assignmentUid, qint64 workMillis);
 
+    // Material assignment quantity/rate. rateUnits=0 is a fixed quantity;
+    // otherwise units is a quantity per minute/hour/day/week/month/year.
+    static void setMaterialRate(Project &p, int assignmentUid, double units,
+                                int rateUnits, int costRateTable = 0);
+
+    // Apply one of Microsoft Project's assignment work contours (0..8).
+    static bool setWorkContour(Project &p, int assignmentUid, int contour);
+
     // Assign a resource to the task. Returns the new assignment's unique id,
     // or -1 when the task/resource is unknown or already assigned.
     static int addAssignment(Project &p, int taskUid, int resourceUid, double units = 1.0);

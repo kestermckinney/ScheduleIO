@@ -39,14 +39,19 @@ public:
     QString author;
     QDateTime startDate;
     QDateTime finishDate;
+    bool scheduleFromStart = true;   // false = calculate backward from finishDate
+    bool multipleCriticalPaths = false; // anchor every independent network at its own finish
     QDateTime statusDate;   // "as of" date for progress / earned-value calculations
     int calendarUniqueId = -1;   // the project calendar; -1 = the "Standard" calendar
+    double budgetCost = 0.0;
+    qint64 budgetWorkMillis = 0;
 
     QList<Task> tasks;
     QList<Resource> resources;
     QList<Assignment> assignments;
     QList<Calendar> calendars;
     QList<Relation> relations;
+    QList<CustomField> customFieldDefinitions; // formula/lookup/indicator metadata
 
     // Opaque MPP14 FONT_BASES payload ("   214/Props", key 0x03400000).
     // It is intentionally not part of semantic equality; it preserves the

@@ -33,6 +33,7 @@ void TstXmlRoundtrip::synthetic()
     p.author = QStringLiteral("Tester");
     p.startDate = QDateTime(QDate(2026, 1, 5), QTime(8, 0));
     p.finishDate = QDateTime(QDate(2026, 2, 27), QTime(17, 0));
+    p.scheduleFromStart = false;
     p.statusDate = QDateTime(QDate(2026, 1, 30), QTime(17, 0));
 
     schedule::Task summary;
@@ -41,6 +42,7 @@ void TstXmlRoundtrip::synthetic()
     summary.outlineLevel = 1;
     summary.name = QStringLiteral("Phase 1");
     summary.summary = true;
+    summary.recurring = true;
     summary.start = p.startDate;
     summary.finish = p.finishDate;
     summary.durationMillis = 40LL * 3600 * 1000;
@@ -56,12 +58,15 @@ void TstXmlRoundtrip::synthetic()
     task.workMillis = 24LL * 3600 * 1000;
     task.levelingDelayMillis = 2LL * 3600 * 1000;
     task.percentComplete = 0.5;
+    task.physicalPercentComplete = 0.35;
+    task.earnedValueMethod = 1;
     task.milestone = false;
     task.constraintType = 4;
     task.constraintDate = p.startDate;
     task.manual = true;
     task.effortDriven = true;
     task.taskType = 2;   // Fixed Work
+    task.ignoreResourceCalendar = true;
     task.priority = 750;
     task.deadline = QDateTime(QDate(2026, 2, 20), QTime(17, 0));
     task.wbs = QStringLiteral("1.1");
@@ -71,6 +76,9 @@ void TstXmlRoundtrip::synthetic()
     task.actualCost = 600.0;
     task.remainingCost = 634.5;
     task.costVariance = 34.5;
+    task.startVarianceMillis = 2LL * 3600 * 1000;
+    task.finishVarianceMillis = -1LL * 3600 * 1000;
+    task.workVarianceMillis = 8LL * 3600 * 1000;
     task.actualStart = task.start;
     task.actualFinish = QDateTime(QDate(2026, 1, 9), QTime(17, 0));
     task.actualDurationMillis = 16LL * 3600 * 1000;
@@ -84,6 +92,10 @@ void TstXmlRoundtrip::synthetic()
     task.evm.spi = 0.61725;
     task.evm.eac = 1200.0;
     task.evm.tcpi = 0.97;
+    task.segments = {
+        { task.start, QDateTime(QDate(2026, 1, 7), QTime(12, 0)) },
+        { QDateTime(QDate(2026, 1, 8), QTime(8, 0)), task.finish }
+    };
 
     schedule::Baseline base;
     base.number = 0;
@@ -114,6 +126,8 @@ void TstXmlRoundtrip::synthetic()
     res.id = 1;
     res.name = QStringLiteral("Alice");
     res.initials = QStringLiteral("A");
+    res.type = schedule::Resource::Type::Material;
+    res.materialLabel = QStringLiteral("yards");
     res.maxUnits = 1.0;
     res.cost = 600.0;
     schedule::CostRate cr;
@@ -137,8 +151,36 @@ void TstXmlRoundtrip::synthetic()
     asn.taskUniqueId = 2;
     asn.resourceUniqueId = 1;
     asn.units = 1.0;
+    asn.costRateTable = 3;
+    asn.variableRateUnits = 4;
+    asn.workContour = 6;
     asn.workMillis = 16LL * 3600 * 1000;
+    asn.overtimeWorkMillis = 3LL * 3600 * 1000;
+    asn.actualOvertimeWorkMillis = 2LL * 3600 * 1000;
+    asn.remainingOvertimeWorkMillis = 1LL * 3600 * 1000;
     asn.cost = 600.0;
+    asn.overtimeCost = 450.0;
+    asn.actualOvertimeCost = 300.0;
+    asn.remainingOvertimeCost = 150.0;
+    schedule::TimephasedValue dayOne;
+    dayOne.type = schedule::TimephasedValue::RemainingWork;
+    dayOne.uniqueId = 1;
+    dayOne.start = QDateTime(QDate(2026, 4, 1), QTime(8, 0));
+    dayOne.finish = QDateTime(QDate(2026, 4, 2), QTime(8, 0));
+    dayOne.unit = 1;
+    dayOne.value = QStringLiteral("PT6H0M0S");
+    asn.timephasedValues.append(dayOne);
+    schedule::TimephasedValue dayTwo = dayOne;
+    dayTwo.uniqueId = 2;
+    dayTwo.start = QDateTime(QDate(2026, 4, 2), QTime(8, 0));
+    dayTwo.finish = QDateTime(QDate(2026, 4, 3), QTime(8, 0));
+    dayTwo.value = QStringLiteral("PT10H0M0S");
+    asn.timephasedValues.append(dayTwo);
+    schedule::TimephasedValue overtime = dayOne;
+    overtime.uniqueId = 3;
+    overtime.type = schedule::TimephasedValue::ActualOvertimeWork;
+    overtime.value = QStringLiteral("PT2H0M0S");
+    asn.timephasedValues.append(overtime);
     p.assignments.append(asn);
 
     schedule::Calendar cal;

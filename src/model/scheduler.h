@@ -13,9 +13,8 @@
 namespace schedule {
 
 // Dependency-driven scheduling over a Project, mirroring WINPROJ's
-// TBkndRecalc forward pass ("Recalc-ForwardRecalc"): auto-scheduled tasks are
-// pushed to the earliest start their predecessors + lag allow, then their
-// finish is derived from the duration in working time.
+// TBkndRecalc passes: start-scheduled projects calculate forward, while ALAP
+// tasks and finish-scheduled projects are placed by a successors-first pass.
 //
 // The static working-time helpers use MS Project's default Standard calendar
 // (Monday-Friday, 08:00-12:00 and 13:00-17:00); reschedule() resolves each
@@ -48,9 +47,9 @@ public:
     // FROM T).
     static bool reachable(const Project &project, int fromUid, int toUid);
 
-    // The forward pass: recompute start/finish of every auto-scheduled,
-    // non-summary task from its predecessors and lag (FS/SS/FF/SF), honouring
-    // Must Start/Finish On and Start/Finish No Earlier Than constraints.
+    // Recompute start/finish of every auto-scheduled, non-summary task from
+    // dependencies and lag (FS/SS/FF/SF), then place ALAP/date-constrained
+    // tasks from the project finish when the project schedules backward.
     // Tasks with no predecessors keep their current start (it anchors them);
     // manually scheduled tasks and summaries are never moved (summaries are
     // rolled up from their children by the caller). Cycles are broken by

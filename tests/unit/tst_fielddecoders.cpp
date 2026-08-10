@@ -60,8 +60,9 @@ void TstFieldDecoders::percentClampsAndScales()
 
 void TstFieldDecoders::guidRoundTrip()
 {
-    const QUuid u = QUuid::createUuid();
+    const QUuid u(QStringLiteral("{00112233-4455-6677-8899-aabbccddeeff}"));
     const QByteArray bytes = encodeGuid(u);
+    QCOMPARE(bytes, QByteArray::fromHex("33221100554477668899aabbccddeeff"));
     QCOMPARE(bytes.size(), 16);
     QCOMPARE(decodeGuid(bytes), u);
 }

@@ -32,6 +32,9 @@ copyable and equality-comparable.
 * Resources are linked to tasks through [`schedule::Assignment`](Assignment.md), not directly.
 * A resource may also have a *resource calendar* — a [`schedule::Calendar`](Calendar.md) whose name is
   the resource's name and whose `baseCalendarUniqueId` points at a base calendar.
+* Work-resource calendars constrain assignment working intervals. `availabilityTable` changes dated
+  capacity for over-allocation and leveling; like Microsoft Project, availability alone does not move
+  a task until leveling is requested.
 * Resource **cost rates** (standard rate, overtime rate, cost-per-use) live in Microsoft Project's
   cost-rate tables and are decoded into `costRates` (see [`schedule::CostRate`](CostRate.md)).
 * **`cost`** is the resource's stored cost where present; for resources whose cost Microsoft Project

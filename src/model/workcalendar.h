@@ -9,6 +9,7 @@
 
 #include <QDateTime>
 #include <QList>
+#include <QSharedPointer>
 #include <QVector>
 
 namespace schedule {
@@ -35,6 +36,11 @@ public:
     // Unknown ids resolve to the built-in Standard week.
     WorkCalendar(const Project &project, int calendarUniqueId);
 
+    // Return a calendar whose working periods are the overlap of every input
+    // calendar. This is the rule Microsoft Project applies to a task calendar
+    // (or project calendar) and an assigned work resource's calendar.
+    static WorkCalendar intersection(const QList<WorkCalendar> &calendars);
+
     bool isWorkingDay(const QDate &d) const;
 
     // Working periods for a calendar date, exceptions applied.
@@ -58,19 +64,30 @@ public:
     // for duration display in "days". The Standard week gives 8h.
     qint64 workPerDay() const;
 
-private:
+public: // exposed for deterministic recurrence evaluation helpers
     // One date-range override, leaf-most calendar first in m_exceptions.
     struct Exception {
         QDate from, to;
         bool working = false;
         QVector<Period> periods;
+        CalendarException::Recurrence recurrence = CalendarException::Recurrence::None;
+        int interval = 1;
+        quint8 weekDayMask = 0;
+        int dayOfMonth = 0;
+        int month = 0;
+        int weekPosition = 0;
+        int occurrences = 0;
     };
+
+private:
 
     const QVector<Period> &periodsFor(const QDate &d) const;
 
     QVector<Period> m_week[7];        // resolved weekly periods, index 0=Monday
     QList<Exception> m_exceptions;    // leaf calendar's first (they win)
     QVector<Period> m_none;           // empty list for non-working days
+    QList<QSharedPointer<WorkCalendar>> m_intersectionCalendars;
+    mutable QVector<Period> m_intersectionScratch;
 };
 
 } // namespace schedule
