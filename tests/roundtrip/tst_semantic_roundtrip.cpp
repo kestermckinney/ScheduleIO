@@ -257,6 +257,7 @@ private slots:
     void fontBaseTableAndIndicesArePreserved();
     void normalRowWeightIsWrittenExplicitly();
     void parentRowsetManifestsAreConsistent();
+    void timelineViewSurvivesEditedFixtureSave();
     void realFixtures_data();
     void realFixtures();
 
@@ -989,6 +990,83 @@ void TstSemanticRoundtrip::parentRowsetManifestsAreConsistent()
         return issue.contains(QStringLiteral("TBkndTask"))
             && issue.contains(QStringLiteral("declares 4 rows"));
     }));
+}
+
+void TstSemanticRoundtrip::timelineViewSurvivesEditedFixtureSave()
+{
+    QString fixturePath;
+    for (const QString &path : fixtures::mppFiles()) {
+        if (QFileInfo(path).fileName().compare(QStringLiteral("Timeline Test.mpp"),
+                                               Qt::CaseInsensitive) == 0) {
+            fixturePath = path;
+            break;
+        }
+    }
+    if (fixturePath.isEmpty())
+        QSKIP("Timeline Test.mpp fixture is not installed");
+
+    QFile fixture(fixturePath);
+    QVERIFY2(fixture.open(QIODevice::ReadOnly), qPrintable(fixture.errorString()));
+    const QByteArray sourceBytes = fixture.readAll();
+
+    auto timelineUid = [](const CompoundFile &cf) {
+        const QStringList base = { QStringLiteral("   214"), QStringLiteral("CV_iew") };
+        const QByteArray meta = cf.readStream(base + QStringList{ QStringLiteral("FixedMeta") });
+        const QByteArray data = cf.readStream(base + QStringList{ QStringLiteral("FixedData") });
+        auto u16 = [](const QByteArray &b, int o) {
+            return qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(b.constData()) + o);
+        };
+        auto u32 = [](const QByteArray &b, int o) {
+            return qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(b.constData()) + o);
+        };
+        const int count = meta.size() >= 16 ? int(u32(meta, 8)) : 0;
+        int lastOffset = -1;
+        for (int i = 0; i < count; ++i) {
+            const int mo = 16 + i * 10;
+            if (mo + 10 > meta.size())
+                break;
+            const int offset = int(u16(meta, mo + 4));
+            if (offset <= lastOffset)
+                continue;
+            lastOffset = offset;
+            if (offset + 138 <= data.size() && u16(data, offset + 112) == 16)
+                return int(u32(data, offset));
+        }
+        return -1;
+    };
+
+    CompoundFile sourceCf;
+    QVERIFY(sourceCf.openFromData(sourceBytes));
+    const int sourceTimelineUid = timelineUid(sourceCf);
+    QVERIFY(sourceTimelineUid >= 0);
+    BkndVarData sourceViews;
+    QVERIFY(sourceViews.parse(
+        sourceCf.readStream({ QStringLiteral("   214"), QStringLiteral("CV_iew"), QStringLiteral("VarMeta") }),
+        sourceCf.readStream({ QStringLiteral("   214"), QStringLiteral("CV_iew"), QStringLiteral("Var2Data") })));
+    const QByteArray sourceMembership = sourceViews.blobFor(quint32(sourceTimelineUid), 47);
+    QVERIFY(!sourceMembership.isEmpty());
+
+    MppIO reader;
+    QVERIFY2(reader.openFromData(sourceBytes), qPrintable(reader.errorString()));
+    schedule::Project edited = reader.project();
+    edited.title += QStringLiteral(" edited"); // force a semantic rewrite
+
+    // Match ScheduleVault's save path: it creates a fresh writer and passes
+    // the edited value model to setProject().
+    MppIO writer;
+    writer.setProject(edited);
+    const QByteArray savedBytes = writer.saveToData();
+    QVERIFY2(!savedBytes.isEmpty(), qPrintable(writer.errorString()));
+
+    CompoundFile savedCf;
+    QVERIFY(savedCf.openFromData(savedBytes));
+    const int savedTimelineUid = timelineUid(savedCf);
+    QCOMPARE(savedTimelineUid, sourceTimelineUid);
+    BkndVarData savedViews;
+    QVERIFY(savedViews.parse(
+        savedCf.readStream({ QStringLiteral("   214"), QStringLiteral("CV_iew"), QStringLiteral("VarMeta") }),
+        savedCf.readStream({ QStringLiteral("   214"), QStringLiteral("CV_iew"), QStringLiteral("Var2Data") })));
+    QCOMPARE(savedViews.blobFor(quint32(savedTimelineUid), 47), sourceMembership);
 }
 
 void TstSemanticRoundtrip::realFixtures_data()

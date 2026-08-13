@@ -59,6 +59,15 @@ public:
     // stock container template.
     QByteArray mppFontBases;
 
+    // Original MPP14 container used as the presentation template for an edited
+    // save.  The semantic model does not decode every view stream (notably the
+    // Microsoft Project Timeline view), so retaining the source lets the writer
+    // preserve storage 214 while regenerating backend records from its stock
+    // template.
+    // Like mppFontBases, this is opaque and intentionally excluded from
+    // semantic equality.
+    QByteArray mppSourceTemplate;
+
     // View formatting template (text styles, gridline/date-line and bar colours),
     // mirroring the Gantt Chart view's stored properties. See ViewStyles.
     ViewStyles viewStyles;
