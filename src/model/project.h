@@ -11,6 +11,7 @@
 #include "model/relation.h"
 #include "model/resource.h"
 #include "model/task.h"
+#include "model/usageviewsettings.h"
 #include "model/viewstyles.h"
 
 #include <QDateTime>
@@ -62,8 +63,8 @@ public:
     // Original MPP14 container used as the presentation template for an edited
     // save.  The semantic model does not decode every view stream (notably the
     // Microsoft Project Timeline view), so retaining the source lets the writer
-    // preserve storage 214 while regenerating backend records from its stock
-    // template.
+    // preserve native view and table rowsets from storage 214 while
+    // regenerating backend records from its stock template.
     // Like mppFontBases, this is opaque and intentionally excluded from
     // semantic equality.
     QByteArray mppSourceTemplate;
@@ -75,6 +76,11 @@ public:
     // Separate style template for the Resource Usage view (text styles + the
     // overallocation highlight). Falls back to viewStyles when not present.
     ViewStyles resourceUsageStyles;
+
+    // Native Microsoft Project Usage-view table columns and timescale size.
+    // ScheduleVault-only geometry is intentionally not stored here.
+    UsageViewSettings resourceUsageView;
+    UsageViewSettings taskUsageView;
 
     // Separate style template for the Team Planner view (text styles + bar
     // colours). Falls back to viewStyles when not present.

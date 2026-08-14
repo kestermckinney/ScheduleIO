@@ -49,11 +49,19 @@ void prepareFontBases(schedule::Project *project, const QByteArray &fallback);
 // template's view data (styles present, or any task row/cell formatted).
 bool wantsPatch(const schedule::Project &in);
 
+// Whether either native Usage table carries edited column widths.
+bool wantsTablePatch(const schedule::Project &in);
+
 // Rebuild the template's CV_iew VarMeta/Var2Data with the project's formatting
 // patched into the Gantt Chart view's Props9 block, adding both streams to
 // `out`. Returns false (adding nothing) when the template has no usable Gantt
 // view; the caller should then copy the template's streams verbatim.
 bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in);
+
+// Patch the Task/Resource Usage table column widths in `   214/CTable` while
+// retaining every other native table byte. Returns false when no matching
+// source table can be patched.
+bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in);
 
 } // namespace ViewFormat
 

@@ -922,8 +922,8 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     // Keep source presentation streams independently from the backend
     // template.  Reusing a real file as the backend record template can import
     // fixture-specific field layouts (for example resource baselines), while
-    // the source CV_iew rowset is exactly the opaque view state that must
-    // survive edits.
+    // the source storage 214 is exactly the native view/table/filter state that
+    // must survive edits.
     CompoundFile sourcePresentation;
     const CompoundFile *viewTemplate = &tpl;
     if (tplOverride.isEmpty() && !in.mppSourceTemplate.isEmpty()
@@ -982,14 +982,18 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     });
 
     if (viewTemplate == &sourcePresentation) {
-        const QStringList sourceViewPath = { viewStorage, QStringLiteral("CV_iew") };
-        cf.addStorage(sourceViewPath);
-        copyTree(sourcePresentation, cf, sourceViewPath, [&](const QStringList &p) {
-            return patchViews && p.size() == 3
-                && p.at(0) == viewStorage && p.at(1) == QStringLiteral("CV_iew")
-                && (p.at(2) == QStringLiteral("VarMeta")
-                    || p.at(2) == QStringLiteral("Var2Data"));
-        });
+        // Overlay the native view and table rowsets. Keeping the backend
+        // template's other 214 children avoids importing unrelated rowsets
+        // whose manifest keys may not exist in every Project generation.
+        for (const QString &rowset : { QStringLiteral("CV_iew"),
+                                      QStringLiteral("CTable") }) {
+            const QStringList sourcePath = { viewStorage, rowset };
+            if (!sourcePresentation.hasStorage(sourcePath))
+                continue;
+            cf.addStorage(sourcePath);
+            copyTree(sourcePresentation, cf, sourcePath,
+                     [](const QStringList &) { return false; });
+        }
     }
 
     // The view STYLE_DATA and COLUMN_PROPERTIES records refer to this table by
@@ -1021,6 +1025,9 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
         cf.addStream({ viewStorage, QStringLiteral("CV_iew"), QStringLiteral("Var2Data") },
                      viewTemplate->readStream({ viewStorage, QStringLiteral("CV_iew"), QStringLiteral("Var2Data") }));
     }
+
+    if (ViewFormat::wantsTablePatch(viewProject))
+        ViewFormat::patchTables(*viewTemplate, cf, viewProject);
 
     // ---- project-level Props (dates) + SummaryInformation (title/author) ------
     QByteArray props = tpl.readStream({ kDataStorage, QStringLiteral("Props") });

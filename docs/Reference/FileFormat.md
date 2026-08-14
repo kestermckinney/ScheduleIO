@@ -159,6 +159,7 @@ Microsoft Project consults the Project-specific value when opening the schedule.
 The view storage contains tables, filters, reports, and view definitions. ScheduleIO currently maps:
 
 * Gantt, Resource Usage, Team Planner, and Calendar view text/category styles;
+* Task Usage and Resource Usage native table-column widths and timescale size;
 * gridline and date-line styles;
 * standard Gantt bar colors;
 * task row formatting and per-column cell formatting;

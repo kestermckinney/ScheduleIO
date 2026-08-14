@@ -85,6 +85,7 @@ set(SCHEDULEIO_HEADERS
     src/model/customfield.h
     src/model/customfieldlogic.h
     src/model/viewstyles.h
+    src/model/usageviewsettings.h
     src/model/costrate.h
     src/model/availability.h
     src/model/duration.h
