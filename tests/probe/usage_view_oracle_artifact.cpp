@@ -18,9 +18,17 @@ bool matches(const schedule::Project &project)
     return project.resourceUsageView.columnWidth(kResourceName) == 31
         && project.resourceUsageView.columnWidth(kResourceWork) == 17
         && project.resourceUsageView.timescaleSize == 135
+        && project.resourceUsageView.detailFields == QList<int>({0, 67, 2, 5})
+        && project.resourceUsageView.detailSelection
+            == QStringList({QStringLiteral("Work"), QStringLiteral("Actual Work"),
+                            QStringLiteral("Baseline Work")})
         && project.taskUsageView.columnWidth(kTaskName) == 29
         && project.taskUsageView.columnWidth(kTaskWork) == 15
-        && project.taskUsageView.timescaleSize == 145;
+        && project.taskUsageView.timescaleSize == 145
+        && project.taskUsageView.detailFields == QList<int>({0, 72, 2, 5})
+        && project.taskUsageView.detailSelection
+            == QStringList({QStringLiteral("Work"), QStringLiteral("Remaining Work"),
+                            QStringLiteral("Remaining Cost")});
 }
 }
 
@@ -47,9 +55,15 @@ int main(int argc, char **argv)
         project.resourceUsageView.setColumnWidth(kResourceName, 31);
         project.resourceUsageView.setColumnWidth(kResourceWork, 17);
         project.resourceUsageView.setTimescaleSize(135);
+        project.resourceUsageView.setDetailFields({0, 67, 2, 5});
+        project.resourceUsageView.setDetailSelection({QStringLiteral("Work"),
+            QStringLiteral("Actual Work"), QStringLiteral("Baseline Work")});
         project.taskUsageView.setColumnWidth(kTaskName, 29);
         project.taskUsageView.setColumnWidth(kTaskWork, 15);
         project.taskUsageView.setTimescaleSize(145);
+        project.taskUsageView.setDetailFields({0, 72, 2, 5});
+        project.taskUsageView.setDetailSelection({QStringLiteral("Work"),
+            QStringLiteral("Remaining Work"), QStringLiteral("Remaining Cost")});
         io.setProject(project);
         if (!io.save(path)) {
             std::fprintf(stderr, "save failed: %s\n", qPrintable(io.errorString()));

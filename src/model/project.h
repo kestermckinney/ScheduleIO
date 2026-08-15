@@ -77,10 +77,12 @@ public:
     // overallocation highlight). Falls back to viewStyles when not present.
     ViewStyles resourceUsageStyles;
 
-    // Native Microsoft Project Usage-view table columns and timescale size.
+    // Native Microsoft Project Gantt/Usage-view table columns and pane geometry.
     // ScheduleVault-only geometry is intentionally not stored here.
+    UsageViewSettings ganttView;
     UsageViewSettings resourceUsageView;
     UsageViewSettings taskUsageView;
+    UsageViewSettings teamPlannerView;
 
     // Separate style template for the Team Planner view (text styles + bar
     // colours). Falls back to viewStyles when not present.

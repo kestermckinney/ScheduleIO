@@ -37,6 +37,7 @@ void TstUsageViewSettings::readsNativeUsageTables()
     const schedule::Project &project = io.project();
     QVERIFY(project.resourceUsageView.present);
     QVERIFY(project.taskUsageView.present);
+    QVERIFY(project.ganttView.present);
     QCOMPARE(QString(project.resourceUsageView.tableName).remove(QLatin1Char('&')),
              QStringLiteral("Usage"));
     QCOMPARE(QString(project.taskUsageView.tableName).remove(QLatin1Char('&')),
@@ -47,6 +48,8 @@ void TstUsageViewSettings::readsNativeUsageTables()
     QVERIFY(project.taskUsageView.columnWidth(kTaskWork) > 0);
     QVERIFY(project.resourceUsageView.timescaleSize >= 25);
     QVERIFY(project.taskUsageView.timescaleSize >= 25);
+    QCOMPARE(project.taskUsageView.detailFields, QList<int>({0, 72}));
+    QVERIFY(project.ganttView.tableWidth > 0);
 }
 
 void TstUsageViewSettings::writesNativeWidthsAndTimescale()
@@ -58,9 +61,19 @@ void TstUsageViewSettings::writesNativeWidthsAndTimescale()
     edited.resourceUsageView.setColumnWidth(kResourceName, 31);
     edited.resourceUsageView.setColumnWidth(kResourceWork, 17);
     edited.resourceUsageView.setTimescaleSize(135);
+    edited.resourceUsageView.setTableWidth(406);
+    edited.resourceUsageView.setDetailFields({0, 67, 2, 5});
+    edited.resourceUsageView.setDetailSelection({QStringLiteral("Work"),
+        QStringLiteral("Actual Work"), QStringLiteral("Baseline Work")});
     edited.taskUsageView.setColumnWidth(kTaskName, 29);
     edited.taskUsageView.setColumnWidth(kTaskWork, 15);
     edited.taskUsageView.setTimescaleSize(145);
+    edited.taskUsageView.setTableWidth(398);
+    edited.taskUsageView.setDetailFields({0, 72, 2, 5});
+    edited.taskUsageView.setDetailSelection({QStringLiteral("Work"),
+        QStringLiteral("Remaining Work"), QStringLiteral("Remaining Cost")});
+    edited.ganttView.setColumnWidth(kTaskName, 37);
+    edited.ganttView.setTableWidth(512);
 
     MppIO writer;
     writer.setProject(edited);
@@ -73,9 +86,21 @@ void TstUsageViewSettings::writesNativeWidthsAndTimescale()
     QCOMPARE(actual.resourceUsageView.columnWidth(kResourceName), 31);
     QCOMPARE(actual.resourceUsageView.columnWidth(kResourceWork), 17);
     QCOMPARE(actual.resourceUsageView.timescaleSize, 135);
+    QCOMPARE(actual.resourceUsageView.tableWidth, 406);
+    QCOMPARE(actual.resourceUsageView.detailFields, QList<int>({0, 67, 2, 5}));
+    QCOMPARE(actual.resourceUsageView.detailSelection,
+             QStringList({QStringLiteral("Work"), QStringLiteral("Actual Work"),
+                          QStringLiteral("Baseline Work")}));
     QCOMPARE(actual.taskUsageView.columnWidth(kTaskName), 29);
     QCOMPARE(actual.taskUsageView.columnWidth(kTaskWork), 15);
     QCOMPARE(actual.taskUsageView.timescaleSize, 145);
+    QCOMPARE(actual.taskUsageView.tableWidth, 398);
+    QCOMPARE(actual.taskUsageView.detailFields, QList<int>({0, 72, 2, 5}));
+    QCOMPARE(actual.taskUsageView.detailSelection,
+             QStringList({QStringLiteral("Work"), QStringLiteral("Remaining Work"),
+                          QStringLiteral("Remaining Cost")}));
+    QCOMPARE(actual.ganttView.columnWidth(kTaskName), 37);
+    QCOMPARE(actual.ganttView.tableWidth, 512);
 }
 
 void TstUsageViewSettings::preservesSourceTableRowsetWhenUnchanged()

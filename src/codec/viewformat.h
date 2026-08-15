@@ -63,6 +63,10 @@ bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &
 // source table can be patched.
 bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in);
 
+// Writes ScheduleIO extension streams that preserve presentation choices with
+// no native Microsoft Project representation.
+void writeExtensions(CompoundFile &out, const schedule::Project &in);
+
 } // namespace ViewFormat
 
 #endif // VIEWFORMAT_H

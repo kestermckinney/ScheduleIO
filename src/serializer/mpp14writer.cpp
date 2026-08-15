@@ -1028,6 +1028,7 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
 
     if (ViewFormat::wantsTablePatch(viewProject))
         ViewFormat::patchTables(*viewTemplate, cf, viewProject);
+    ViewFormat::writeExtensions(cf, viewProject);
 
     // ---- project-level Props (dates) + SummaryInformation (title/author) ------
     QByteArray props = tpl.readStream({ kDataStorage, QStringLiteral("Props") });

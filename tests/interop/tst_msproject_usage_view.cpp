@@ -31,9 +31,11 @@ void TstMsProjectUsageView::projectOpensInspectsAndResavesUsageSettings()
     edited.resourceUsageView.setColumnWidth(kResourceName, 31);
     edited.resourceUsageView.setColumnWidth(kResourceWork, 17);
     edited.resourceUsageView.setTimescaleSize(135);
+    edited.resourceUsageView.setDetailFields({0, 67, 2, 5});
     edited.taskUsageView.setColumnWidth(kTaskName, 29);
     edited.taskUsageView.setColumnWidth(kTaskWork, 15);
     edited.taskUsageView.setTimescaleSize(145);
+    edited.taskUsageView.setDetailFields({0, 72, 2, 5});
 
     QTemporaryDir temp;
     QVERIFY(temp.isValid());
@@ -65,9 +67,11 @@ void TstMsProjectUsageView::projectOpensInspectsAndResavesUsageSettings()
     QCOMPARE(actual.resourceUsageView.columnWidth(kResourceName), 31);
     QCOMPARE(actual.resourceUsageView.columnWidth(kResourceWork), 17);
     QCOMPARE(actual.resourceUsageView.timescaleSize, 135);
+    QCOMPARE(actual.resourceUsageView.detailFields, QList<int>({0, 67, 2, 5}));
     QCOMPARE(actual.taskUsageView.columnWidth(kTaskName), 29);
     QCOMPARE(actual.taskUsageView.columnWidth(kTaskWork), 15);
     QCOMPARE(actual.taskUsageView.timescaleSize, 145);
+    QCOMPARE(actual.taskUsageView.detailFields, QList<int>({0, 72, 2, 5}));
 }
 
 QTEST_APPLESS_MAIN(TstMsProjectUsageView)
