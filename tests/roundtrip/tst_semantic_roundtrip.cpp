@@ -735,7 +735,14 @@ void TstSemanticRoundtrip::fontBaseTableAndIndicesArePreserved()
     MppIO reader;
     QVERIFY(reader.openFromData(bytes));
     QCOMPARE(reader.project().mppFontBases, p.mppFontBases);
-    QCOMPARE(reader.project().viewStyles.text[schedule::ViewStyles::Critical].fontBaseIndex, 5);
+    const schedule::TextStyle &critical =
+        reader.project().viewStyles.text[schedule::ViewStyles::Critical];
+    QCOMPARE(critical.fontBaseIndex, 5);
+    // The family/size must be resolved from the font-base table on read, not left
+    // empty -- consumers like the Gantt view's task-detail text read fontName/
+    // fontSize directly and never look at fontBaseIndex.
+    QVERIFY(!critical.fontName.isEmpty());
+    QVERIFY(critical.fontSize > 0);
 }
 
 void TstSemanticRoundtrip::inconsistentProgressIsCanonicalizedForProject()

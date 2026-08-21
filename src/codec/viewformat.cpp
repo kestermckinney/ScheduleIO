@@ -959,6 +959,12 @@ void read(const CompoundFile &cf, schedule::Project *out)
     if (const PropsItem *cols = props.find(kKeyColumnProperties))
         readColumnProperties(cols->data, out);
 
+    // readStyleData() only decodes each text category's fontBaseIndex; resolve it
+    // against the font table so callers (e.g. the Gantt view's bar/task-detail text)
+    // see the actual family/size the file specifies, not an empty/default font.
+    for (schedule::TextStyle &style : out->viewStyles.text)
+        hydrateFont(style, out->mppFontBases);
+
     for (schedule::Task &task : out->tasks) {
         hydrateFont(task.rowFormat, out->mppFontBases);
         for (auto it = task.cellFormats.begin(); it != task.cellFormats.end(); ++it)
