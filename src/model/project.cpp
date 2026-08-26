@@ -12,13 +12,18 @@ bool Project::operator==(const Project &o) const
         && author == o.author
         && startDate == o.startDate
         && finishDate == o.finishDate
+        && scheduleFromStart == o.scheduleFromStart
+        && multipleCriticalPaths == o.multipleCriticalPaths
         && statusDate == o.statusDate
         && calendarUniqueId == o.calendarUniqueId
+        && budgetCost == o.budgetCost
+        && budgetWorkMillis == o.budgetWorkMillis
         && tasks == o.tasks
         && resources == o.resources
         && assignments == o.assignments
         && calendars == o.calendars
         && relations == o.relations
+        && customFieldDefinitions == o.customFieldDefinitions
         && viewStyles == o.viewStyles
         && resourceUsageStyles == o.resourceUsageStyles
         && teamPlannerStyles == o.teamPlannerStyles

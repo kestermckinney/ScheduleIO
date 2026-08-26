@@ -16,6 +16,19 @@
 
 namespace schedule {
 
+// One contiguous working portion of a split task. Microsoft Project exposes
+// these through Task.SplitParts; an unsplit task leaves this list empty.
+struct SCHEDULEIO_EXPORT TaskSegment
+{
+    QDateTime start;
+    QDateTime finish;
+
+    bool operator==(const TaskSegment &o) const
+    {
+        return start == o.start && finish == o.finish;
+    }
+};
+
 // Earned-value / PMI performance metrics as stored by Microsoft Project. These are
 // the file's own values; consumers may prefer them when present (non-zero) and fall
 // back to computing from baseline cost, % complete and actual cost otherwise. BAC
@@ -54,12 +67,19 @@ public:
                                  // of assignments). Mirrors the assignment total when
                                  // resources exist -- see TaskScheduling.
     double percentComplete = 0.0;
+    double physicalPercentComplete = 0.0; // 0..1, independent of duration progress
+    int earnedValueMethod = 0;            // 0 = % Complete, 1 = Physical % Complete
     bool milestone = false;
     bool summary = false;
+    bool recurring = false;       // recurring-task summary/occurrence container
+    QList<TaskSegment> segments;  // two or more portions when the task is split
     int constraintType = 0;      // 0 = As Soon As Possible
     QDateTime constraintDate;    // invalid unless the constraint needs a date
     QString wbs;
     QString notes;   // raw RTF source of the task's notes (empty if none)
+    QString hyperlink;           // display text (Project Task.Hyperlink)
+    QString hyperlinkAddress;    // URL or file address
+    QString hyperlinkSubAddress; // optional bookmark/location inside the target
 
     // Inactive tasks (MS Project Professional's Task > Inactivate) stay in the plan but
     // are excluded from scheduling: they impose no constraints on successors and don't
@@ -80,12 +100,17 @@ public:
     int priority = 500;          // 0..1000, 500 = normal
     QDateTime deadline;          // invalid when no deadline is set
     int calendarUniqueId = -1;   // task calendar; -1 = use the project calendar
+    bool ignoreResourceCalendar = false; // task calendar alone governs assigned work
 
     // Critical-path results (Scheduler::computeSlack): the latest dates the
     // task can run without moving the project finish, the slack margins, and
     // whether the task is on the critical path (total slack <= 0).
+    QDateTime earlyStart;
+    QDateTime earlyFinish;
     QDateTime lateStart;
     QDateTime lateFinish;
+    qint64 startSlackMillis = 0;
+    qint64 finishSlackMillis = 0;
     qint64 totalSlackMillis = 0;
     qint64 freeSlackMillis = 0;
     bool critical = false;
@@ -105,6 +130,13 @@ public:
     double actualCost = 0.0;
     double remainingCost = 0.0;
     double costVariance = 0.0;
+
+    // Current schedule/work deltas from Baseline 0. Date variances are signed
+    // task-calendar working durations, matching Project's displayed fields.
+    qint64 startVarianceMillis = 0;
+    qint64 finishVarianceMillis = 0;
+    qint64 durationVarianceMillis = 0;
+    qint64 workVarianceMillis = 0;
 
     // Row text formatting (MS Project's Format > Font): emphasis + colours applied
     // to the task's grid row. Stored in the MPP file as the Gantt Chart view's

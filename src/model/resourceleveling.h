@@ -9,6 +9,7 @@
 
 #include <QDateTime>
 #include <QList>
+#include <QSet>
 
 namespace schedule {
 
@@ -16,11 +17,27 @@ namespace schedule {
 //
 // A resource is *overallocated* when, at some instant, the units of its concurrently
 // running assignments exceed the resource's available units (Max Units). Leveling
-// removes overallocations by delaying the lower-priority / later task of each conflict
-// (Task::levelingDelayMillis, which the forward pass honours so successors follow).
+// removes overallocations by delaying an eligible task chosen by the requested leveling
+// order (Task::levelingDelayMillis, which the forward pass honours so successors follow).
 class SCHEDULEIO_EXPORT ResourceLeveling
 {
 public:
+    enum class Order {
+        IdOnly,
+        Standard,
+        PriorityStandard
+    };
+
+    struct Options
+    {
+        Order order = Order::PriorityStandard;
+        bool levelOnlyWithinAvailableSlack = false;
+        bool allowTaskSplitting = true;
+        // Empty means all tasks. When populated, other tasks still contribute load,
+        // but only tasks in this set may receive leveling delay.
+        QSet<int> taskUniqueIds;
+    };
+
     // A window during which one resource is loaded beyond its available units.
     struct Overallocation
     {
@@ -48,10 +65,10 @@ public:
     static qint64 resourceWork(const Project &project, int resourceUniqueId);
 
     // Level the project: add leveling delay until no resource is overallocated,
-    // delaying the lower-priority / later task of each conflict. Does not move manual
-    // or already-started tasks. Reschedules as it goes. Returns the number of tasks
-    // that were delayed.
+    // using Priority/Standard order. Does not move manual or already-started tasks.
+    // Reschedules as it goes. Returns the number of tasks that were delayed.
     static int level(Project &project);
+    static int level(Project &project, const Options &options);
 
     // Remove all leveling delay (MS Project's "Clear Leveling") and reschedule.
     static void clearLeveling(Project &project);

@@ -9,6 +9,8 @@
 #include "ole/compoundfile.h"
 
 #include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -21,10 +23,17 @@ namespace {
 
 const QString kViewStorage = QStringLiteral("   214");
 const QString kCView = QStringLiteral("CV_iew");
+const QString kCTable = QStringLiteral("CTable");
+const QString kExtensionStorage = QStringLiteral("ScheduleIO");
+const QString kTaskUsageSelection = QStringLiteral("TaskUsageDetailSelection");
+const QString kResourceUsageSelection = QStringLiteral("ResourceUsageDetailSelection");
 
 // Props9 item keys (MPXJ PropsKey).
 constexpr quint32 kKeyStyleData = 574619656u;         // STYLE_DATA
 constexpr quint32 kKeyColumnProperties = 574619660u;  // COLUMN_PROPERTIES
+constexpr quint32 kKeyTableName = 574619658u;         // TABLE_NAME
+constexpr quint32 kKeyTableProperties = 574619655u;   // TABLE_PROPERTIES
+constexpr quint32 kKeyViewFields = 574619708u;        // VIEW_FIELDS (Usage details)
 constexpr quint32 kKeyFontBases = 54525952u;          // 0x03400000, in 214/Props
 
 constexpr quint16 kViewPropsType = 6;   // GanttChartView14.PROPERTIES
@@ -32,6 +41,7 @@ constexpr quint16 kViewPropsType = 6;   // GanttChartView14.PROPERTIES
 // MPXJ's ViewType enum ordinals -- verified against real files by view name.
 constexpr quint16 kViewTypeGantt = 1;
 constexpr quint16 kViewTypeResourceUsage = 15;
+constexpr quint16 kViewTypeTaskUsage = 14;
 constexpr quint16 kViewTypeTeamPlanner = 9;
 constexpr quint16 kViewTypeCalendar = 13;
 constexpr int kViewRecordSize = 138;    // CV_iew FixedData block size
@@ -54,6 +64,12 @@ constexpr int kBarCountOffset = 2243;
 constexpr int kBarStylesBase = 2255;
 constexpr int kBarStyleSize = 195;
 constexpr int kStyleDataMinSize = 2255; // enough for text styles + gridlines + bar header
+constexpr int kTimescaleSizeOffset = 1180;
+constexpr int kUsageFieldCountOffset = 2236;
+constexpr int kUsageFieldsOffset = 2237;
+constexpr int kTableRecordSize = 230;
+constexpr int kTableColumnHeaderSize = 12;
+constexpr int kTableColumnSize = 115;
 
 // Per-cell/row exceptional-style records. Field ids are 0x0B400000 | MPXJ
 // MPPTaskField FIELD_ARRAY index for a single cell; 0xFFFFFFFF means "the
@@ -344,6 +360,9 @@ int findViewUid(const QByteArray &fixedMeta, const QByteArray &fixedData, quint1
     return -1;
 }
 
+QByteArray findViewRecord(const QByteArray &fixedMeta, const QByteArray &fixedData,
+                          quint16 viewType);
+
 // ---- Props9 ---------------------------------------------------------------------
 
 struct PropsItem {
@@ -579,6 +598,106 @@ QByteArray patchViewTextStylesInBlob(const QByteArray &blob, const schedule::Vie
     return {};
 }
 
+QString normalizedPresentationName(QString name)
+{
+    name.remove(QLatin1Char('&'));
+    return name.trimmed().toCaseFolded();
+}
+
+void readUsageView(const CompoundFile &cf, const QByteArray &viewFixedMeta,
+                   const QByteArray &viewFixedData, const BkndVarData &viewVarData,
+                   quint16 viewType, schedule::UsageViewSettings *out)
+{
+    if (!out || !cf.hasStorage({ kViewStorage, kCTable }))
+        return;
+
+    const QByteArray viewRecord = findViewRecord(viewFixedMeta, viewFixedData, viewType);
+    if (viewRecord.isEmpty())
+        return;
+    const quint32 viewUid = rdU32(viewRecord, 0);
+    Props9 props;
+    if (!parseProps9(viewVarData.blobFor(viewUid, kViewPropsType), &props))
+        return;
+    const PropsItem *tableNameItem = props.find(kKeyTableName);
+    if (!tableNameItem)
+        return;
+
+    out->viewName = rdUtf16(viewRecord, 4, 104);
+    out->tableName = rdUtf16(tableNameItem->data, 0, tableNameItem->data.size());
+    if (const PropsItem *table = props.find(kKeyTableProperties)) {
+        if (table->data.size() >= 37)
+            out->tableWidth = rdU16(table->data, 35);
+    }
+    if (const PropsItem *style = props.find(kKeyStyleData)) {
+        if (style->data.size() > kTimescaleSizeOffset)
+            out->timescaleSize = quint8(style->data.at(kTimescaleSizeOffset));
+        if ((viewType == kViewTypeResourceUsage || viewType == kViewTypeTaskUsage)
+            && style->data.size() > kUsageFieldCountOffset) {
+            const int count = quint8(style->data.at(kUsageFieldCountOffset));
+            if (count > 0 && kUsageFieldsOffset + count <= style->data.size()) {
+                out->detailFields.clear();
+                for (int i = 0; i < count; ++i)
+                    out->detailFields.append(quint8(style->data.at(kUsageFieldsOffset + i)));
+            }
+        }
+    }
+    if (out->detailFields.isEmpty()
+        && (viewType == kViewTypeResourceUsage || viewType == kViewTypeTaskUsage)) {
+        if (const PropsItem *fields = props.find(kKeyViewFields)) {
+            out->detailFields.clear();
+            for (char value : fields->data) {
+                const int field = quint8(value);
+                if (field == 0xFF)
+                    break;
+                out->detailFields.append(field);
+            }
+        }
+    }
+
+    const QByteArray tableFixed = cf.readStream(
+        { kViewStorage, kCTable, QStringLiteral("FixedData") });
+    BkndVarData tableVars;
+    if (!tableVars.parse(cf.readStream({ kViewStorage, kCTable, QStringLiteral("VarMeta") }),
+                         cf.readStream({ kViewStorage, kCTable, QStringLiteral("Var2Data") })))
+        return;
+
+    const QString wanted = normalizedPresentationName(out->tableName);
+    for (int offset = 0; offset + kTableRecordSize <= tableFixed.size();
+         offset += kTableRecordSize) {
+        const QByteArray rec = tableFixed.mid(offset, kTableRecordSize);
+        const quint32 tableUid = rdU32(rec, 0);
+        if (normalizedPresentationName(rdUtf16(rec, 4, 104)) != wanted)
+            continue;
+        const bool resourceTable = rdU16(rec, 108) == 1;
+        if (resourceTable != (viewType == kViewTypeResourceUsage
+                              || viewType == kViewTypeTeamPlanner))
+            continue;
+
+        QByteArray columns;
+        for (quint16 type : { quint16(8), quint16(7), quint16(6) }) {
+            columns = tableVars.blobFor(tableUid, type);
+            if (!columns.isEmpty())
+                break;
+        }
+        if (columns.size() < kTableColumnHeaderSize)
+            return;
+        const int count = int(rdU16(columns, 4)) + 1;
+        out->columns.clear();
+        for (int i = 0; i < count; ++i) {
+            const int at = kTableColumnHeaderSize + i * kTableColumnSize;
+            if (at + kTableColumnSize > columns.size())
+                break;
+            schedule::UsageTableColumn column;
+            column.fieldId = rdU32(columns, at);
+            column.width = quint8(columns.at(at + 4));
+            column.title = rdUtf16(columns, at + 13, 100);
+            out->columns.append(column);
+        }
+        out->present = !out->columns.isEmpty();
+        return;
+    }
+}
+
 // ---- COLUMN_PROPERTIES (per-task exceptional styles) ----------------------------
 
 void readColumnProperties(const QByteArray &d, schedule::Project *out)
@@ -651,6 +770,30 @@ void readColumnProperties(const QByteArray &d, schedule::Project *out)
                 task.rowFormat = cellIt.value();
         }
     }
+}
+
+QByteArray findViewRecord(const QByteArray &fixedMeta, const QByteArray &fixedData,
+                          quint16 viewType)
+{
+    if (fixedMeta.size() < 16)
+        return {};
+    const int items = int(rdU32(fixedMeta, 8));
+    int lastOffset = -1;
+    for (int i = 0; i < items; ++i) {
+        const int metaOff = 16 + i * 10;
+        if (metaOff + 10 > fixedMeta.size())
+            break;
+        const int offset = int(rdU16(fixedMeta, metaOff + 4));
+        if (offset <= lastOffset)
+            continue;
+        lastOffset = offset;
+        if (offset + kViewRecordSize > fixedData.size())
+            continue;
+        const QByteArray rec = fixedData.mid(offset, kViewRecordSize);
+        if (rdU16(rec, 110) == 0 && rdU16(rec, 112) == viewType)
+            return rec;
+    }
+    return {};
 }
 
 QByteArray buildColumnProperties(const schedule::Project &in)
@@ -774,6 +917,31 @@ void read(const CompoundFile &cf, schedule::Project *out)
                   cf.readStream({ kViewStorage, kCView, QStringLiteral("Var2Data") })))
         return;
 
+    readUsageView(cf, fixedMeta, fixedData, vd, kViewTypeGantt,
+                  &out->ganttView);
+    readUsageView(cf, fixedMeta, fixedData, vd, kViewTypeResourceUsage,
+                  &out->resourceUsageView);
+    readUsageView(cf, fixedMeta, fixedData, vd, kViewTypeTaskUsage,
+                  &out->taskUsageView);
+    readUsageView(cf, fixedMeta, fixedData, vd, kViewTypeTeamPlanner,
+                  &out->teamPlannerView);
+
+    const auto readSelection = [&cf](const QString &stream) {
+        QStringList selection;
+        const QJsonDocument document = QJsonDocument::fromJson(
+            cf.readStream({kExtensionStorage, stream}));
+        if (!document.isArray())
+            return selection;
+        for (const QJsonValue &value : document.array()) {
+            if (value.isString() && !value.toString().isEmpty()
+                && !selection.contains(value.toString()))
+                selection.append(value.toString());
+        }
+        return selection;
+    };
+    out->taskUsageView.detailSelection = readSelection(kTaskUsageSelection);
+    out->resourceUsageView.detailSelection = readSelection(kResourceUsageSelection);
+
     // The Gantt Chart view: full template (text styles + gridlines + bars) plus
     // the per-task exceptional styles. The other views' styles are not read back
     // into the model: a written file always carries all standard views (from the
@@ -790,6 +958,12 @@ void read(const CompoundFile &cf, schedule::Project *out)
         readStyleData(style->data, &out->viewStyles);
     if (const PropsItem *cols = props.find(kKeyColumnProperties))
         readColumnProperties(cols->data, out);
+
+    // readStyleData() only decodes each text category's fontBaseIndex; resolve it
+    // against the font table so callers (e.g. the Gantt view's bar/task-detail text)
+    // see the actual family/size the file specifies, not an empty/default font.
+    for (schedule::TextStyle &style : out->viewStyles.text)
+        hydrateFont(style, out->mppFontBases);
 
     for (schedule::Task &task : out->tasks) {
         hydrateFont(task.rowFormat, out->mppFontBases);
@@ -830,10 +1004,19 @@ bool wantsPatch(const schedule::Project &in)
     if (in.viewStyles.present || in.resourceUsageStyles.present
         || in.teamPlannerStyles.present || in.calendarStyles.present)
         return true;
+    if (in.ganttView.modified || in.resourceUsageView.modified || in.taskUsageView.modified
+        || in.teamPlannerView.modified)
+        return true;
     for (const schedule::Task &t : in.tasks)
         if (!t.rowFormat.isDefault() || !t.cellFormats.isEmpty())
             return true;
     return false;
+}
+
+bool wantsTablePatch(const schedule::Project &in)
+{
+    return in.ganttView.modified || in.resourceUsageView.modified || in.taskUsageView.modified
+        || in.teamPlannerView.modified;
 }
 
 bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in)
@@ -876,6 +1059,13 @@ bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &
             if (in.viewStyles.present)
                 if (PropsItem *style = props.find(kKeyStyleData))
                     patchStyleData(style->data, in.viewStyles);
+
+            if (in.ganttView.modified && in.ganttView.tableWidth > 0) {
+                if (PropsItem *table = props.find(kKeyTableProperties)) {
+                    if (table->data.size() >= 37)
+                        wrU16(table->data, 35, quint16(qBound(0, in.ganttView.tableWidth, 65535)));
+                }
+            }
 
             const QByteArray colProps = buildColumnProperties(in);
             if (PropsItem *cols = props.find(kKeyColumnProperties)) {
@@ -926,6 +1116,71 @@ bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &
             patched.insert(rec, newBlob);
     }
 
+    // Native Usage-view timescale expansion and ordered detail fields.
+    // Resource/Task Usage keep the authoritative counted field list in
+    // STYLE_DATA and newer files duplicate it in an FF-padded VIEW_FIELDS item.
+    const struct { quint16 type; const schedule::UsageViewSettings *settings; } kUsage[] = {
+        { kViewTypeResourceUsage, &in.resourceUsageView },
+        { kViewTypeTaskUsage, &in.taskUsageView },
+        { kViewTypeTeamPlanner, &in.teamPlannerView },
+    };
+    for (const auto &v : kUsage) {
+        if (!v.settings->modified)
+            continue;
+        const int uid = findViewUid(fixedMeta, fixedData, v.type);
+        const int rec = uid >= 0 ? recordForView(uid) : -1;
+        if (rec < 0)
+            continue;
+        Props9 props;
+        const bool parsed = patched.contains(rec)
+            ? parseProps9(patched.value(rec), &props)
+            : parseRecordProps(rec, &props);
+        if (!parsed)
+            continue;
+        bool changed = false;
+        if (v.settings->tableWidth > 0) {
+            if (PropsItem *table = props.find(kKeyTableProperties)) {
+                if (table->data.size() >= 37) {
+                    wrU16(table->data, 35, quint16(qBound(
+                        0, v.settings->tableWidth, 65535)));
+                    changed = true;
+                }
+            }
+        }
+        if (PropsItem *style = props.find(kKeyStyleData)) {
+            if (style->data.size() > kTimescaleSizeOffset) {
+                style->data[kTimescaleSizeOffset] = char(
+                    qBound(25, v.settings->timescaleSize, 255));
+                if (!v.settings->detailFields.isEmpty()
+                    && style->data.size() > kUsageFieldCountOffset) {
+                    const int oldCount = quint8(style->data.at(kUsageFieldCountOffset));
+                    const int count = qMin(v.settings->detailFields.size(), 255);
+                    if (kUsageFieldsOffset + qMax(oldCount, count) <= style->data.size()) {
+                        for (int i = 0; i < qMax(oldCount, count); ++i)
+                            style->data[kUsageFieldsOffset + i] = 0;
+                        style->data[kUsageFieldCountOffset] = char(count);
+                        for (int i = 0; i < count; ++i)
+                            style->data[kUsageFieldsOffset + i] =
+                                char(v.settings->detailFields.at(i));
+                    }
+                }
+                changed = true;
+            }
+        }
+        if (!v.settings->detailFields.isEmpty()) {
+            PropsItem *fields = props.find(kKeyViewFields);
+            if (fields) {
+                fields->data.fill(char(0xFF));
+                const int count = qMin(fields->data.size(), v.settings->detailFields.size());
+                for (int i = 0; i < count; ++i)
+                    fields->data[i] = char(v.settings->detailFields.at(i));
+                changed = true;
+            }
+        }
+        if (changed)
+            patched.insert(rec, buildProps9(props));
+    }
+
     if (patched.isEmpty())
         return false;   // nothing to change; caller copies the template verbatim
 
@@ -957,6 +1212,104 @@ bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &
     out.addStream({ kViewStorage, kCView, QStringLiteral("VarMeta") }, newMeta);
     out.addStream({ kViewStorage, kCView, QStringLiteral("Var2Data") }, newVar2);
     return true;
+}
+
+bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in)
+{
+    if (!wantsTablePatch(in) || !tpl.hasStorage({ kViewStorage, kCTable }))
+        return false;
+
+    const QByteArray fixedData = tpl.readStream(
+        { kViewStorage, kCTable, QStringLiteral("FixedData") });
+    const QByteArray varMeta = tpl.readStream(
+        { kViewStorage, kCTable, QStringLiteral("VarMeta") });
+    QByteArray var2 = tpl.readStream(
+        { kViewStorage, kCTable, QStringLiteral("Var2Data") });
+    QVector<VarRecord> records;
+    if (!parseVarMeta(varMeta, &records))
+        return false;
+
+    struct Target { const schedule::UsageViewSettings *settings; bool resource; };
+    const Target targets[] = {
+        { &in.ganttView, false }, { &in.resourceUsageView, true },
+        { &in.taskUsageView, false }, { &in.teamPlannerView, true }
+    };
+    bool changed = false;
+    for (const Target &target : targets) {
+        if (!target.settings->modified || target.settings->tableName.isEmpty())
+            continue;
+        const QString wanted = normalizedPresentationName(target.settings->tableName);
+        quint32 tableUid = 0;
+        for (int offset = 0; offset + kTableRecordSize <= fixedData.size();
+             offset += kTableRecordSize) {
+            const QByteArray rec = fixedData.mid(offset, kTableRecordSize);
+            if ((rdU16(rec, 108) == 1) != target.resource)
+                continue;
+            if (normalizedPresentationName(rdUtf16(rec, 4, 104)) == wanted) {
+                tableUid = rdU32(rec, 0);
+                break;
+            }
+        }
+        if (tableUid == 0)
+            continue;
+
+        int recordIndex = -1;
+        for (quint16 wantedType : { quint16(8), quint16(7), quint16(6) }) {
+            for (int i = 0; i < records.size(); ++i) {
+                if (records[i].uid == tableUid && records[i].typeLow == wantedType) {
+                    recordIndex = i;
+                    break;
+                }
+            }
+            if (recordIndex >= 0)
+                break;
+        }
+        if (recordIndex < 0)
+            continue;
+        const int blobOffset = int(records[recordIndex].offset);
+        const int length = int(rdU32(var2, blobOffset));
+        if (length < kTableColumnHeaderSize || blobOffset + 4 + length > var2.size())
+            continue;
+        const int count = int(rdU16(var2, blobOffset + 4 + 4)) + 1;
+        for (int i = 0; i < count; ++i) {
+            const int at = blobOffset + 4 + kTableColumnHeaderSize + i * kTableColumnSize;
+            if (at + kTableColumnSize > blobOffset + 4 + length)
+                break;
+            const quint32 fieldId = rdU32(var2, at);
+            for (const schedule::UsageTableColumn &column : target.settings->columns) {
+                if (column.fieldId == fieldId) {
+                    const char value = char(qBound(0, column.width, 255));
+                    if (var2.at(at + 4) != value) {
+                        var2[at + 4] = value;
+                        changed = true;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!changed)
+        return false;
+    out.addStream({ kViewStorage, kCTable, QStringLiteral("VarMeta") }, varMeta);
+    out.addStream({ kViewStorage, kCTable, QStringLiteral("Var2Data") }, var2);
+    return true;
+}
+
+void writeExtensions(CompoundFile &out, const schedule::Project &in)
+{
+    const auto writeSelection = [&out](const QString &stream,
+                                       const QStringList &details) {
+        if (details.isEmpty())
+            return;
+        QJsonArray selection;
+        for (const QString &detail : details)
+            selection.append(detail);
+        out.addStream({kExtensionStorage, stream},
+                      QJsonDocument(selection).toJson(QJsonDocument::Compact));
+    };
+    writeSelection(kTaskUsageSelection, in.taskUsageView.detailSelection);
+    writeSelection(kResourceUsageSelection, in.resourceUsageView.detailSelection);
 }
 
 } // namespace ViewFormat

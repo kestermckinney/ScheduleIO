@@ -87,8 +87,10 @@ cycle prevention before inserting a relation.
 Include `src/model/resourceleveling.h`.
 
 `overallocations()` returns time windows in which concurrent assignment units exceed resource
-capacity. `level()` delays lower-priority/later eligible tasks until conflicts are gone and returns
-the number delayed. `clearLeveling()` removes those delays and reschedules.
+capacity. `level()` delays eligible tasks until conflicts are gone and returns the number delayed.
+The default uses Priority/Standard order. An `Options` value can instead select ID Only or Standard
+order, restrict movement to available total slack, and restrict which tasks may receive delay.
+`clearLeveling()` removes those delays and reschedules.
 
 Other helpers answer whether one resource is overallocated, calculate a resource's total work, and
 spread an assignment's work over a requested time period.
@@ -98,8 +100,29 @@ for (const auto &window : schedule::ResourceLeveling::overallocations(project))
     qInfo() << window.resourceUniqueId << window.start << window.finish;
 
 schedule::ResourceLeveling::level(project);
+
+schedule::ResourceLeveling::Options options;
+options.order = schedule::ResourceLeveling::Order::Standard;
+options.levelOnlyWithinAvailableSlack = true;
+options.taskUniqueIds = { 12, 14 }; // empty means all tasks
+schedule::ResourceLeveling::level(project, options);
 // ...
 schedule::ResourceLeveling::clearLeveling(project);
+```
+
+## ProgressUpdating
+
+Include `src/model/progressupdating.h`. `rescheduleIncompleteWork()` implements the
+desktop `Update Project` / `pjReschedule` subset. It preserves actual dates and
+time-phased actual work, moves remaining assignment buckets after the supplied
+boundary using the applicable task/resource calendars, and recalculates successors.
+An empty task set updates the whole project; a non-empty set limits the operation.
+Summary, manual, inactive, and completed tasks are protected.
+
+```cpp
+project.statusDate = QDateTime(QDate(2026, 8, 5), QTime(17, 0));
+const int moved = schedule::ProgressUpdating::rescheduleIncompleteWork(
+    project, project.statusDate, { 12, 14 });
 ```
 
 ## Recommended edit sequence

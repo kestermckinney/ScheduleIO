@@ -87,6 +87,13 @@ int main(int argc, char **argv)
             const quint32 len = u32(vd, int(off));
             std::printf("  [len=%-4u] ", len);
             hexLine(vd, int(off) + 4, int(qMin<quint32>(len, 32)));
+            if (type == 8 && len > 420) {
+                const int base = int(off) + 4;
+                for (int p = 420; p < int(len); p += 16) {
+                    std::printf("        +%-3d: ", p);
+                    hexLine(vd, base + p, qMin(16, int(len) - p));
+                }
+            }
         } else {
             std::printf("  [offset out of range]\n");
         }

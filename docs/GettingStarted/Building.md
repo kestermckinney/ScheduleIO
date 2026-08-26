@@ -33,7 +33,7 @@ cmake --build build
 | Option | Default | Purpose |
 | :--- | :--- | :--- |
 | `SCHEDULEIO_BUILD_TESTS` | `ON` | Build the QtTest suite and register it with CTest. |
-| `SCHEDULEIO_ORACLE_MSPROJECT` | `OFF` | Reserved for the optional Windows-only writer-acceptance oracle. |
+| `SCHEDULEIO_ORACLE_MSPROJECT` | `OFF` | Enables the Windows-only writer-acceptance oracle. It launches an installed Microsoft Project instance, verifies native Usage-view widths, resaves the MPP, and checks the resaved settings with ScheduleIO. |
 
 ## Targets
 

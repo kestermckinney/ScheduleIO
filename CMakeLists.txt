@@ -31,20 +31,28 @@ set(SCHEDULEIO_SOURCES
     src/codec/propsreader.cpp
     src/codec/mppfieldids.cpp
     src/codec/viewformat.cpp
+    src/codec/mpp14timephased.cpp
     src/model/project.cpp
     src/model/task.cpp
     src/model/resource.cpp
     src/model/assignment.cpp
+    src/model/timephasedvalue.cpp
     src/model/calendar.cpp
     src/model/relation.cpp
     src/model/baseline.cpp
     src/model/customfield.cpp
+    src/model/customfieldlogic.cpp
     src/model/costrate.cpp
     src/model/availability.cpp
     src/model/duration.cpp
-    src/model/scheduler.cpp
-    src/model/workcalendar.cpp
-    src/model/taskscheduling.cpp
+      src/model/scheduler.cpp
+      src/model/workcalendar.cpp
+      src/model/schedulingcalendar.cpp
+      src/model/taskscheduling.cpp
+    src/model/materialcosting.cpp
+    src/model/projectreconciliation.cpp
+    src/model/progressupdating.cpp
+    src/model/workcontouring.cpp
     src/model/resourceleveling.cpp
     src/serializer/docserializer.cpp
     src/serializer/mpp12serializer.cpp
@@ -75,13 +83,20 @@ set(SCHEDULEIO_HEADERS
     src/model/relation.h
     src/model/baseline.h
     src/model/customfield.h
+    src/model/customfieldlogic.h
     src/model/viewstyles.h
+    src/model/usageviewsettings.h
     src/model/costrate.h
     src/model/availability.h
     src/model/duration.h
-    src/model/scheduler.h
-    src/model/workcalendar.h
-    src/model/taskscheduling.h
+      src/model/scheduler.h
+      src/model/workcalendar.h
+      src/model/schedulingcalendar.h
+      src/model/taskscheduling.h
+    src/model/materialcosting.h
+    src/model/projectreconciliation.h
+    src/model/progressupdating.h
+    src/model/workcontouring.h
     src/model/resourceleveling.h
     src/serializer/docserializer.h
     src/serializer/mpp12serializer.h

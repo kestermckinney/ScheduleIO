@@ -50,6 +50,9 @@ bool MppIO::openFromData(const QByteArray &bytes)
     if (!ser->read(cf, parsed, &d->error))
         return false;
 
+    if (v == schedule::Project::FormatVersion::Mpp14)
+        parsed.mppSourceTemplate = bytes;
+
     d->project = parsed;
     d->sourceProject = parsed;
     d->sourceData = bytes;

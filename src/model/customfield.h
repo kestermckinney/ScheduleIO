@@ -7,6 +7,8 @@
 #include "scheduleio_export.h"
 
 #include <QString>
+#include <QStringList>
+#include <QList>
 #include <QVariant>
 
 namespace schedule {
@@ -20,10 +22,20 @@ namespace schedule {
 class SCHEDULEIO_EXPORT CustomField
 {
 public:
+    struct IndicatorRule {
+        QString comparison; // eq, ne, lt, le, gt, ge, contains
+        QVariant value;
+        QString indicator;  // symbolic icon name used by modern UI/reports
+        bool operator==(const IndicatorRule &o) const
+        { return comparison == o.comparison && value == o.value && indicator == o.indicator; }
+    };
     int fieldId = 0;      // full MPP field id (high word entity + low word index),
                           // e.g. 0x0B400073 == task Cost1; matches the XML <FieldID>
     QString name;         // human label, e.g. "Text1", "Cost2", "Outline Code1"
     QVariant value;       // decoded value in its natural type
+    QString formula;      // Schedule Vault/Project-style expression, e.g. [Cost] / [Duration]
+    QStringList lookupValues;
+    QList<IndicatorRule> graphicalIndicators;
 
     bool operator==(const CustomField &o) const;
     bool operator!=(const CustomField &o) const { return !(*this == o); }

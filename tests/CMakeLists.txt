@@ -32,6 +32,20 @@ scheduleio_add_test(tst_scheduler       unit/tst_scheduler.cpp)
 scheduleio_add_test(tst_workcalendar    unit/tst_workcalendar.cpp)
 scheduleio_add_test(tst_taskscheduling  unit/tst_taskscheduling.cpp)
 scheduleio_add_test(tst_resourcecalendars unit/tst_resourcecalendars.cpp)
+scheduleio_add_test(tst_resourceleveling unit/tst_resourceleveling.cpp)
+scheduleio_add_test(tst_mpp14timephased unit/tst_mpp14timephased.cpp)
+scheduleio_add_test(tst_materialcosting unit/tst_materialcosting.cpp)
+scheduleio_add_test(tst_projectreconciliation unit/tst_projectreconciliation.cpp)
+scheduleio_add_test(tst_progressupdating unit/tst_progressupdating.cpp)
+scheduleio_add_test(tst_workcontouring unit/tst_workcontouring.cpp)
+scheduleio_add_test(tst_paritygaps unit/tst_paritygaps.cpp)
+scheduleio_add_test(tst_usageviewsettings unit/tst_usageviewsettings.cpp)
+
+if(WIN32 AND SCHEDULEIO_ORACLE_MSPROJECT)
+    scheduleio_add_test(tst_msproject_usage_view interop/tst_msproject_usage_view.cpp)
+    target_compile_definitions(tst_msproject_usage_view PRIVATE
+        SCHEDULEIO_USAGE_ORACLE_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/interop/msproject_usage_view_oracle.ps1")
+endif()
 
 # Layer 2 - round-trip (synthetic now; fixture-driven cases self-skip if absent)
 scheduleio_add_test(tst_semantic_roundtrip roundtrip/tst_semantic_roundtrip.cpp)
@@ -113,6 +127,20 @@ target_include_directories(dump_cview PRIVATE ${CMAKE_SOURCE_DIR}/src)
 qt_add_executable(resave probe/resave.cpp)
 target_link_libraries(resave PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(resave PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(create_task_definition_oracle probe/create_task_definition_oracle.cpp)
+target_link_libraries(create_task_definition_oracle PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(create_task_definition_oracle PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(create_parity_oracle probe/create_parity_oracle.cpp)
+target_link_libraries(create_parity_oracle PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(create_parity_oracle PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(usage_view_oracle_artifact probe/usage_view_oracle_artifact.cpp)
+target_link_libraries(usage_view_oracle_artifact PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(usage_view_oracle_artifact PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(usage_view_oracle_artifact PRIVATE
+    SCHEDULEIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
 qt_add_executable(dump_model probe/dump_model.cpp)
 target_link_libraries(dump_model PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)

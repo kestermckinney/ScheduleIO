@@ -12,8 +12,9 @@
 
 #include "fixtureutils.h"
 
-// Layer 3 oracle: cost values (a plain currency double in the binary) decoded for
-// tasks / resources / assignments must agree with the MS Project XML export. The
+// Layer 3 oracle: native MPP and MSPDI both store currency in hundredths of the
+// project unit; the public model exposes ordinary currency units. Decoded task,
+// resource, and assignment costs must agree with the normalized XML export. The
 // task/assignment <Cost> we want is the entity-level one, NOT the <Cost> nested
 // inside a <Baseline>, so we ignore everything while inside a <Baseline> element.
 class TstCostOracle : public QObject
@@ -53,10 +54,10 @@ void TstCostOracle::parse(const QString &xmlPath, QHash<int, XmlCost> &tasks,
             else if (n == u"Baseline")   { inBaseline = true; }
             else if (sect != None && !inBaseline) {
                 if (n == u"UID" && uid < 0) uid = xml.readElementText().toInt();
-                else if (n == u"Cost" && !cur.costSeen) { cur.cost = xml.readElementText().toDouble(); cur.costSeen = true; }
-                else if (n == u"FixedCost" && !cur.fixedSeen) { cur.fixed = xml.readElementText().toDouble(); cur.fixedSeen = true; }
-                else if (n == u"ActualCost" && !cur.actualSeen) { cur.actual = xml.readElementText().toDouble(); cur.actualSeen = true; }
-                else if (n == u"RemainingCost" && !cur.remainingSeen) { cur.remaining = xml.readElementText().toDouble(); cur.remainingSeen = true; }
+                else if (n == u"Cost" && !cur.costSeen) { cur.cost = xml.readElementText().toDouble() / 100.0; cur.costSeen = true; }
+                else if (n == u"FixedCost" && !cur.fixedSeen) { cur.fixed = xml.readElementText().toDouble() / 100.0; cur.fixedSeen = true; }
+                else if (n == u"ActualCost" && !cur.actualSeen) { cur.actual = xml.readElementText().toDouble() / 100.0; cur.actualSeen = true; }
+                else if (n == u"RemainingCost" && !cur.remainingSeen) { cur.remaining = xml.readElementText().toDouble() / 100.0; cur.remainingSeen = true; }
             }
         } else if (xml.isEndElement()) {
             const QStringView n = xml.name();

@@ -3,6 +3,7 @@
 
 #include "model/scheduler.h"
 #include "model/duration.h"
+#include "model/schedulingcalendar.h"
 #include "model/workcalendar.h"
 
 #include <QHash>
@@ -78,24 +79,14 @@ bool Scheduler::reachable(const Project &project, int fromUid, int toUid)
     return false;
 }
 
-void Scheduler::reschedule(Project &project)
+namespace {
+
+void rescheduleForward(Project &project)
 {
     QHash<int, int> idx;   // uid -> tasks index
     idx.reserve(project.tasks.size());
     for (int i = 0; i < project.tasks.size(); ++i)
         idx.insert(project.tasks.at(i).uniqueId, i);
-
-    // Working time is task-calendar first, project calendar otherwise.
-    const WorkCalendar projCal = projectCalendar(project);
-    QHash<int, WorkCalendar> calByUid;   // calendar uid -> resolved calendar
-    auto calendarFor = [&](const Task &t) -> const WorkCalendar & {
-        if (t.calendarUniqueId < 0)
-            return projCal;
-        auto it = calByUid.find(t.calendarUniqueId);
-        if (it == calByUid.end())
-            it = calByUid.insert(t.calendarUniqueId, WorkCalendar(project, t.calendarUniqueId));
-        return it.value();
-    };
 
     // Dependency edges between tasks that exist; self-links are ignored.
     QMultiHash<int, const Relation *> predsOf;   // successor uid -> its relations
@@ -137,7 +128,7 @@ void Scheduler::reschedule(Project &project)
         if (t.summary || t.manual || !t.active || t.actualStart.isValid())
             continue;
 
-        const WorkCalendar &cal = calendarFor(t);
+        const WorkCalendar cal = SchedulingCalendar::taskBase(project, t);
         const qint64 dur = qMax<qint64>(0, t.durationMillis);
 
         // Earliest start allowed by the predecessors.
@@ -168,8 +159,8 @@ void Scheduler::reschedule(Project &project)
                                                             : cal.addWork(base, rel->lagMillis);
 
             const QDateTime cand = drivesFinish
-                ? (dur > 0 ? cal.addWork(point, -dur) : point)
-                : cal.nextWorkStart(point);
+                ? SchedulingCalendar::startForFinish(project, t, point)
+                : SchedulingCalendar::nextStart(project, t, point);
             if (!cand.isValid())
                 continue;
             havePred = true;
@@ -196,7 +187,7 @@ void Scheduler::reschedule(Project &project)
                 break;
             case 3:   // Must Finish On
                 t.finish = t.constraintDate;
-                t.start = dur > 0 ? cal.addWork(t.constraintDate, -dur) : t.constraintDate;
+                t.start = SchedulingCalendar::startForFinish(project, t, t.constraintDate);
                 fixedByFinish = true;
                 break;
             case 4:   // Start No Earlier Than
@@ -210,15 +201,15 @@ void Scheduler::reschedule(Project &project)
                     start = t.constraintDate;
                 break;
             case 6: { // Finish No Earlier Than
-                const QDateTime s = dur > 0 ? cal.addWork(t.constraintDate, -dur)
-                                            : t.constraintDate;
+                const QDateTime s = SchedulingCalendar::startForFinish(
+                    project, t, t.constraintDate);
                 if (s.isValid() && s > start)
                     start = s;
                 break;
             }
             case 7: { // Finish No Later Than
-                const QDateTime s = dur > 0 ? cal.addWork(t.constraintDate, -dur)
-                                            : t.constraintDate;
+                const QDateTime s = SchedulingCalendar::startForFinish(
+                    project, t, t.constraintDate);
                 if (s.isValid() && start > s)
                     start = s;
                 break;
@@ -235,9 +226,173 @@ void Scheduler::reschedule(Project &project)
         if (t.levelingDelayMillis > 0)
             start = cal.addWork(start, t.levelingDelayMillis);
 
-        t.start = start;
-        t.finish = dur > 0 ? cal.addWork(start, dur) : start;
+        t.start = SchedulingCalendar::nextStart(project, t, start);
+        t.finish = SchedulingCalendar::finish(project, t, t.start);
     }
+}
+
+void rescheduleBackward(Project &project)
+{
+    QHash<int, int> idx;
+    idx.reserve(project.tasks.size());
+    for (int i = 0; i < project.tasks.size(); ++i)
+        idx.insert(project.tasks.at(i).uniqueId, i);
+
+    // The forward scheduling result is the early schedule. Keep explicit copies
+    // so callers can compare early/late dates even after constraints or leveling.
+    for (Task &task : project.tasks) {
+        task.earlyStart = task.start;
+        task.earlyFinish = task.finish;
+    }
+
+    // Walk successors before predecessors. Inactive successors impose no
+    // backward bound, matching the forward pass's inactive-link behavior.
+    QMultiHash<int, const Relation *> succLinksOf;
+    QMultiHash<int, int> predsOf;
+    QHash<int, int> outdegree;
+    for (const Task &t : project.tasks)
+        outdegree.insert(t.uniqueId, 0);
+    for (const Relation &rel : project.relations) {
+        if (!idx.contains(rel.predecessorTaskUid) || !idx.contains(rel.successorTaskUid)
+            || rel.predecessorTaskUid == rel.successorTaskUid
+            || !project.tasks.at(idx.value(rel.successorTaskUid)).active)
+            continue;
+        succLinksOf.insert(rel.predecessorTaskUid, &rel);
+        predsOf.insert(rel.successorTaskUid, rel.predecessorTaskUid);
+        ++outdegree[rel.predecessorTaskUid];
+    }
+
+    QDateTime finishAnchor;
+    if (!project.scheduleFromStart && project.finishDate.isValid())
+        finishAnchor = project.finishDate;
+    if (!finishAnchor.isValid()) {
+        for (const Task &t : project.tasks) {
+            if (t.summary || !t.active || !t.finish.isValid())
+                continue;
+            if (!finishAnchor.isValid() || t.finish > finishAnchor)
+                finishAnchor = t.finish;
+        }
+    }
+    if (!finishAnchor.isValid())
+        return;
+
+    QQueue<int> queue;
+    for (const Task &t : project.tasks)
+        if (outdegree.value(t.uniqueId) == 0)
+            queue.enqueue(t.uniqueId);
+
+    while (!queue.isEmpty()) {
+        const int uid = queue.dequeue();
+        Task &t = project.tasks[idx.value(uid)];
+
+        for (auto it = predsOf.constFind(uid); it != predsOf.constEnd() && it.key() == uid; ++it)
+            if (--outdegree[it.value()] == 0)
+                queue.enqueue(it.value());
+
+        // In a start-scheduled project only ALAP tasks consume their available
+        // float. In a finish-scheduled project ASAP remains an explicit opt-out;
+        // ALAP and date-constrained tasks participate in the backward pass.
+        const bool backwardTask = project.scheduleFromStart
+            ? t.constraintType == 1
+            : t.constraintType != 0;
+        if (!backwardTask || t.summary || t.manual || !t.active || t.actualStart.isValid())
+            continue;
+
+        const WorkCalendar cal = SchedulingCalendar::taskBase(project, t);
+        QDateTime start;
+        bool haveSuccessor = false;
+        for (auto it = succLinksOf.constFind(uid);
+             it != succLinksOf.constEnd() && it.key() == uid; ++it) {
+            const Relation *rel = it.value();
+            const Task &s = project.tasks.at(idx.value(rel->successorTaskUid));
+            if (s.summary || !s.start.isValid() || !s.finish.isValid())
+                continue;
+
+            QDateTime bound;
+            bool boundsStart = false;
+            switch (rel->type) {
+            case Relation::StartToStart:   bound = s.start;  boundsStart = true; break;
+            case Relation::FinishToFinish: bound = s.finish; break;
+            case Relation::StartToFinish:  bound = s.finish; boundsStart = true; break;
+            case Relation::FinishToStart:
+            default:                       bound = s.start;  break;
+            }
+            if (rel->lagMillis != 0)
+                bound = Duration::isElapsed(rel->lagFormat)
+                    ? bound.addMSecs(-rel->lagMillis)
+                    : cal.addWork(bound, -rel->lagMillis);
+
+            const QDateTime cand = boundsStart
+                ? bound
+                : SchedulingCalendar::startForFinish(project, t, bound);
+            if (!cand.isValid())
+                continue;
+            haveSuccessor = true;
+            if (!start.isValid() || cand < start)
+                start = cand;
+        }
+        if (!haveSuccessor)
+            start = SchedulingCalendar::startForFinish(project, t, finishAnchor);
+        if (!start.isValid())
+            continue;
+
+        // A backward-scheduled task cannot extend beyond the project's finish
+        // merely because an SS/SF relation only bounds its start.
+        const QDateTime projectBound = SchedulingCalendar::startForFinish(
+            project, t, finishAnchor);
+        if (projectBound.isValid() && start > projectBound)
+            start = projectBound;
+
+        // ALAP deadlines cap the latest finish. Date constraints otherwise win
+        // over dependency bounds, exposing conflicts later as negative slack.
+        QDateTime finish = SchedulingCalendar::finish(project, t, start);
+        if (t.constraintType == 1 && t.deadline.isValid()
+            && finish.isValid() && t.deadline < finish) {
+            start = SchedulingCalendar::startForFinish(project, t, t.deadline);
+            finish = t.deadline;
+        }
+        if (t.constraintDate.isValid()) {
+            switch (t.constraintType) {
+            case 2: // Must Start On
+                start = t.constraintDate;
+                break;
+            case 3: // Must Finish On
+                start = SchedulingCalendar::startForFinish(project, t, t.constraintDate);
+                break;
+            case 4: // Start No Earlier Than
+                if (start < t.constraintDate)
+                    start = t.constraintDate;
+                break;
+            case 5: // Start No Later Than
+                if (start > t.constraintDate)
+                    start = t.constraintDate;
+                break;
+            case 6: // Finish No Earlier Than
+                if (finish.isValid() && finish < t.constraintDate)
+                    start = SchedulingCalendar::startForFinish(project, t, t.constraintDate);
+                break;
+            case 7: // Finish No Later Than
+                if (finish.isValid() && finish > t.constraintDate)
+                    start = SchedulingCalendar::startForFinish(project, t, t.constraintDate);
+                break;
+            default:
+                break;
+            }
+        }
+
+        t.start = SchedulingCalendar::nextStart(project, t, start);
+        t.finish = SchedulingCalendar::finish(project, t, t.start);
+    }
+}
+
+} // namespace
+
+void Scheduler::reschedule(Project &project)
+{
+    // The early pass provides anchors for explicit ASAP tasks and establishes
+    // the project finish used by ALAP tasks in start-scheduled projects.
+    rescheduleForward(project);
+    rescheduleBackward(project);
 }
 
 void Scheduler::computeSlack(Project &project)
@@ -274,7 +429,7 @@ void Scheduler::computeSlack(Project &project)
     }
 
     // The project finish anchors every chain's late finish.
-    QDateTime projectFinish;
+    QDateTime projectFinish = !project.scheduleFromStart ? project.finishDate : QDateTime();
     for (const Task &t : project.tasks) {
         if (t.summary || !t.finish.isValid())
             continue;
@@ -330,10 +485,14 @@ void Scheduler::computeSlack(Project &project)
                 bound = Duration::isElapsed(rel->lagFormat)
                     ? bound.addMSecs(-rel->lagMillis)
                     : cal.addWork(bound, -rel->lagMillis);
-            tighten(boundsStart ? (dur > 0 ? cal.addWork(bound, dur) : bound) : bound);
+            tighten(boundsStart
+                ? (Duration::isElapsed(t.durationFormat)
+                    ? (dur > 0 ? bound.addMSecs(dur) : bound)
+                    : (dur > 0 ? cal.addWork(bound, dur) : bound))
+                : bound);
         }
         if (!lateFinish.isValid())
-            lateFinish = projectFinish;
+            lateFinish = project.multipleCriticalPaths ? t.finish : projectFinish;
 
         // A deadline or a Must Start/Finish On constraint caps the late dates.
         if (t.deadline.isValid() && t.deadline < lateFinish)
@@ -350,10 +509,21 @@ void Scheduler::computeSlack(Project &project)
         }
 
         t.lateFinish = lateFinish;
-        t.lateStart = dur > 0 ? cal.addWork(lateFinish, -dur) : lateFinish;
-        t.totalSlackMillis = t.lateFinish >= t.finish
+        t.lateStart = dur > 0
+            ? (Duration::isElapsed(t.durationFormat)
+                ? lateFinish.addMSecs(-dur) : cal.addWork(lateFinish, -dur))
+            : lateFinish;
+        // Slack is relative to the task's current scheduled dates. In a project
+        // scheduled from its finish, the separately retained early dates describe
+        // the forward-pass opportunity, while ALAP tasks already sit at their late
+        // dates and therefore have zero schedulable slack.
+        t.startSlackMillis = t.lateStart >= t.start
+            ? cal.workBetween(t.start, t.lateStart)
+            : -cal.workBetween(t.lateStart, t.start);
+        t.finishSlackMillis = t.lateFinish >= t.finish
             ? cal.workBetween(t.finish, t.lateFinish)
             : -cal.workBetween(t.lateFinish, t.finish);
+        t.totalSlackMillis = qMin(t.startSlackMillis, t.finishSlackMillis);
         t.critical = t.totalSlackMillis <= 0;
 
         // Free slack: how far the task can slip before the EARLIEST successor
@@ -382,7 +552,11 @@ void Scheduler::computeSlack(Project &project)
                 bound = Duration::isElapsed(rel->lagFormat)
                     ? bound.addMSecs(-rel->lagMillis)
                     : cal.addWork(bound, -rel->lagMillis);
-            tightenFree(boundsStart ? (dur > 0 ? cal.addWork(bound, dur) : bound) : bound);
+            tightenFree(boundsStart
+                ? (Duration::isElapsed(t.durationFormat)
+                    ? (dur > 0 ? bound.addMSecs(dur) : bound)
+                    : (dur > 0 ? cal.addWork(bound, dur) : bound))
+                : bound);
         }
         if (!freeBound.isValid())
             freeBound = projectFinish;
@@ -398,7 +572,8 @@ void Scheduler::computeSlack(Project &project)
             continue;
         bool any = false;
         bool critical = false;
-        qint64 total = 0, free = 0;
+        qint64 total = 0, free = 0, startSlack = 0, finishSlack = 0;
+        QDateTime earlyStart, earlyFinish, lateStart, lateFinish;
         for (int j = i + 1; j < project.tasks.size(); ++j) {
             const Task &c = project.tasks.at(j);
             if (c.outlineLevel <= s.outlineLevel)
@@ -410,12 +585,24 @@ void Scheduler::computeSlack(Project &project)
                 total = c.totalSlackMillis;
             if (!any || c.freeSlackMillis < free)
                 free = c.freeSlackMillis;
+            if (!any || c.startSlackMillis < startSlack) startSlack = c.startSlackMillis;
+            if (!any || c.finishSlackMillis < finishSlack) finishSlack = c.finishSlackMillis;
+            if (!earlyStart.isValid() || c.earlyStart < earlyStart) earlyStart = c.earlyStart;
+            if (!earlyFinish.isValid() || c.earlyFinish > earlyFinish) earlyFinish = c.earlyFinish;
+            if (!lateStart.isValid() || c.lateStart < lateStart) lateStart = c.lateStart;
+            if (!lateFinish.isValid() || c.lateFinish > lateFinish) lateFinish = c.lateFinish;
             any = true;
         }
         if (any) {
             s.critical = critical;
             s.totalSlackMillis = total;
             s.freeSlackMillis = free;
+            s.startSlackMillis = startSlack;
+            s.finishSlackMillis = finishSlack;
+            s.earlyStart = earlyStart;
+            s.earlyFinish = earlyFinish;
+            s.lateStart = lateStart;
+            s.lateFinish = lateFinish;
         }
     }
 }

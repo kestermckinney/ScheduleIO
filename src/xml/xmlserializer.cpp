@@ -5,6 +5,7 @@
 
 #include "codec/mppfieldids.h"
 #include "model/duration.h"
+#include "model/customfieldlogic.h"
 #include "model/workcalendar.h"
 
 #include <QDateTime>
@@ -17,6 +18,7 @@
 #include <QXmlStreamWriter>
 
 #include <cmath>
+#include <algorithm>
 
 // The MSPDI namespace every element lives in.
 static const QString kMspdiNs = QStringLiteral("http://schemas.microsoft.com/project");
@@ -74,15 +76,22 @@ QString formatIsoDuration(qint64 ms)
 
 QDateTime parseDateTime(const QString &s)
 {
-    return QDateTime::fromString(s.trimmed(), Qt::ISODate);
+    // MSPDI carries wall-clock times with no timezone marker, which Qt::ISODate parses
+    // as LocalTime -- the spec the whole model uses. Should a file carry a 'Z' anyway,
+    // keep its digits rather than its instant, so every date in the model still means
+    // the wall clock Project displays.
+    const QDateTime parsed = QDateTime::fromString(s.trimmed(), Qt::ISODate);
+    // date()/time() read the value in its own spec, so this keeps the digits the file
+    // wrote rather than the instant they denote.
+    return parsed.isValid() ? QDateTime(parsed.date(), parsed.time()) : QDateTime();
 }
 
 QString formatDateTime(const QDateTime &dt)
 {
-    // MSPDI carries local wall-clock times with no timezone marker. Qt::ISODate
-    // appends 'Z' for UTC-spec values (e.g. those decoded from a .mpp), which
-    // real MS Project exports never do and which makes MS Project shift or
-    // reject the value on import. Emit the wall-clock unchanged, no 'Z'.
+    // MSPDI carries local wall-clock times with no timezone marker. Qt::ISODate would
+    // append 'Z' for any UTC-spec value that reached here, which real MS Project
+    // exports never do and which makes MS Project shift or reject the value on
+    // import. Emit the wall clock unchanged, no 'Z'.
     return dt.toString(QStringLiteral("yyyy-MM-ddTHH:mm:ss"));
 }
 
@@ -100,6 +109,18 @@ QString formatNumber(double v)
             return s;
     }
     return QString::number(v, 'g', 17);
+}
+
+// MSPDI, like native MPP, represents currency values in hundredths of the
+// project currency unit. Keep the public model in ordinary currency units.
+double parseCurrency(const QString &text)
+{
+    return text.toDouble() / 100.0;
+}
+
+QString formatCurrency(double value)
+{
+    return formatNumber(value * 100.0);
 }
 
 QTime parseTime(const QString &s)
@@ -187,7 +208,7 @@ schedule::Baseline parseBaseline(QXmlStreamReader &r)
         if (n == u"Number")
             b.number = r.readElementText().toInt();
         else if (n == u"Cost")
-            b.cost = r.readElementText().toDouble();
+            b.cost = parseCurrency(r.readElementText());
         else if (n == u"Work")
             b.workMillis = parseIsoDuration(r.readElementText());
         else if (n == u"Duration")
@@ -256,9 +277,42 @@ void parseExtendedAttribute(QXmlStreamReader &r, QList<schedule::CustomField> &o
         out.append(cf);
 }
 
+schedule::CustomField parseExtendedAttributeDefinition(QXmlStreamReader &r)
+{
+    schedule::CustomField field;
+    while (r.readNextStartElement()) {
+        const QStringView n = r.name();
+        if (n == u"FieldID") field.fieldId = r.readElementText().toInt();
+        else if (n == u"FieldName") field.name = r.readElementText();
+        else if (n == u"Formula") field.formula = r.readElementText();
+        else if (n == u"ValueList") {
+            while (r.readNextStartElement()) {
+                if (r.name() == u"Value") field.lookupValues.append(r.readElementText());
+                else r.skipCurrentElement();
+            }
+        } else if (n == u"GraphicalIndicators") {
+            while (r.readNextStartElement()) {
+                if (r.name() != u"GraphicalIndicator") { r.skipCurrentElement(); continue; }
+                schedule::CustomField::IndicatorRule rule;
+                while (r.readNextStartElement()) {
+                    if (r.name() == u"Comparison") rule.comparison = r.readElementText();
+                    else if (r.name() == u"Value") rule.value = r.readElementText();
+                    else if (r.name() == u"Indicator") rule.indicator = r.readElementText();
+                    else r.skipCurrentElement();
+                }
+                field.graphicalIndicators.append(rule);
+            }
+        } else r.skipCurrentElement();
+    }
+    return field;
+}
+
 schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relations)
 {
     schedule::Task t;
+    QDateTime stop;
+    QDateTime resume;
+    bool resumeValid = false;
     while (r.readNextStartElement()) {
         const QStringView n = r.name();
         if (n == u"UID")
@@ -285,10 +339,16 @@ schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relatio
             t.levelingDelayMillis = r.readElementText().toLongLong() * 6000;
         else if (n == u"PercentComplete")
             t.percentComplete = r.readElementText().toDouble() / 100.0;
+        else if (n == u"PhysicalPercentComplete")
+            t.physicalPercentComplete = r.readElementText().toDouble() / 100.0;
+        else if (n == u"EarnedValueMethod")
+            t.earnedValueMethod = r.readElementText().toInt() == 1 ? 1 : 0;
         else if (n == u"Milestone")
             t.milestone = r.readElementText().toInt() != 0;
         else if (n == u"Summary")
             t.summary = r.readElementText().toInt() != 0;
+        else if (n == u"Recurring")
+            t.recurring = r.readElementText().toInt() != 0;
         else if (n == u"Manual")
             t.manual = r.readElementText().toInt() != 0;
         else if (n == u"Active")
@@ -303,10 +363,20 @@ schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relatio
             t.deadline = parseDateTime(r.readElementText());
         else if (n == u"CalendarUID")
             t.calendarUniqueId = r.readElementText().toInt();
+        else if (n == u"IgnoreResourceCalendar")
+            t.ignoreResourceCalendar = r.readElementText().toInt() != 0;
         else if (n == u"LateStart")
             t.lateStart = parseDateTime(r.readElementText());
         else if (n == u"LateFinish")
             t.lateFinish = parseDateTime(r.readElementText());
+        else if (n == u"StartVariance")
+            t.startVarianceMillis = r.readElementText().toLongLong() * 6000;
+        else if (n == u"FinishVariance")
+            t.finishVarianceMillis = r.readElementText().toLongLong() * 6000;
+        else if (n == u"DurationVariance")
+            t.durationVarianceMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"WorkVariance")
+            t.workVarianceMillis = qRound64(r.readElementText().toDouble());
         else if (n == u"TotalSlack")   // tenths of a minute, like task lag
             t.totalSlackMillis = r.readElementText().toLongLong() * 6000;
         else if (n == u"FreeSlack")
@@ -318,15 +388,15 @@ schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relatio
         else if (n == u"ConstraintDate")
             t.constraintDate = parseDateTime(r.readElementText());
         else if (n == u"FixedCost")
-            t.fixedCost = r.readElementText().toDouble();
+            t.fixedCost = parseCurrency(r.readElementText());
         else if (n == u"Cost")
-            t.cost = r.readElementText().toDouble();
+            t.cost = parseCurrency(r.readElementText());
         else if (n == u"ActualCost")
-            t.actualCost = r.readElementText().toDouble();
+            t.actualCost = parseCurrency(r.readElementText());
         else if (n == u"RemainingCost")
-            t.remainingCost = r.readElementText().toDouble();
+            t.remainingCost = parseCurrency(r.readElementText());
         else if (n == u"CostVariance")
-            t.costVariance = r.readElementText().toDouble();
+            t.costVariance = parseCurrency(r.readElementText());
         else if (n == u"ActualStart")
             t.actualStart = parseDateTime(r.readElementText());
         else if (n == u"ActualFinish")
@@ -335,26 +405,38 @@ schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relatio
             t.actualDurationMillis = parseIsoDuration(r.readElementText());
         else if (n == u"ActualWork")
             t.actualWorkMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"Stop")
+            stop = parseDateTime(r.readElementText());
+        else if (n == u"Resume")
+            resume = parseDateTime(r.readElementText());
+        else if (n == u"ResumeValid")
+            resumeValid = r.readElementText().toInt() != 0;
         else if (n == u"BCWS")   // Planned Value (PV)
-            t.evm.pv = r.readElementText().toDouble();
+            t.evm.pv = parseCurrency(r.readElementText());
         else if (n == u"BCWP")   // Earned Value (EV)
-            t.evm.ev = r.readElementText().toDouble();
+            t.evm.ev = parseCurrency(r.readElementText());
         else if (n == u"ACWP")   // Actual Cost (AC)
-            t.evm.ac = r.readElementText().toDouble();
+            t.evm.ac = parseCurrency(r.readElementText());
         else if (n == u"CV")
-            t.evm.cv = r.readElementText().toDouble();
+            t.evm.cv = parseCurrency(r.readElementText());
         else if (n == u"SV")
-            t.evm.sv = r.readElementText().toDouble();
+            t.evm.sv = parseCurrency(r.readElementText());
         else if (n == u"CPI")
             t.evm.cpi = r.readElementText().toDouble();
         else if (n == u"SPI")
             t.evm.spi = r.readElementText().toDouble();
         else if (n == u"EAC")
-            t.evm.eac = r.readElementText().toDouble();
+            t.evm.eac = parseCurrency(r.readElementText());
         else if (n == u"TCPI")
             t.evm.tcpi = r.readElementText().toDouble();
         else if (n == u"Notes")
             t.notes = r.readElementText();
+        else if (n == u"Hyperlink")
+            t.hyperlink = r.readElementText();
+        else if (n == u"HyperlinkAddress")
+            t.hyperlinkAddress = r.readElementText();
+        else if (n == u"HyperlinkSubAddress")
+            t.hyperlinkSubAddress = r.readElementText();
         else if (n == u"Baseline")
             t.baselines.append(parseBaseline(r));
         else if (n == u"PredecessorLink")
@@ -363,6 +445,12 @@ schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relatio
             parseExtendedAttribute(r, t.customFields);
         else
             r.skipCurrentElement();
+    }
+    // MSPDI represents a task interruption through Stop/Resume. Do not treat
+    // ordinary progress anchors as splits unless ResumeValid is explicitly set.
+    if (resumeValid && t.start.isValid() && t.finish.isValid()
+        && stop > t.start && resume > stop && resume < t.finish) {
+        t.segments = { { t.start, stop }, { resume, t.finish } };
     }
     return t;
 }
@@ -379,15 +467,15 @@ schedule::CostRate parseRate(QXmlStreamReader &r)
         else if (n == u"RatesTo")
             cr.endDate = parseDateTime(r.readElementText());
         else if (n == u"StandardRate")
-            cr.standardRate = r.readElementText().toDouble();
+            cr.standardRate = parseCurrency(r.readElementText());
         else if (n == u"StandardRateFormat")
             cr.standardRateUnit = r.readElementText().toInt();
         else if (n == u"OvertimeRate")
-            cr.overtimeRate = r.readElementText().toDouble();
+            cr.overtimeRate = parseCurrency(r.readElementText());
         else if (n == u"OvertimeRateFormat")
             cr.overtimeRateUnit = r.readElementText().toInt();
         else if (n == u"CostPerUse")
-            cr.costPerUse = r.readElementText().toDouble();
+            cr.costPerUse = parseCurrency(r.readElementText());
         else
             r.skipCurrentElement();
     }
@@ -426,18 +514,33 @@ schedule::Resource parseResource(QXmlStreamReader &r)
             res.name = r.readElementText();
         else if (n == u"Initials")
             res.initials = r.readElementText();
+        else if (n == u"Type")
+            res.type = r.readElementText().toInt() == 1
+                ? schedule::Resource::Type::Work : schedule::Resource::Type::Material;
+        else if (n == u"IsCostResource") {
+            if (r.readElementText().toInt() != 0)
+                res.type = schedule::Resource::Type::Cost;
+        }
+        else if (n == u"MaterialLabel")
+            res.materialLabel = r.readElementText();
+        else if (n == u"IsBudget")
+            res.budget = r.readElementText().toInt() != 0;
         else if (n == u"MaxUnits")
             res.maxUnits = r.readElementText().toDouble();
         else if (n == u"CalendarUID")
             res.calendarUniqueId = r.readElementText().toInt();
         else if (n == u"Cost")
-            res.cost = r.readElementText().toDouble();
+            res.cost = parseCurrency(r.readElementText());
         else if (n == u"ActualCost")
-            res.actualCost = r.readElementText().toDouble();
+            res.actualCost = parseCurrency(r.readElementText());
         else if (n == u"RemainingCost")
-            res.remainingCost = r.readElementText().toDouble();
+            res.remainingCost = parseCurrency(r.readElementText());
         else if (n == u"CostVariance")
-            res.costVariance = r.readElementText().toDouble();
+            res.costVariance = parseCurrency(r.readElementText());
+        else if (n == u"BudgetCost")
+            res.budgetCost = parseCurrency(r.readElementText());
+        else if (n == u"BudgetWork")
+            res.budgetWorkMillis = parseIsoDuration(r.readElementText());
         else if (n == u"Notes")
             res.notes = r.readElementText();
         else if (n == u"Baseline")
@@ -475,14 +578,34 @@ schedule::Assignment parseAssignment(QXmlStreamReader &r)
             a.taskUniqueId = r.readElementText().toInt();
         else if (n == u"ResourceUID")
             a.resourceUniqueId = r.readElementText().toInt();
+        else if (n == u"IsBudget")
+            a.budget = r.readElementText().toInt() != 0;
+        else if (n == u"BudgetCost")
+            a.budgetCost = parseCurrency(r.readElementText());
+        else if (n == u"BudgetWork")
+            a.budgetWorkMillis = parseIsoDuration(r.readElementText());
         else if (n == u"Units")
             a.units = r.readElementText().toDouble();
+        else if (n == u"CostRateTable")
+            a.costRateTable = r.readElementText().toInt();
+        else if (n == u"RateScale")
+            a.variableRateUnits = r.readElementText().toInt();
+        else if (n == u"HasFixedRateUnits") {
+            if (r.readElementText().toInt() != 0)
+                a.variableRateUnits = 0;
+        }
+        else if (n == u"WorkContour")
+            a.workContour = qBound(0, r.readElementText().toInt(), 8);
         else if (n == u"Work")
             a.workMillis = parseIsoDuration(r.readElementText());
         else if (n == u"Start")
             a.start = parseDateTime(r.readElementText());
         else if (n == u"Finish")
             a.finish = parseDateTime(r.readElementText());
+        else if (n == u"Stop")
+            a.stop = parseDateTime(r.readElementText());
+        else if (n == u"Resume")
+            a.resume = parseDateTime(r.readElementText());
         else if (n == u"Delay")   // tenths of a minute, like task lag
             a.delayMillis = r.readElementText().toLongLong() * 6000;
         else if (n == u"LevelingDelay")
@@ -491,20 +614,55 @@ schedule::Assignment parseAssignment(QXmlStreamReader &r)
             a.actualWorkMillis = parseIsoDuration(r.readElementText());
         else if (n == u"RemainingWork")
             a.remainingWorkMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"OvertimeWork")
+            a.overtimeWorkMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"ActualOvertimeWork")
+            a.actualOvertimeWorkMillis = parseIsoDuration(r.readElementText());
+        else if (n == u"RemainingOvertimeWork")
+            a.remainingOvertimeWorkMillis = parseIsoDuration(r.readElementText());
         else if (n == u"Cost")
-            a.cost = r.readElementText().toDouble();
+            a.cost = parseCurrency(r.readElementText());
         else if (n == u"ActualCost")
-            a.actualCost = r.readElementText().toDouble();
+            a.actualCost = parseCurrency(r.readElementText());
         else if (n == u"RemainingCost")
-            a.remainingCost = r.readElementText().toDouble();
+            a.remainingCost = parseCurrency(r.readElementText());
         else if (n == u"CostVariance")
-            a.costVariance = r.readElementText().toDouble();
+            a.costVariance = parseCurrency(r.readElementText());
+        else if (n == u"OvertimeCost")
+            a.overtimeCost = parseCurrency(r.readElementText());
+        else if (n == u"ActualOvertimeCost")
+            a.actualOvertimeCost = parseCurrency(r.readElementText());
+        else if (n == u"RemainingOvertimeCost")
+            a.remainingOvertimeCost = parseCurrency(r.readElementText());
         else if (n == u"Notes")
             a.notes = r.readElementText();
         else if (n == u"Baseline")
             a.baselines.append(parseBaseline(r));
         else if (n == u"ExtendedAttribute")
             parseExtendedAttribute(r, a.customFields);
+        else if (n == u"TimephasedData") {
+            schedule::TimephasedValue value;
+            while (r.readNextStartElement()) {
+                const QStringView child = r.name();
+                if (child == u"Type")
+                    value.type = r.readElementText().toInt();
+                else if (child == u"UID")
+                    value.uniqueId = r.readElementText().toInt();
+                else if (child == u"Start")
+                    value.start = parseDateTime(r.readElementText());
+                else if (child == u"Finish")
+                    value.finish = parseDateTime(r.readElementText());
+                else if (child == u"Unit")
+                    value.unit = r.readElementText().toInt();
+                else if (child == u"BaselineNumber")
+                    value.baselineNumber = r.readElementText().toInt();
+                else if (child == u"Value")
+                    value.value = r.readElementText();
+                else
+                    r.skipCurrentElement();
+            }
+            a.timephasedValues.append(value);
+        }
         else
             r.skipCurrentElement();
     }
@@ -580,10 +738,25 @@ void parseWeekDay(QXmlStreamReader &r, schedule::Calendar &cal)
 void parseException(QXmlStreamReader &r, schedule::Calendar &cal)
 {
     schedule::CalendarException ex;
+    int recurrenceType = 0;
     while (r.readNextStartElement()) {
         const QStringView n = r.name();
         if (n == u"Name")
             ex.name = r.readElementText();
+        else if (n == u"Type")
+            recurrenceType = r.readElementText().toInt();
+        else if (n == u"Period")
+            ex.interval = qMax(1, r.readElementText().toInt());
+        else if (n == u"Occurrences")
+            ex.occurrences = qMax(0, r.readElementText().toInt());
+        else if (n == u"DaysOfWeek")
+            ex.weekDayMask = quint8(r.readElementText().toUInt());
+        else if (n == u"MonthDay")
+            ex.dayOfMonth = r.readElementText().toInt();
+        else if (n == u"Month")
+            ex.month = r.readElementText().toInt();
+        else if (n == u"MonthPosition")
+            ex.weekPosition = r.readElementText().toInt();
         else if (n == u"DayWorking")
             ex.working = r.readElementText().toInt() != 0;
         else if (n == u"WorkingTimes")
@@ -602,6 +775,15 @@ void parseException(QXmlStreamReader &r, schedule::Calendar &cal)
             r.skipCurrentElement();
     }
     if (ex.fromDate.isValid()) {
+        switch (recurrenceType) {
+        case 1: ex.recurrence = schedule::CalendarException::Recurrence::Daily; break;
+        case 2: ex.recurrence = schedule::CalendarException::Recurrence::YearlyByDate; break;
+        case 3: ex.recurrence = schedule::CalendarException::Recurrence::YearlyByPosition; break;
+        case 4: ex.recurrence = schedule::CalendarException::Recurrence::MonthlyByDate; break;
+        case 5: ex.recurrence = schedule::CalendarException::Recurrence::MonthlyByPosition; break;
+        case 6: ex.recurrence = schedule::CalendarException::Recurrence::Weekly; break;
+        default: break;
+        }
         if (!ex.toDate.isValid())
             ex.toDate = ex.fromDate;
         cal.exceptions.append(ex);
@@ -671,7 +853,7 @@ void writeBaseline(QXmlStreamWriter &w, const schedule::Baseline &b)
         writeText(w, "Finish", formatDateTime(b.finish));
     writeText(w, "Duration", formatIsoDuration(b.durationMillis));
     writeText(w, "Work", formatIsoDuration(b.workMillis));
-    writeText(w, "Cost", formatNumber(b.cost));
+    writeText(w, "Cost", formatCurrency(b.cost));
     w.writeEndElement();
 }
 
@@ -728,6 +910,25 @@ void writeCalendar(QXmlStreamWriter &w, const schedule::Calendar &cal)
             w.writeEndElement();
             if (!ex.name.isEmpty())
                 writeText(w, "Name", ex.name);
+            int recurrenceType = 0;
+            switch (ex.recurrence) {
+            case schedule::CalendarException::Recurrence::Daily: recurrenceType = 1; break;
+            case schedule::CalendarException::Recurrence::YearlyByDate: recurrenceType = 2; break;
+            case schedule::CalendarException::Recurrence::YearlyByPosition: recurrenceType = 3; break;
+            case schedule::CalendarException::Recurrence::MonthlyByDate: recurrenceType = 4; break;
+            case schedule::CalendarException::Recurrence::MonthlyByPosition: recurrenceType = 5; break;
+            case schedule::CalendarException::Recurrence::Weekly: recurrenceType = 6; break;
+            default: break;
+            }
+            if (recurrenceType) {
+                writeText(w, "Type", QString::number(recurrenceType));
+                writeText(w, "Period", QString::number(qMax(1, ex.interval)));
+                if (ex.occurrences > 0) writeText(w, "Occurrences", QString::number(ex.occurrences));
+                if (ex.weekDayMask) writeText(w, "DaysOfWeek", QString::number(ex.weekDayMask));
+                if (ex.dayOfMonth > 0) writeText(w, "MonthDay", QString::number(ex.dayOfMonth));
+                if (ex.month > 0) writeText(w, "Month", QString::number(ex.month));
+                if (ex.weekPosition > 0) writeText(w, "MonthPosition", QString::number(ex.weekPosition));
+            }
             writeText(w, "DayWorking", ex.working ? QStringLiteral("1") : QStringLiteral("0"));
             if (ex.working && !ex.workingTimes.isEmpty())
                 writeWorkingTimes(w, ex.workingTimes);
@@ -764,6 +965,7 @@ void writeTask(QXmlStreamWriter &w, const schedule::Project &in, const schedule:
     writeText(w, "PercentComplete", QString::number(qRound(t.percentComplete * 100.0)));
     writeText(w, "Milestone", t.milestone ? QStringLiteral("1") : QStringLiteral("0"));
     writeText(w, "Summary", t.summary ? QStringLiteral("1") : QStringLiteral("0"));
+    writeText(w, "Recurring", t.recurring ? QStringLiteral("1") : QStringLiteral("0"));
     writeText(w, "Manual", t.manual ? QStringLiteral("1") : QStringLiteral("0"));
     writeText(w, "Active", t.active ? QStringLiteral("1") : QStringLiteral("0"));
     writeText(w, "EffortDriven", t.effortDriven ? QStringLiteral("1") : QStringLiteral("0"));
@@ -776,21 +978,26 @@ void writeTask(QXmlStreamWriter &w, const schedule::Project &in, const schedule:
     writeText(w, "LevelingDelayFormat", QStringLiteral("8"));
     if (t.calendarUniqueId >= 0)
         writeText(w, "CalendarUID", QString::number(t.calendarUniqueId));
+    writeText(w, "IgnoreResourceCalendar",
+              t.ignoreResourceCalendar ? QStringLiteral("1") : QStringLiteral("0"));
     if (t.lateStart.isValid())
         writeText(w, "LateStart", formatDateTime(t.lateStart));
     if (t.lateFinish.isValid())
         writeText(w, "LateFinish", formatDateTime(t.lateFinish));
+    writeText(w, "StartVariance", QString::number(t.startVarianceMillis / 6000));
+    writeText(w, "FinishVariance", QString::number(t.finishVarianceMillis / 6000));
+    writeText(w, "WorkVariance", formatNumber(double(t.workVarianceMillis)));
     writeText(w, "FreeSlack", QString::number(t.freeSlackMillis / 6000));
     writeText(w, "TotalSlack", QString::number(t.totalSlackMillis / 6000));
     writeText(w, "Critical", t.critical ? QStringLiteral("1") : QStringLiteral("0"));
     writeText(w, "ConstraintType", QString::number(t.constraintType));
     if (t.constraintDate.isValid())
         writeText(w, "ConstraintDate", formatDateTime(t.constraintDate));
-    writeText(w, "FixedCost", formatNumber(t.fixedCost));
-    writeText(w, "Cost", formatNumber(t.cost));
-    writeText(w, "ActualCost", formatNumber(t.actualCost));
-    writeText(w, "RemainingCost", formatNumber(t.remainingCost));
-    writeText(w, "CostVariance", formatNumber(t.costVariance));
+    writeText(w, "FixedCost", formatCurrency(t.fixedCost));
+    writeText(w, "Cost", formatCurrency(t.cost));
+    writeText(w, "ActualCost", formatCurrency(t.actualCost));
+    writeText(w, "RemainingCost", formatCurrency(t.remainingCost));
+    writeText(w, "CostVariance", formatCurrency(t.costVariance));
     // Progress anchors. MS Project pins a started task at its ActualStart (and
     // ActualFinish once complete); the Stop/Resume pair records how far actual
     // work has progressed. Without these a completed task is rescheduled to the
@@ -811,9 +1018,15 @@ void writeTask(QXmlStreamWriter &w, const schedule::Project &in, const schedule:
     if (actualFinish.isValid())
         writeText(w, "ActualFinish", formatDateTime(actualFinish));
     QDateTime stop;
-    if (pctComplete >= 100)
+    QDateTime resume;
+    bool resumeValid = false;
+    if (t.segments.size() >= 2) {
+        stop = t.segments.first().finish;
+        resume = t.segments.at(1).start;
+        resumeValid = stop.isValid() && resume > stop;
+    } else if (pctComplete >= 100) {
         stop = actualFinish;
-    else if (pctComplete > 0 && actualStart.isValid()) {
+    } else if (pctComplete > 0 && actualStart.isValid()) {
         const schedule::WorkCalendar cal(in, t.calendarUniqueId >= 0 ? t.calendarUniqueId
                                                                       : in.calendarUniqueId);
         stop = t.actualDurationMillis > 0 ? cal.addWork(actualStart, t.actualDurationMillis)
@@ -821,22 +1034,31 @@ void writeTask(QXmlStreamWriter &w, const schedule::Project &in, const schedule:
     }
     if (stop.isValid()) {
         writeText(w, "Stop", formatDateTime(stop));
-        writeText(w, "Resume", formatDateTime(stop));
-        writeText(w, "ResumeValid", QStringLiteral("0"));
+        writeText(w, "Resume", formatDateTime(resumeValid ? resume : stop));
+        writeText(w, "ResumeValid", resumeValid ? QStringLiteral("1") : QStringLiteral("0"));
     }
     writeText(w, "ActualDuration", formatIsoDuration(t.actualDurationMillis));
     writeText(w, "ActualWork", formatIsoDuration(t.actualWorkMillis));
-    writeText(w, "BCWS", formatNumber(t.evm.pv));
-    writeText(w, "BCWP", formatNumber(t.evm.ev));
-    writeText(w, "ACWP", formatNumber(t.evm.ac));
-    writeText(w, "CV", formatNumber(t.evm.cv));
-    writeText(w, "SV", formatNumber(t.evm.sv));
+    writeText(w, "BCWS", formatCurrency(t.evm.pv));
+    writeText(w, "BCWP", formatCurrency(t.evm.ev));
+    writeText(w, "PhysicalPercentComplete",
+              QString::number(qRound(t.physicalPercentComplete * 100.0)));
+    writeText(w, "EarnedValueMethod", QString::number(t.earnedValueMethod == 1 ? 1 : 0));
+    writeText(w, "ACWP", formatCurrency(t.evm.ac));
+    writeText(w, "CV", formatCurrency(t.evm.cv));
+    writeText(w, "SV", formatCurrency(t.evm.sv));
     writeText(w, "CPI", formatNumber(t.evm.cpi));
     writeText(w, "SPI", formatNumber(t.evm.spi));
-    writeText(w, "EAC", formatNumber(t.evm.eac));
+    writeText(w, "EAC", formatCurrency(t.evm.eac));
     writeText(w, "TCPI", formatNumber(t.evm.tcpi));
     if (!t.notes.isEmpty())
         writeText(w, "Notes", t.notes);
+    if (!t.hyperlink.isEmpty())
+        writeText(w, "Hyperlink", t.hyperlink);
+    if (!t.hyperlinkAddress.isEmpty())
+        writeText(w, "HyperlinkAddress", t.hyperlinkAddress);
+    if (!t.hyperlinkSubAddress.isEmpty())
+        writeText(w, "HyperlinkSubAddress", t.hyperlinkSubAddress);
     for (const schedule::Baseline &b : t.baselines)
         writeBaseline(w, b);
     // Predecessor links live on the successor task in MSPDI.
@@ -864,13 +1086,22 @@ void writeResource(QXmlStreamWriter &w, const schedule::Resource &res)
         writeText(w, "Name", res.name);
     if (!res.initials.isEmpty())
         writeText(w, "Initials", res.initials);
+    writeText(w, "Type", res.type == schedule::Resource::Type::Work
+                              ? QStringLiteral("1") : QStringLiteral("0"));
+    if (!res.materialLabel.isEmpty())
+        writeText(w, "MaterialLabel", res.materialLabel);
     writeText(w, "MaxUnits", formatNumber(res.maxUnits));
     if (res.calendarUniqueId >= 0)
         writeText(w, "CalendarUID", QString::number(res.calendarUniqueId));
-    writeText(w, "Cost", formatNumber(res.cost));
-    writeText(w, "ActualCost", formatNumber(res.actualCost));
-    writeText(w, "RemainingCost", formatNumber(res.remainingCost));
-    writeText(w, "CostVariance", formatNumber(res.costVariance));
+    writeText(w, "Cost", formatCurrency(res.cost));
+    writeText(w, "ActualCost", formatCurrency(res.actualCost));
+    writeText(w, "RemainingCost", formatCurrency(res.remainingCost));
+    writeText(w, "CostVariance", formatCurrency(res.costVariance));
+    writeText(w, "IsCostResource", res.type == schedule::Resource::Type::Cost
+                                           ? QStringLiteral("1") : QStringLiteral("0"));
+    writeText(w, "IsBudget", res.budget ? QStringLiteral("1") : QStringLiteral("0"));
+    if (res.budgetCost != 0.0) writeText(w, "BudgetCost", formatCurrency(res.budgetCost));
+    if (res.budgetWorkMillis != 0) writeText(w, "BudgetWork", formatIsoDuration(res.budgetWorkMillis));
     if (!res.notes.isEmpty())
         writeText(w, "Notes", res.notes);
     for (const schedule::Baseline &b : res.baselines)
@@ -897,11 +1128,11 @@ void writeResource(QXmlStreamWriter &w, const schedule::Resource &res)
             if (cr.endDate.isValid())
                 writeText(w, "RatesTo", formatDateTime(cr.endDate));
             writeText(w, "RateTable", QString::number(cr.table));
-            writeText(w, "StandardRate", formatNumber(cr.standardRate));
+            writeText(w, "StandardRate", formatCurrency(cr.standardRate));
             writeText(w, "StandardRateFormat", QString::number(cr.standardRateUnit));
-            writeText(w, "OvertimeRate", formatNumber(cr.overtimeRate));
+            writeText(w, "OvertimeRate", formatCurrency(cr.overtimeRate));
             writeText(w, "OvertimeRateFormat", QString::number(cr.overtimeRateUnit));
-            writeText(w, "CostPerUse", formatNumber(cr.costPerUse));
+            writeText(w, "CostPerUse", formatCurrency(cr.costPerUse));
             w.writeEndElement();
         }
         w.writeEndElement();
@@ -916,26 +1147,61 @@ void writeAssignment(QXmlStreamWriter &w, const schedule::Assignment &a)
     writeText(w, "UID", QString::number(a.uniqueId));
     writeText(w, "TaskUID", QString::number(a.taskUniqueId));
     writeText(w, "ResourceUID", QString::number(a.resourceUniqueId));
-    writeText(w, "ActualCost", formatNumber(a.actualCost));
+    writeText(w, "IsBudget", a.budget ? QStringLiteral("1") : QStringLiteral("0"));
+    if (a.budgetCost != 0.0)
+        writeText(w, "BudgetCost", formatCurrency(a.budgetCost));
+    if (a.budgetWorkMillis != 0)
+        writeText(w, "BudgetWork", formatIsoDuration(a.budgetWorkMillis));
+    writeText(w, "ActualCost", formatCurrency(a.actualCost));
     writeText(w, "ActualWork", formatIsoDuration(a.actualWorkMillis));
-    writeText(w, "Cost", formatNumber(a.cost));
-    writeText(w, "CostVariance", formatNumber(a.costVariance));
+    writeText(w, "ActualOvertimeCost", formatCurrency(a.actualOvertimeCost));
+    writeText(w, "ActualOvertimeWork", formatIsoDuration(a.actualOvertimeWorkMillis));
+    writeText(w, "Cost", formatCurrency(a.cost));
+    writeText(w, "CostRateTable", QString::number(a.costRateTable));
+    writeText(w, "RateScale", QString::number(a.variableRateUnits));
+    writeText(w, "CostVariance", formatCurrency(a.costVariance));
+    writeText(w, "OvertimeCost", formatCurrency(a.overtimeCost));
+    writeText(w, "OvertimeWork", formatIsoDuration(a.overtimeWorkMillis));
     writeText(w, "Delay", QString::number(a.delayMillis / 6000));
     if (a.finish.isValid())
         writeText(w, "Finish", formatDateTime(a.finish));
+    writeText(w, "HasFixedRateUnits", a.variableRateUnits == 0
+                                          ? QStringLiteral("1")
+                                          : QStringLiteral("0"));
     writeText(w, "LevelingDelay", QString::number(a.levelingDelayMillis / 6000));
     writeText(w, "LevelingDelayFormat", QStringLiteral("7"));
     if (!a.notes.isEmpty())
         writeText(w, "Notes", a.notes);
-    writeText(w, "RemainingCost", formatNumber(a.remainingCost));
+    writeText(w, "RemainingCost", formatCurrency(a.remainingCost));
+    writeText(w, "RemainingOvertimeCost", formatCurrency(a.remainingOvertimeCost));
+    writeText(w, "RemainingOvertimeWork", formatIsoDuration(a.remainingOvertimeWorkMillis));
     writeText(w, "RemainingWork", formatIsoDuration(a.remainingWorkMillis));
     if (a.start.isValid())
         writeText(w, "Start", formatDateTime(a.start));
+    if (a.stop.isValid())
+        writeText(w, "Stop", formatDateTime(a.stop));
+    if (a.resume.isValid())
+        writeText(w, "Resume", formatDateTime(a.resume));
     writeText(w, "Units", formatNumber(a.units));
     writeText(w, "Work", formatIsoDuration(a.workMillis));
+    writeText(w, "WorkContour", QString::number(qBound(0, a.workContour, 8)));
     for (const schedule::Baseline &b : a.baselines)
         writeBaseline(w, b);
     writeExtendedAttributes(w, a.customFields);
+    for (const schedule::TimephasedValue &value : a.timephasedValues) {
+        w.writeStartElement(QStringLiteral("TimephasedData"));
+        writeText(w, "Type", QString::number(value.type));
+        writeText(w, "UID", QString::number(value.uniqueId));
+        if (value.start.isValid())
+            writeText(w, "Start", formatDateTime(value.start));
+        if (value.finish.isValid())
+            writeText(w, "Finish", formatDateTime(value.finish));
+        writeText(w, "Unit", QString::number(value.unit));
+        if (value.baselineNumber != 0)
+            writeText(w, "BaselineNumber", QString::number(value.baselineNumber));
+        writeText(w, "Value", value.value);
+        w.writeEndElement();
+    }
     w.writeEndElement();
 }
 
@@ -944,13 +1210,20 @@ void writeAssignment(QXmlStreamWriter &w, const schedule::Assignment &a)
 // import. (The reader ignores this block; entity values carry the data.)
 void writeExtendedAttributeDefs(QXmlStreamWriter &w, const schedule::Project &p)
 {
-    QHash<int, QString> defs;   // fieldId -> name, in first-seen order via a list
+    QHash<int, schedule::CustomField> defs;
     QList<int> order;
     auto collect = [&](const QList<schedule::CustomField> &fields) {
         for (const schedule::CustomField &cf : fields) {
             if (!defs.contains(cf.fieldId)) {
-                defs.insert(cf.fieldId, cf.name);
+                defs.insert(cf.fieldId, cf);
                 order.append(cf.fieldId);
+            } else if (!cf.formula.isEmpty() || !cf.lookupValues.isEmpty()
+                       || !cf.graphicalIndicators.isEmpty()) {
+                schedule::CustomField &stored = defs[cf.fieldId];
+                if (!cf.name.isEmpty()) stored.name = cf.name;
+                if (!cf.formula.isEmpty()) stored.formula = cf.formula;
+                if (!cf.lookupValues.isEmpty()) stored.lookupValues = cf.lookupValues;
+                if (!cf.graphicalIndicators.isEmpty()) stored.graphicalIndicators = cf.graphicalIndicators;
             }
         }
     };
@@ -960,14 +1233,32 @@ void writeExtendedAttributeDefs(QXmlStreamWriter &w, const schedule::Project &p)
         collect(r.customFields);
     for (const schedule::Assignment &a : p.assignments)
         collect(a.customFields);
+    collect(p.customFieldDefinitions);
     if (order.isEmpty())
         return;
     w.writeStartElement(QStringLiteral("ExtendedAttributes"));
     for (int fieldId : order) {
         w.writeStartElement(QStringLiteral("ExtendedAttribute"));
         writeText(w, "FieldID", QString::number(fieldId));
-        if (!defs[fieldId].isEmpty())
-            writeText(w, "FieldName", defs[fieldId]);
+        const schedule::CustomField &def = defs[fieldId];
+        if (!def.name.isEmpty()) writeText(w, "FieldName", def.name);
+        if (!def.formula.isEmpty()) writeText(w, "Formula", def.formula);
+        if (!def.lookupValues.isEmpty()) {
+            w.writeStartElement(QStringLiteral("ValueList"));
+            for (const QString &value : def.lookupValues) writeText(w, "Value", value);
+            w.writeEndElement();
+        }
+        if (!def.graphicalIndicators.isEmpty()) {
+            w.writeStartElement(QStringLiteral("GraphicalIndicators"));
+            for (const auto &rule : def.graphicalIndicators) {
+                w.writeStartElement(QStringLiteral("GraphicalIndicator"));
+                writeText(w, "Comparison", rule.comparison);
+                writeText(w, "Value", rule.value.toString());
+                writeText(w, "Indicator", rule.indicator);
+                w.writeEndElement();
+            }
+            w.writeEndElement();
+        }
         w.writeEndElement();
     }
     w.writeEndElement();
@@ -1006,10 +1297,25 @@ bool read(const QByteArray &xml, schedule::Project &out, QString *error)
             out.startDate = parseDateTime(r.readElementText());
         else if (n == u"FinishDate")
             out.finishDate = parseDateTime(r.readElementText());
+        else if (n == u"ScheduleFromStart")
+            out.scheduleFromStart = r.readElementText().toInt() != 0;
+        else if (n == u"MultipleCriticalPaths")
+            out.multipleCriticalPaths = r.readElementText().toInt() != 0;
         else if (n == u"StatusDate")
             out.statusDate = parseDateTime(r.readElementText());
         else if (n == u"CalendarUID")
             out.calendarUniqueId = r.readElementText().toInt();
+        else if (n == u"ExtendedAttributes") {
+            while (r.readNextStartElement()) {
+                if (r.name() == u"ExtendedAttribute")
+                    out.customFieldDefinitions.append(parseExtendedAttributeDefinition(r));
+                else r.skipCurrentElement();
+            }
+        }
+        else if (n == u"BudgetCost")
+            out.budgetCost = parseCurrency(r.readElementText());
+        else if (n == u"BudgetWork")
+            out.budgetWorkMillis = parseIsoDuration(r.readElementText());
         else if (n == u"Calendars") {
             while (r.readNextStartElement()) {
                 if (r.name() == u"Calendar")
@@ -1049,6 +1355,27 @@ bool read(const QByteArray &xml, schedule::Project &out, QString *error)
                          .arg(r.lineNumber()).arg(r.errorString());
         return false;
     }
+    for (schedule::Task &task : out.tasks) {
+        for (const schedule::CustomField &definition : out.customFieldDefinitions) {
+            auto it = std::find_if(task.customFields.begin(), task.customFields.end(),
+                [&](const schedule::CustomField &field) { return field.fieldId == definition.fieldId; });
+            if (it == task.customFields.end()) {
+                if (!definition.formula.isEmpty()) task.customFields.append(definition);
+            } else {
+                it->formula = definition.formula;
+                it->lookupValues = definition.lookupValues;
+                it->graphicalIndicators = definition.graphicalIndicators;
+                if (!definition.name.isEmpty()) it->name = definition.name;
+            }
+        }
+    }
+    out.customFieldDefinitions.erase(
+        std::remove_if(out.customFieldDefinitions.begin(), out.customFieldDefinitions.end(),
+            [](const schedule::CustomField &field) {
+                return field.formula.isEmpty() && field.lookupValues.isEmpty()
+                    && field.graphicalIndicators.isEmpty();
+            }), out.customFieldDefinitions.end());
+    schedule::CustomFieldLogic::recalculate(out);
     return true;
 }
 
@@ -1078,7 +1405,10 @@ QByteArray write(const schedule::Project &original, QString *error)
         writeText(w, "Title", in.title);
     if (!in.author.isEmpty())
         writeText(w, "Author", in.author);
-    writeText(w, "ScheduleFromStart", QStringLiteral("1"));
+    writeText(w, "ScheduleFromStart", in.scheduleFromStart ? QStringLiteral("1")
+                                                            : QStringLiteral("0"));
+    writeText(w, "MultipleCriticalPaths", in.multipleCriticalPaths
+              ? QStringLiteral("1") : QStringLiteral("0"));
     if (in.startDate.isValid())
         writeText(w, "StartDate", formatDateTime(in.startDate));
     if (in.finishDate.isValid())
@@ -1091,6 +1421,8 @@ QByteArray write(const schedule::Project &original, QString *error)
     }
     if (in.calendarUniqueId >= 0)
         writeText(w, "CalendarUID", QString::number(in.calendarUniqueId));
+    if (in.budgetCost != 0.0) writeText(w, "BudgetCost", formatCurrency(in.budgetCost));
+    if (in.budgetWorkMillis != 0) writeText(w, "BudgetWork", formatIsoDuration(in.budgetWorkMillis));
 
     // Time defaults, derived from the project calendar's first working weekday.
     // Without these MS Project falls back to its own settings and re-derives

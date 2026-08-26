@@ -23,7 +23,8 @@ private slots:
 
 private:
     struct XmlTask { int id = -1; int outline = -1; int percent = -1; int milestone = -1; int summary = -1;
-                     int constraintType = -1; QString wbs; bool wbsSeen = false; };
+                     int constraintType = -1; QString wbs; bool wbsSeen = false;
+                     QString hyperlink, hyperlinkAddress, hyperlinkSubAddress; };
     static QHash<int, XmlTask> tasksFromXml(const QString &xmlPath);
 };
 
@@ -51,6 +52,9 @@ QHash<int, TstTaskFieldsOracle::XmlTask> TstTaskFieldsOracle::tasksFromXml(const
             else if (inTask && n == u"Summary" && cur.summary < 0) cur.summary = xml.readElementText().toInt();
             else if (inTask && n == u"ConstraintType" && cur.constraintType < 0) cur.constraintType = xml.readElementText().toInt();
             else if (inTask && n == u"WBS" && !cur.wbsSeen) { cur.wbs = xml.readElementText(); cur.wbsSeen = true; }
+            else if (inTask && n == u"Hyperlink") cur.hyperlink = xml.readElementText();
+            else if (inTask && n == u"HyperlinkAddress") cur.hyperlinkAddress = xml.readElementText();
+            else if (inTask && n == u"HyperlinkSubAddress") cur.hyperlinkSubAddress = xml.readElementText();
         } else if (xml.isEndElement()) {
             if (xml.name() == u"Task") { if (uid >= 0) out.insert(uid, cur); inTask = false; }
             else if (xml.name() == u"Tasks") inTasks = false;
@@ -100,6 +104,9 @@ void TstTaskFieldsOracle::fieldsMatchXml()
         if ((d->summary ? 1 : 0) == it.value().summary) ++smOk;
         if (d->constraintType == it.value().constraintType) ++ctOk;
         if (d->wbs == it.value().wbs) ++wbsOk;
+        QCOMPARE(d->hyperlink, it.value().hyperlink);
+        QCOMPARE(d->hyperlinkAddress, it.value().hyperlinkAddress);
+        QCOMPARE(d->hyperlinkSubAddress, it.value().hyperlinkSubAddress);
     }
     QVERIFY(n > 0);
     qInfo().noquote() << QFileInfo(mpp).fileName()

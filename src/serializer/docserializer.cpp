@@ -10,6 +10,7 @@
 #include "codec/fielddecoders.h"
 #include "codec/fieldmap.h"
 #include "codec/mppfieldids.h"
+#include "codec/mpp14timephased.h"
 #include "codec/propsreader.h"
 #include "codec/streamquartet.h"
 #include "codec/viewformat.h"
@@ -39,6 +40,14 @@ constexpr quint16 kFieldCustom = 11;
 constexpr quint16 kFieldCostRates = 12;
 constexpr quint16 kFieldCalData = 13;   // calendar working times + exceptions
 constexpr quint16 kFieldTaskExtra = 14; // task actuals + earned-value metrics
+constexpr quint16 kFieldAssignmentExtra = 15; // rate table, material scale, contour
+constexpr quint16 kFieldHyperlink = 16;
+constexpr quint16 kFieldHyperlinkAddress = 17;
+constexpr quint16 kFieldHyperlinkSubAddress = 18;
+constexpr quint16 kFieldResourceExtra = 19;
+constexpr quint16 kFieldTimephased = 20;
+constexpr quint32 kCalendarRecurrenceMarker = 0x52454358; // XCER
+constexpr quint32 kCustomMetadataMarker = 0x444D4643;    // CFMD
 
 // ---- fixed-record packing -------------------------------------------------
 // These are the scaffold's own record layouts, NOT the real MPP layouts.
@@ -140,6 +149,9 @@ QByteArray packTaskExtra(const schedule::Task &t)
     putI64(b, t.levelingDelayMillis);
     putU8(b, t.active ? 1 : 0);   // appended; older blobs default active=true on read
     putI32(b, t.barColor);        // per-task bar colour (kAutomatic = -1)
+    putU8(b, t.ignoreResourceCalendar ? 1 : 0);
+    putU16(b, encodePercent(t.physicalPercentComplete));
+    putU16(b, static_cast<quint16>(t.earnedValueMethod == 1 ? 1 : 0));
     return b;
 }
 
@@ -180,10 +192,21 @@ void unpackTaskExtra(const QByteArray &b, schedule::Task &t)
     quint32 bc = 0;
     if (readU32(b, o, &bc))
         t.barColor = static_cast<qint32>(bc);
+    o += 4;
+    if (o < b.size())
+        t.ignoreResourceCalendar = b.at(o) != 0;
+    o += 1;
+    if (readU16(b, o, &u16v))
+        t.physicalPercentComplete = decodePercent(u16v);
+    o += 2;
+    if (readU16(b, o, &u16v))
+        t.earnedValueMethod = u16v == 1 ? 1 : 0;
 }
 
 // Value tags for a custom field's QVariant.
 enum CustomTag : quint8 { TagString = 0, TagDouble = 1, TagI64 = 2, TagBool = 3, TagDate = 4 };
+void putUtf16(QByteArray &b, const QString &s);
+QString getUtf16(const QByteArray &b, int &o);
 
 QByteArray packCustom(const QList<schedule::CustomField> &list)
 {
@@ -209,6 +232,18 @@ QByteArray packCustom(const QList<schedule::CustomField> &list)
         case QMetaType::Bool:      putU8(b, TagBool);   putU8(b, c.value.toBool() ? 1 : 0); break;
         case QMetaType::QDateTime: putU8(b, TagDate);   putU32(b, encodeTimestampSeconds(c.value.toDateTime())); break;
         default:                   putU8(b, TagString); putU32(b, 0); break;
+        }
+    }
+    putU32(b, kCustomMetadataMarker);
+    putU32(b, static_cast<quint32>(list.size()));
+    for (const schedule::CustomField &c : list) {
+        putUtf16(b, c.formula);
+        putU32(b, static_cast<quint32>(c.lookupValues.size()));
+        for (const QString &value : c.lookupValues) putUtf16(b, value);
+        putU32(b, static_cast<quint32>(c.graphicalIndicators.size()));
+        for (const auto &rule : c.graphicalIndicators) {
+            putUtf16(b, rule.comparison); putUtf16(b, rule.value.toString());
+            putUtf16(b, rule.indicator);
         }
     }
     return b;
@@ -313,6 +348,13 @@ QByteArray packCalData(const QList<QList<schedule::TimeRange>> &hours, const QLi
         putUtf16(b, e.name);
         putTimeRanges(b, e.workingTimes);
     }
+    putU32(b, kCalendarRecurrenceMarker);
+    putU32(b, static_cast<quint32>(exc.size()));
+    for (const schedule::CalendarException &e : exc) {
+        putU8(b, static_cast<quint8>(e.recurrence)); putI32(b, e.interval);
+        putU8(b, e.weekDayMask); putI32(b, e.dayOfMonth); putI32(b, e.month);
+        putI32(b, e.weekPosition); putI32(b, e.occurrences);
+    }
     return b;
 }
 
@@ -340,6 +382,22 @@ void unpackCalData(const QByteArray &b, QList<QList<schedule::TimeRange>> *hours
         e.name = getUtf16(b, o);
         e.workingTimes = getTimeRanges(b, o);
         exc->append(e);
+    }
+    quint32 marker = 0, count = 0;
+    if (readU32(b, o, &marker) && marker == kCalendarRecurrenceMarker
+        && readU32(b, o + 4, &count)) {
+        o += 8;
+        for (quint32 i = 0; i < count && i < quint32(exc->size()); ++i) {
+            if (o >= b.size()) break;
+            auto &e = (*exc)[int(i)];
+            e.recurrence = static_cast<schedule::CalendarException::Recurrence>(quint8(b.at(o++)));
+            qint32 v = 0; if (readI32(b,o,&v)) e.interval=v; o+=4;
+            if (o < b.size()) e.weekDayMask=quint8(b.at(o++));
+            if (readI32(b,o,&v)) e.dayOfMonth=v; o+=4;
+            if (readI32(b,o,&v)) e.month=v; o+=4;
+            if (readI32(b,o,&v)) e.weekPosition=v; o+=4;
+            if (readI32(b,o,&v)) e.occurrences=v; o+=4;
+        }
     }
 }
 
@@ -379,6 +437,20 @@ QList<schedule::CustomField> unpackCustom(const QByteArray &b)
         default: o = b.size(); break;
         }
         out.append(c);
+    }
+    quint32 marker = 0, count = 0;
+    if (readU32(b, o, &marker) && marker == kCustomMetadataMarker
+        && readU32(b, o + 4, &count)) {
+        o += 8;
+        for (quint32 i = 0; i < count && i < quint32(out.size()); ++i) {
+            auto &c = out[int(i)]; c.formula = getUtf16(b,o);
+            quint32 nLookup=0; if(!readU32(b,o,&nLookup)) break; o+=4;
+            for(quint32 n=0;n<nLookup;++n)c.lookupValues.append(getUtf16(b,o));
+            quint32 nRules=0; if(!readU32(b,o,&nRules)) break; o+=4;
+            for(quint32 n=0;n<nRules;++n){ schedule::CustomField::IndicatorRule rule;
+                rule.comparison=getUtf16(b,o); rule.value=getUtf16(b,o);
+                rule.indicator=getUtf16(b,o); c.graphicalIndicators.append(rule); }
+        }
     }
     return out;
 }
@@ -496,6 +568,84 @@ schedule::Assignment unpackAssignment(const QByteArray &r)
     return a;
 }
 
+QByteArray packAssignmentExtra(const schedule::Assignment &a)
+{
+    QByteArray data;
+    putU16(data, quint16(a.costRateTable));
+    putU16(data, quint16(a.variableRateUnits));
+    putU16(data, quint16(a.workContour));
+    putI64(data, a.overtimeWorkMillis);
+    putI64(data, a.actualOvertimeWorkMillis);
+    putI64(data, a.remainingOvertimeWorkMillis);
+    putDouble(data, a.overtimeCost);
+    putDouble(data, a.actualOvertimeCost);
+    putDouble(data, a.remainingOvertimeCost);
+    putU8(data, a.budget ? 1 : 0);
+    putDouble(data, a.budgetCost);
+    putI64(data, a.budgetWorkMillis);
+    return data;
+}
+
+void unpackAssignmentExtra(const QByteArray &data, schedule::Assignment &a)
+{
+    quint16 value = 0;
+    if (FieldDecoders::readU16(data, 0, &value))
+        a.costRateTable = int(value);
+    if (FieldDecoders::readU16(data, 2, &value))
+        a.variableRateUnits = int(value);
+    if (FieldDecoders::readU16(data, 4, &value))
+        a.workContour = int(value);
+    getI64(data, 6, &a.overtimeWorkMillis);
+    getI64(data, 14, &a.actualOvertimeWorkMillis);
+    getI64(data, 22, &a.remainingOvertimeWorkMillis);
+    FieldDecoders::readDouble(data, 30, &a.overtimeCost);
+    FieldDecoders::readDouble(data, 38, &a.actualOvertimeCost);
+    FieldDecoders::readDouble(data, 46, &a.remainingOvertimeCost);
+    if (data.size() > 54) a.budget = data.at(54) != 0;
+    FieldDecoders::readDouble(data, 55, &a.budgetCost);
+    getI64(data, 63, &a.budgetWorkMillis);
+}
+
+QByteArray packResourceExtra(const schedule::Resource &r)
+{
+    QByteArray data; putU8(data, quint8(r.type)); putU8(data, r.budget ? 1 : 0);
+    putDouble(data, r.budgetCost); putI64(data, r.budgetWorkMillis);
+    putUtf16(data, r.materialLabel); return data;
+}
+
+void unpackResourceExtra(const QByteArray &data, schedule::Resource &r)
+{
+    if (!data.isEmpty()) r.type = static_cast<schedule::Resource::Type>(quint8(data.at(0)));
+    if (data.size() > 1) r.budget = data.at(1) != 0;
+    FieldDecoders::readDouble(data,2,&r.budgetCost); getI64(data,10,&r.budgetWorkMillis);
+    int o=18; if(o<data.size()) r.materialLabel=getUtf16(data,o);
+}
+
+QByteArray packTimephased(const QList<schedule::TimephasedValue> &values)
+{
+    QByteArray data; putU32(data,quint32(values.size()));
+    for(const auto &v:values){ putI32(data,v.type); putI32(data,v.uniqueId);
+        putU32(data,FieldDecoders::encodeTimestampSeconds(v.start));
+        putU32(data,FieldDecoders::encodeTimestampSeconds(v.finish));
+        putI32(data,v.unit); putI32(data,v.baselineNumber); putUtf16(data,v.value); }
+    return data;
+}
+
+QList<schedule::TimephasedValue> unpackTimephased(const QByteArray &data)
+{
+    QList<schedule::TimephasedValue> out; quint32 count=0;
+    if(!FieldDecoders::readU32(data,0,&count))return out; int o=4;
+    for(quint32 n=0;n<count;++n){ schedule::TimephasedValue v; qint32 i=0; quint32 u=0;
+        if(!FieldDecoders::readI32(data,o,&i))break;v.type=i;o+=4;
+        FieldDecoders::readI32(data,o,&i);v.uniqueId=i;o+=4;
+        FieldDecoders::readU32(data,o,&u);v.start=FieldDecoders::decodeTimestampSeconds(u);o+=4;
+        FieldDecoders::readU32(data,o,&u);v.finish=FieldDecoders::decodeTimestampSeconds(u);o+=4;
+        FieldDecoders::readI32(data,o,&i);v.unit=i;o+=4;
+        FieldDecoders::readI32(data,o,&i);v.baselineNumber=i;o+=4;
+        v.value=getUtf16(data,o); out.append(v); }
+    return out;
+}
+
 QByteArray packRelation(const schedule::Relation &r)
 {
     QByteArray b;
@@ -553,6 +703,9 @@ QByteArray serializeProps(const schedule::Project &p, FormatVersion v)
     putU32(b, FieldDecoders::encodeTimestampSeconds(p.startDate));
     putU32(b, FieldDecoders::encodeTimestampSeconds(p.finishDate));
     putU32(b, FieldDecoders::encodeTimestampSeconds(p.statusDate));
+    putU8(b, p.scheduleFromStart ? 1 : 0);   // appended for scaffold compatibility
+    putU8(b, p.multipleCriticalPaths ? 1 : 0);
+    putDouble(b, p.budgetCost); putI64(b, p.budgetWorkMillis);
     return b;
 }
 
@@ -570,6 +723,10 @@ void deserializeProps(const QByteArray &b, schedule::Project &p)
     if (readU32(b, off, &u)) { p.startDate = decodeTimestampSeconds(u); off += 4; }
     if (readU32(b, off, &u)) { p.finishDate = decodeTimestampSeconds(u); off += 4; }
     if (readU32(b, off, &u)) { p.statusDate = decodeTimestampSeconds(u); off += 4; }
+    if (off < b.size()) p.scheduleFromStart = b.at(off++) != 0;
+    if (off < b.size()) p.multipleCriticalPaths = b.at(off++) != 0;
+    if (FieldDecoders::readDouble(b,off,&p.budgetCost)) off+=8;
+    getI64(b,off,&p.budgetWorkMillis);
 }
 
 StreamQuartet::Streams readQuartet(const CompoundFile &cf, const QString &entity)
@@ -598,6 +755,7 @@ struct TaskFixedOffsets {
     int start = -1;      // index 35  (block 0, auto-scheduled)
     int finish = -1;     // index 36  (block 0, auto-scheduled)
     int duration = -1;   // index 29  (block 0, mode-independent)
+    int durationFormat = -1; // index 181 (block 0, actual/scheduled duration units)
     int start1 = -1;     // index 1283 (block 1 / Fixed2Data, manual-scheduled)
     int finish1 = -1;    // index 1284 (block 1 / Fixed2Data, manual-scheduled)
     int id = -1;         // index 23  (block 0)
@@ -642,6 +800,7 @@ TaskFixedOffsets parseTaskFixedOffsets(const QByteArray &fm)
             case 35: setOnce(off.start, dataBlockOffset); break;
             case 36: setOnce(off.finish, dataBlockOffset); break;
             case 29: setOnce(off.duration, dataBlockOffset); break;
+            case 181: setOnce(off.durationFormat, dataBlockOffset); break;
             case 23: setOnce(off.id, dataBlockOffset); break;
             case 32: setOnce(off.percent, dataBlockOffset); break;
             case 249: setOnce(off.outline, dataBlockOffset); break;
@@ -694,7 +853,9 @@ using FieldMap::fieldMapBytes;
 
 // Var-data keys for the NOTES field per entity (MPXJ MPP*Field NOTES index).
 constexpr quint16 kTaskNotesKey = 15;
+constexpr quint16 kTaskHyperlinkKey = 215;
 constexpr quint16 kResourceNotesKey = 20;
+constexpr quint16 kResourceMaterialLabelKey = 299;
 constexpr quint16 kAssignmentNotesKey = 71;
 
 // Notes are stored as an 8-bit (Latin1), NUL-terminated RTF string in var data
@@ -711,6 +872,31 @@ QString readNotesRtf(const BkndVarData &var, quint32 uid, quint16 key)
     return QString::fromLatin1(blob.constData(), len);
 }
 
+void readTaskHyperlink(const BkndVarData &var, quint32 uid, schedule::Task *task)
+{
+    const QByteArray blob = var.blobFor(uid, kTaskHyperlinkKey);
+    quint32 count = 0;
+    if (!task || blob.size() < 12 || !FieldDecoders::readU32(blob, 8, &count))
+        return;
+    int pos = 12;
+    for (quint32 i = 0; i < count && pos + 12 <= blob.size(); ++i) {
+        quint32 byteLength = 0, property = 0;
+        if (!FieldDecoders::readU32(blob, pos, &byteLength)
+            || !FieldDecoders::readU32(blob, pos + 4, &property)
+            || byteLength > quint32(blob.size() - pos - 12))
+            return;
+        QString value = QString::fromUtf16(
+            reinterpret_cast<const char16_t *>(blob.constData() + pos + 12),
+            int(byteLength / 2));
+        if (value.endsWith(QChar(u'\0')))
+            value.chop(1);
+        if (property == 0) task->hyperlink = value;
+        else if (property == 1) task->hyperlinkAddress = value;
+        else if (property == 2) task->hyperlinkSubAddress = value;
+        pos += 12 + int(byteLength);
+    }
+}
+
 // Resource cost-rate tables A..E are var-data fields (MPXJ ResourceField.COST_RATE_*).
 constexpr quint16 kCostRateVarKey[5] = { 61, 62, 63, 64, 65 };
 
@@ -718,7 +904,8 @@ constexpr quint16 kCostRateVarKey[5] = { 61, 62, 63, 64, 65 };
 // (MPXJ LocalDateTimeHelper.END_DATE_NA = 2049-12-31 23:59.)
 inline QDateTime costRateEndNa()
 {
-    return QDateTime(QDate(2049, 12, 31), QTime(23, 59), Qt::UTC);
+    // Wall clock (LocalTime), like every decoded timestamp it is compared against.
+    return QDateTime(QDate(2049, 12, 31), QTime(23, 59));
 }
 
 // Convert a rate stored per-hour into the rate's display unit (MPXJ
@@ -794,21 +981,28 @@ constexpr quint16 kAvailabilityVarKey = 276;
 // FieldDecoders::decodeTimestampTenths (1984-01-01): empirically (checked
 // against tests/fixtures/mpp14availability.mpp + its XML oracle) they count
 // tenths-of-a-minute from 1983-12-31, the same epoch calendar exceptions use.
-inline QDateTime availabilityEpoch() { return QDateTime(QDate(1983, 12, 31), QTime(0, 0), Qt::UTC); }
+// UTC is the arithmetic base only; decoded boundaries come back as wall clock, the
+// same way FieldDecoders' timestamps do.
+inline QDateTime availabilityEpochUtc() { return QDateTime(QDate(1983, 12, 31), QTime(0, 0), Qt::UTC); }
+
+// The same instant as wall clock, for comparing against decoded boundaries.
+inline QDateTime availabilityEpoch() { return QDateTime(QDate(1983, 12, 31), QTime(0, 0)); }
 
 QDateTime decodeAvailabilityTimestamp(const QByteArray &d, int offset)
 {
     qint32 tenths = 0;
     if (!FieldDecoders::readI32(d, offset, &tenths))
         return QDateTime();
-    return availabilityEpoch().addSecs(static_cast<qint64>(tenths) * 6);
+    return FieldDecoders::wallTimeFromUtc(
+        availabilityEpochUtc().addSecs(static_cast<qint64>(tenths) * 6));
 }
 
 qint32 encodeAvailabilityTimestamp(const QDateTime &dt)
 {
     if (!dt.isValid())
         return 0;
-    return static_cast<qint32>(availabilityEpoch().secsTo(dt.toUTC()) / 6);
+    return static_cast<qint32>(
+        availabilityEpochUtc().secsTo(FieldDecoders::utcFromWallTime(dt)) / 6);
 }
 
 // Parse a resource availability-table var blob (MPXJ AvailabilityFactory): a
@@ -852,9 +1046,9 @@ using FieldMap::EntityFieldLoc;
 using FieldMap::entityFieldLocations;
 
 // Decode cost scalars, baselines and custom fields for one entity instance, using
-// the field-map locations. Fields default to absent (kAbsent) where the entity
-// lacks them. Cost/Number are plain 8-byte doubles; Work is a double in tenths of
-// a minute; dates are 4-byte MPP timestamps; durations are u32 tenths of a minute.
+// the field-map locations. Currency is an 8-byte double in hundredths; Number is
+// unscaled. Work is a double in tenths of a minute, dates are MPP timestamps,
+// and durations are u32 tenths of a minute.
 struct CostOut {
     double *cost = nullptr;
     double *fixedCost = nullptr;
@@ -876,6 +1070,9 @@ struct TaskExtraOut {
     QDateTime *deadline = nullptr; // DEADLINE (MPP timestamp)
     qint64 *workMillis = nullptr;          // WORK (double, thousandths-of-minute)
     qint64 *levelingDelayMillis = nullptr; // LEVELING_DELAY (u32 tenths-of-minute)
+    int *calendarUniqueId = nullptr;        // CALENDAR_UNIQUE_ID (u32)
+    double *physicalPercentComplete = nullptr; // PHYSICAL_PERCENT_COMPLETE (u16)
+    int *earnedValueMethod = nullptr;          // EARNED_VALUE_METHOD (u16, 0/1)
 };
 
 void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
@@ -909,6 +1106,13 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
         QByteArray src; int off = 0;
         return locate(idx, src, off) && readDouble(src, off, outv);
     };
+    auto getCurrency = [&](quint16 idx, double *outv) -> bool {
+        double raw = 0.0;
+        if (!getDouble(idx, &raw))
+            return false;
+        *outv = raw / 100.0;
+        return true;
+    };
     auto getDate = [&](quint16 idx) -> QDateTime {
         QByteArray src; int off = 0;
         return locate(idx, src, off) ? decodeMppTimestamp(src, off) : QDateTime();
@@ -928,11 +1132,11 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
         return true;
     };
 
-    if (costOut.cost)          getDouble(costFields.cost, costOut.cost);
-    if (costOut.fixedCost)     getDouble(costFields.fixedCost, costOut.fixedCost);
-    if (costOut.actualCost)    getDouble(costFields.actualCost, costOut.actualCost);
-    if (costOut.remainingCost) getDouble(costFields.remainingCost, costOut.remainingCost);
-    if (costOut.costVariance)  getDouble(costFields.costVariance, costOut.costVariance);
+    if (costOut.cost)          getCurrency(costFields.cost, costOut.cost);
+    if (costOut.fixedCost)     getCurrency(costFields.fixedCost, costOut.fixedCost);
+    if (costOut.actualCost)    getCurrency(costFields.actualCost, costOut.actualCost);
+    if (costOut.remainingCost) getCurrency(costFields.remainingCost, costOut.remainingCost);
+    if (costOut.costVariance)  getCurrency(costFields.costVariance, costOut.costVariance);
 
     // Task-only: recorded actuals + stored earned-value metrics.
     if (extra.actualStart) {
@@ -946,14 +1150,14 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
     if (extra.actualDurationMillis) getDuration(taskActual.duration, extra.actualDurationMillis);
     if (extra.actualWorkMillis)     getWork(taskActual.work, extra.actualWorkMillis);
     if (extra.evm) {
-        getDouble(taskEvm.bcwp, &extra.evm->ev);
-        getDouble(taskEvm.bcws, &extra.evm->pv);
-        getDouble(taskEvm.acwp, &extra.evm->ac);
-        getDouble(taskEvm.cv,   &extra.evm->cv);
-        getDouble(taskEvm.sv,   &extra.evm->sv);
+        getCurrency(taskEvm.bcwp, &extra.evm->ev);
+        getCurrency(taskEvm.bcws, &extra.evm->pv);
+        getCurrency(taskEvm.acwp, &extra.evm->ac);
+        getCurrency(taskEvm.cv,   &extra.evm->cv);
+        getCurrency(taskEvm.sv,   &extra.evm->sv);
         getDouble(taskEvm.cpi,  &extra.evm->cpi);
         getDouble(taskEvm.spi,  &extra.evm->spi);
-        getDouble(taskEvm.eac,  &extra.evm->eac);
+        getCurrency(taskEvm.eac,  &extra.evm->eac);
         getDouble(taskEvm.tcpi, &extra.evm->tcpi);
     }
     auto getU16 = [&](quint16 idx, int *outv) -> bool {
@@ -963,13 +1167,31 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
         *outv = static_cast<int>(u);
         return true;
     };
+    auto getU32 = [&](quint16 idx, int *outv) -> bool {
+        QByteArray src; int off = 0; quint32 u = 0;
+        if (!locate(idx, src, off) || !readU32(src, off, &u))
+            return false;
+        *outv = static_cast<int>(u);
+        return true;
+    };
     if (extra.priority) getU16(taskInfo.priority, extra.priority);
     if (extra.taskType) getU16(taskInfo.taskType, extra.taskType);
+    if (extra.physicalPercentComplete) {
+        int physical = 0;
+        if (getU16(taskInfo.physicalPercentComplete, &physical))
+            *extra.physicalPercentComplete = decodePercent(quint16(physical));
+    }
+    if (extra.earnedValueMethod) {
+        getU16(taskInfo.earnedValueMethod, extra.earnedValueMethod);
+        *extra.earnedValueMethod = *extra.earnedValueMethod == 1 ? 1 : 0;
+    }
     if (extra.deadline) {
         const QDateTime d = getDate(taskInfo.deadline);
         if (d.isValid()) *extra.deadline = d;
     }
     if (extra.workMillis) getWork(taskInfo.work, extra.workMillis);
+    if (extra.calendarUniqueId)
+        getU32(taskInfo.calendarUniqueId, extra.calendarUniqueId);
     if (extra.levelingDelayMillis
         && !getDuration(taskInfo.levelingDelay, extra.levelingDelayMillis)) {
         // Field maps commonly leave LEVELING_DELAY unassigned (META, no offset);
@@ -985,7 +1207,7 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
             schedule::Baseline b;
             b.number = n;
             bool any = false;
-            if (getDouble(bs.cost, &b.cost)) any = true;
+            if (getCurrency(bs.cost, &b.cost)) any = true;
             if (getWork(bs.work, &b.workMillis)) any = true;
             const QDateTime s = getDate(bs.start);
             if (s.isValid()) { b.start = s; any = true; }
@@ -1016,11 +1238,16 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
                 }
                 break;
             }
-            case FieldKind::Number:
-            case FieldKind::Currency: {
+            case FieldKind::Number: {
                 double v = 0.0;
                 if (readDouble(src, off, &v))
                     val = v;
+                break;
+            }
+            case FieldKind::Currency: {
+                double v = 0.0;
+                if (readDouble(src, off, &v))
+                    val = v / 100.0;
                 break;
             }
             case FieldKind::DateTime: {
@@ -1066,9 +1293,11 @@ void readRealResources(const CompoundFile &cf, schedule::Project &out, const Pro
     BkndVarData v;
     v.parse(cf.readStream({ kDataStorage, rsc, QStringLiteral("VarMeta") }),
             cf.readStream({ kDataStorage, rsc, QStringLiteral("Var2Data") }));
-    QHash<int, QString> names, initials;
+    QHash<int, QString> names, initials, materialLabels;
     for (const auto &e : v.stringsForType(1)) names.insert(int(e.uniqueId), e.value);
     for (const auto &e : v.stringsForType(2)) initials.insert(int(e.uniqueId), e.value);
+    for (const auto &e : v.stringsForType(kResourceMaterialLabelKey))
+        materialLabels.insert(int(e.uniqueId), e.value);
 
     const QByteArray fm = fieldMapBytes(props, 0x00020015u, 0x03000015u);
     const QHash<quint16, int> off = block0FixedOffsets(fm, 0x0C40);
@@ -1077,11 +1306,16 @@ void readRealResources(const CompoundFile &cf, schedule::Project &out, const Pro
     if (uidOff < 0)
         return;
 
+    const QByteArray fixedMeta =
+        cf.readStream({ kDataStorage, rsc, QStringLiteral("FixedMeta") });
+    const QByteArray fixed2Meta =
+        cf.readStream({ kDataStorage, rsc, QStringLiteral("Fixed2Meta") });
     const QVector<QByteArray> blocks = readFixedBlocks(
-        cf.readStream({ kDataStorage, rsc, QStringLiteral("FixedMeta") }),
+        fixedMeta,
         cf.readStream({ kDataStorage, rsc, QStringLiteral("FixedData") }), 37);
     QSet<int> seen;
-    for (const QByteArray &b : blocks) {
+    for (int loop = 0; loop < blocks.size(); ++loop) {
+        const QByteArray &b = blocks.at(loop);
         quint32 uid = 0;
         if (!FieldDecoders::readU32(b, uidOff, &uid) || seen.contains(int(uid)))
             continue;
@@ -1092,6 +1326,20 @@ void readRealResources(const CompoundFile &cf, schedule::Project &out, const Pro
         r.uniqueId = int(uid);
         r.name = names.value(int(uid));
         r.initials = initials.value(int(uid));
+        r.materialLabel = materialLabels.value(int(uid));
+        quint32 metaFlags = 0;
+        const int resourceTypeByte = 16 + loop * 37 + 12;
+        if (resourceTypeByte < fixedMeta.size()
+            && (quint8(fixedMeta.at(resourceTypeByte)) & 0x10u) == 0)
+            r.type = schedule::Resource::Type::Material;
+        // Project marks cost resources with bit 0x10 in the first Fixed2Meta
+        // tail byte (0x3b versus 0x2b for Work/Material resources).
+        const int fixed2Tail = 16 + loop * 51 + 8;
+        if (fixed2Tail < fixed2Meta.size()
+            && (quint8(fixed2Meta.at(fixed2Tail)) & 0x10u))
+            r.type = schedule::Resource::Type::Cost;
+        if (fixed2Tail < fixed2Meta.size())
+            r.budget = (quint8(fixed2Meta.at(fixed2Tail)) & 0x40u) != 0;
         quint32 v32 = 0;
         if (idOff >= 0 && FieldDecoders::readU32(b, idOff, &v32))
             r.id = int(v32);
@@ -1105,6 +1353,17 @@ void readRealResources(const CompoundFile &cf, schedule::Project &out, const Pro
                                MppFieldIds::resourceCost, MppFieldIds::resourceBaselines,
                                MppFieldIds::resourceCustomFields(), co,
                                &r.baselines, &r.customFields);
+        auto readResourceDouble = [&](quint16 index, double *value) {
+            const auto it = loc.constFind(index);
+            if (it == loc.constEnd()) return false;
+            const QByteArray source = it->var ? v.blobFor(uid, index) : b;
+            return FieldDecoders::readDouble(source, it->var ? 0 : it->offset, value);
+        };
+        double budgetWorkRaw = 0.0;
+        if (readResourceDouble(753, &budgetWorkRaw))
+            r.budgetWorkMillis = FieldDecoders::decodeWorkDouble(budgetWorkRaw);
+        if (readResourceDouble(754, &r.budgetCost))
+            r.budgetCost /= 100.0;
         r.notes = readNotesRtf(v, uid, kResourceNotesKey);
         for (int ti = 0; ti < 5; ++ti) {
             const QByteArray rateBlob = v.blobFor(uid, kCostRateVarKey[ti]);
@@ -1133,9 +1392,12 @@ void readRealAssignments(const CompoundFile &cf, schedule::Project &out, const P
               unitsOff = off.value(7, -1), workOff = off.value(8, -1);
     // Scheduling fields (indices pinned against the fixtures' XML exports):
     // 10 = actual work, 12 = remaining work, 20 = start, 21 = finish, 25 = delay.
-    const int actualWorkOff = off.value(10, -1), remainingWorkOff = off.value(12, -1),
+    const int actualWorkOff = off.value(10, -1),
+              remainingWorkOff = off.value(12, -1),
               startOff = off.value(20, -1), finishOff = off.value(21, -1),
-              delayOff = off.value(25, -1);
+              resumeOff = off.value(24, -1), stopOff = off.value(264, -1),
+              delayOff = off.value(25, -1), costRateTableOff = off.value(80, -1),
+              variableRateUnitsOff = off.value(270, -1);
     if (taskOff < 0 || resOff < 0)
         return;
 
@@ -1172,6 +1434,12 @@ void readRealAssignments(const CompoundFile &cf, schedule::Project &out, const P
         a.resourceUniqueId = int(resUid);
         if (unitsOff >= 0)
             a.units = readDoubleLE(b, unitsOff) / 10000.0;   // hundredths of a percent
+        quint16 rateTable = 0;
+        if (costRateTableOff >= 0
+            && FieldDecoders::readU16(b, costRateTableOff, &rateTable))
+            a.costRateTable = int(rateTable);
+        if (variableRateUnitsOff >= 0 && variableRateUnitsOff < b.size())
+            a.variableRateUnits = quint8(b.at(variableRateUnitsOff));
         // Work doubles are thousandths of a minute (decodeWorkDouble), the same
         // encoding as every other work field. (An earlier read used the tenth-of-
         // a-minute duration decode, inflating work 100x vs the XML oracle.)
@@ -1182,10 +1450,33 @@ void readRealAssignments(const CompoundFile &cf, schedule::Project &out, const P
         if (remainingWorkOff >= 0)
             a.remainingWorkMillis
                 = FieldDecoders::decodeWorkDouble(readDoubleLE(b, remainingWorkOff));
+        auto mappedWork = [&](quint16 index, qint64 *value) {
+            const auto it = loc.constFind(index);
+            if (it == loc.constEnd())
+                return;
+            QByteArray source;
+            int offset = 0;
+            if (it->block == 0) {
+                source = b;
+                offset = it->offset;
+            } else if (it->var) {
+                source = av.blobFor(quint32(a.uniqueId), index);
+            }
+            double raw = 0.0;
+            if (FieldDecoders::readDouble(source, offset, &raw))
+                *value = FieldDecoders::decodeWorkDouble(raw);
+        };
+        mappedWork(9, &a.overtimeWorkMillis);
+        mappedWork(13, &a.actualOvertimeWorkMillis);
+        mappedWork(14, &a.remainingOvertimeWorkMillis);
         if (startOff >= 0)
             a.start = FieldDecoders::decodeMppTimestamp(b, startOff);
         if (finishOff >= 0)
             a.finish = FieldDecoders::decodeMppTimestamp(b, finishOff);
+        if (resumeOff >= 0)
+            a.resume = FieldDecoders::decodeMppTimestamp(b, resumeOff);
+        if (stopOff >= 0)
+            a.stop = FieldDecoders::decodeMppTimestamp(b, stopOff);
         quint32 delayRaw = 0;
         if (delayOff >= 0 && FieldDecoders::readU32(b, delayOff, &delayRaw))
             a.delayMillis = FieldDecoders::decodeDurationTenthMinutes(
@@ -1199,7 +1490,74 @@ void readRealAssignments(const CompoundFile &cf, schedule::Project &out, const P
                                MppFieldIds::assignmentBaselines,
                                MppFieldIds::assignmentCustomFields(), co,
                                &a.baselines, &a.customFields);
+        auto readAssignmentDouble = [&](quint16 index, double *value) {
+            const auto it = loc.constFind(index);
+            if (it == loc.constEnd()) return false;
+            const QByteArray source = it->var
+                ? av.blobFor(quint32(a.uniqueId), index) : b;
+            return FieldDecoders::readDouble(source, it->var ? 0 : it->offset, value);
+        };
+        double budgetWorkRaw = 0.0;
+        if (readAssignmentDouble(669, &budgetWorkRaw))
+            a.budgetWorkMillis = FieldDecoders::decodeWorkDouble(budgetWorkRaw);
+        if (readAssignmentDouble(670, &a.budgetCost))
+            a.budgetCost /= 100.0;
+        for (const schedule::Resource &resource : out.resources)
+            if (resource.uniqueId == a.resourceUniqueId) {
+                a.budget = resource.budget;
+                break;
+            }
         a.notes = readNotesRtf(av, quint32(a.uniqueId), kAssignmentNotesKey);
+
+        int calendarUid = out.calendarUniqueId;
+        for (const schedule::Resource &resource : out.resources)
+            if (resource.uniqueId == a.resourceUniqueId
+                && resource.calendarUniqueId >= 0) {
+                calendarUid = resource.calendarUniqueId;
+                break;
+            }
+        if (calendarUid < 0)
+            for (const schedule::Task &task : out.tasks)
+                if (task.uniqueId == a.taskUniqueId && task.calendarUniqueId >= 0) {
+                    calendarUid = task.calendarUniqueId;
+                    break;
+                }
+        if (calendarUid < 0)
+            for (const schedule::Calendar &calendar : out.calendars)
+                if (calendar.name == QStringLiteral("Standard")) {
+                    calendarUid = calendar.uniqueId;
+                    break;
+                }
+        const schedule::WorkCalendar workCalendar(out, calendarUid);
+        const QByteArray remainingBlob = av.blobFor(quint32(a.uniqueId), 49);
+        a.workContour = Mpp14Timephased::decodeWorkContour(remainingBlob);
+        if (a.workContour == 0) {
+            quint16 storedContour = 0;
+            const QByteArray contourBlob = av.blobFor(quint32(a.uniqueId), 39);
+            if (FieldDecoders::readU16(contourBlob, 0, &storedContour))
+                a.workContour = qBound(0, int(storedContour), 8);
+        }
+        quint32 metaFlags = 0;
+        if (FieldDecoders::readU32(meta, 16 + loop * 34 + 8, &metaFlags)
+            && (metaFlags & 0x00040000u))
+            a.workContour = 8;
+        const QList<schedule::TimephasedValue> actual =
+            Mpp14Timephased::decodeActualWork(
+                av.blobFor(quint32(a.uniqueId), 50), a, workCalendar);
+        a.timephasedValues.append(actual);
+        a.timephasedValues.append(Mpp14Timephased::decodeActualWork(
+            av.blobFor(quint32(a.uniqueId), 51), a, workCalendar,
+            schedule::TimephasedValue::ActualOvertimeWork));
+        a.timephasedValues.append(Mpp14Timephased::decodeRemainingWork(
+            remainingBlob, a, workCalendar, actual));
+        for (int baseline = 0; baseline < MppFieldIds::kBaselineCount; ++baseline) {
+            const quint16 workKey = baseline == 0 ? 52 : quint16(282 + baseline * 9);
+            const quint16 costKey = quint16(workKey + 1);
+            a.timephasedValues.append(Mpp14Timephased::decodeBaselineWork(
+                av.blobFor(quint32(a.uniqueId), workKey), a.uniqueId, baseline));
+            a.timephasedValues.append(Mpp14Timephased::decodeBaselineCost(
+                av.blobFor(quint32(a.uniqueId), costKey), a.uniqueId, baseline));
+        }
         out.assignments.append(a);
     }
 }
@@ -1349,6 +1707,61 @@ void parseCalendarData(const QByteArray &blob, bool isBaseCalendar,
                 ex.fromDate = QDate(1983, 12, 31).addDays(fromDays);
             if (toDays != 0xFFFF)
                 ex.toDate = QDate(1983, 12, 31).addDays(toDays);
+            quint16 recurrenceType = 1, occurrences = 0;
+            readU16(blob, offset + 4, &occurrences);
+            readU16(blob, offset + 72, &recurrenceType);
+            ex.occurrences = occurrences;
+            auto modelDayMask = [](int projectDay) -> quint8 {
+                // Project ordinal is Sun=1, Mon=2..Sat=7; model is Mon bit0..Sun bit6.
+                const int index = projectDay == 1 ? 6 : projectDay - 2;
+                return index >= 0 && index < 7 ? quint8(1u << index) : quint8(0);
+            };
+            switch (recurrenceType) {
+            case 7: {
+                ex.recurrence = schedule::CalendarException::Recurrence::Daily;
+                quint16 interval = 1; readU16(blob, offset + 76, &interval);
+                ex.interval = qMax(1, int(interval));
+                break;
+            }
+            case 6: {
+                ex.recurrence = schedule::CalendarException::Recurrence::Weekly;
+                const quint8 nativeDays = quint8(blob.at(offset + 76));
+                ex.weekDayMask = quint8(((nativeDays >> 1) & 0x3f)
+                                        | ((nativeDays & 0x01) << 6));
+                quint16 interval = 1; readU16(blob, offset + 78, &interval);
+                ex.interval = qMax(1, int(interval));
+                break;
+            }
+            case 4:
+                ex.recurrence = schedule::CalendarException::Recurrence::MonthlyByDate;
+                ex.dayOfMonth = quint8(blob.at(offset + 76));
+                ex.interval = qMax(1, int(quint8(blob.at(offset + 78))));
+                break;
+            case 5: {
+                ex.recurrence = schedule::CalendarException::Recurrence::MonthlyByPosition;
+                ex.weekPosition = int(quint8(blob.at(offset + 76))) + 1;
+                ex.weekDayMask = modelDayMask(int(quint8(blob.at(offset + 77))) - 2);
+                quint16 interval = 1; readU16(blob, offset + 78, &interval);
+                ex.interval = qMax(1, int(interval));
+                break;
+            }
+            case 2:
+                ex.recurrence = schedule::CalendarException::Recurrence::YearlyByDate;
+                ex.month = int(quint8(blob.at(offset + 76))) + 1;
+                ex.dayOfMonth = quint8(blob.at(offset + 77));
+                break;
+            case 3:
+                ex.recurrence = schedule::CalendarException::Recurrence::YearlyByPosition;
+                ex.month = int(quint8(blob.at(offset + 76))) + 1;
+                ex.weekPosition = int(quint8(blob.at(offset + 77))) + 1;
+                ex.weekDayMask = modelDayMask(int(quint8(blob.at(offset + 78))) - 2);
+                break;
+            default:
+                // Type 1 is Project's one-off date-range encoding.
+                ex.recurrence = schedule::CalendarException::Recurrence::None;
+                ex.occurrences = 0;
+                break;
+            }
             readU16(blob, offset + 14, &periodCount);
             ex.working = periodCount != 0;
             for (int p = 0; p < periodCount; ++p) {
@@ -1606,6 +2019,9 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
             quint16 u16v = 0;
             if (off.duration >= 0 && FieldDecoders::readU32(b0, off.duration, &u32v))
                 t.durationMillis = FieldDecoders::decodeDurationTenthMinutes(static_cast<qint32>(u32v));
+            if (off.durationFormat >= 0
+                && FieldDecoders::readU16(b0, off.durationFormat, &u16v))
+                t.durationFormat = schedule::Duration::normalizeUnit(u16v);
             if (off.id >= 0 && FieldDecoders::readU32(b0, off.id, &u32v))
                 t.id = static_cast<int>(u32v);
             if (off.percent >= 0 && FieldDecoders::readU16(b0, off.percent, &u16v))
@@ -1629,6 +2045,11 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
             if (FieldDecoders::readU32(fixedMeta, 16 + loop * 47 + 13, &metaFlags))
                 t.effortDriven = (metaFlags & 0x08u) != 0;
 
+            // IGNORE_RESOURCE_CALENDAR is Project 2013/2016 FixedMeta byte 17,
+            // mask 0x20 (MPXJ PROJECT2013/2016_TASK_META_DATA_BIT_FLAGS).
+            if (FieldDecoders::readU32(fixedMeta, 16 + loop * 47 + 17, &metaFlags))
+                t.ignoreResourceCalendar = (metaFlags & 0x20u) != 0;
+
             // TASK_MODE (manually scheduled) is a bit flag in the per-task
             // Fixed2Meta item: int at offset 8, mask 0x80 (Project 2013/2016;
             // 2010 used mask 0x08). MPXJ *_TASK_META_DATA2_BIT_FLAGS.
@@ -1649,11 +2070,15 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
             ex.deadline = &t.deadline;
             ex.workMillis = &t.workMillis;
             ex.levelingDelayMillis = &t.levelingDelayMillis;
+            ex.calendarUniqueId = &t.calendarUniqueId;
+            ex.physicalPercentComplete = &t.physicalPercentComplete;
+            ex.earnedValueMethod = &t.earnedValueMethod;
             fillCostBaselineCustom(taskLoc, b0, b1, taskVars, uid32, MppFieldIds::kTaskHigh,
                                    MppFieldIds::taskCost, MppFieldIds::taskBaselines,
                                    MppFieldIds::taskCustomFields(), co,
                                    &t.baselines, &t.customFields, ex);
             t.notes = readNotesRtf(taskVars, uid32, kTaskNotesKey);
+            readTaskHyperlink(taskVars, uid32, &t);
         }
 
         // Drop tasks that never received a live FixedData row: their names
@@ -1697,7 +2122,52 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
     }
 
     readRealResources(cf, out, props);
+    // Resource calendars must be linked before assignment timephased streams
+    // are expanded into dated buckets.
+    readRealCalendars(cf, out);
     readRealAssignments(cf, out, props);
+    // Microsoft Project represents split geometry through gaps in assignment
+    // work. Reconstruct Task::segments by merging buckets separated only by
+    // normal non-working time and retaining gaps that contain available work.
+    for (schedule::Task &task : out.tasks) {
+        QList<schedule::TaskSegment> buckets;
+        for (const schedule::Assignment &assignment : out.assignments)
+            if (assignment.taskUniqueId == task.uniqueId)
+                for (const schedule::TimephasedValue &value : assignment.timephasedValues)
+                    if ((value.type == schedule::TimephasedValue::ActualWork
+                         || value.type == schedule::TimephasedValue::RemainingWork)
+                        && value.start.isValid() && value.finish > value.start)
+                        buckets.append({value.start, value.finish});
+        std::sort(buckets.begin(), buckets.end(), [](const auto &left, const auto &right) {
+            return left.start < right.start;
+        });
+        const int calendarUid = task.calendarUniqueId >= 0
+            ? task.calendarUniqueId : out.calendarUniqueId;
+        const schedule::WorkCalendar calendar(out, calendarUid);
+        QList<schedule::TaskSegment> merged;
+        for (const schedule::TaskSegment &bucket : buckets) {
+            if (merged.isEmpty()) {
+                merged.append(bucket);
+                continue;
+            }
+            schedule::TaskSegment &last = merged.last();
+            if (bucket.start <= last.finish
+                || calendar.workBetween(last.finish, bucket.start) <= 0) {
+                if (bucket.finish > last.finish) last.finish = bucket.finish;
+            } else {
+                merged.append(bucket);
+            }
+        }
+        if (merged.size() > 1)
+            task.segments = merged;
+    }
+    out.budgetCost = 0.0;
+    out.budgetWorkMillis = 0;
+    for (const schedule::Assignment &assignment : out.assignments)
+        if (assignment.budget) {
+            out.budgetCost += assignment.budgetCost;
+            out.budgetWorkMillis += assignment.budgetWorkMillis;
+        }
 
     // Resource cost is frequently not stored on the resource itself (Microsoft
     // Project computes it from cost-rate tables, which we do not decode yet). Where
@@ -1718,7 +2188,6 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
     }
 
     readRealRelations(cf, out);
-    readRealCalendars(cf, out);
     readSummaryInformation(cf, out);
 
     // Project start/finish dates (PropsKey PROJECT_START_DATE=0x02400002,
@@ -1729,7 +2198,21 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
     };
     out.startDate = projDate(props, 0x02400002u);
     out.finishDate = projDate(props, 0x02400003u);
+    {
+        quint16 direction = 1;
+        const QByteArray value = props.value(0x02400004u);   // PropsKey SCHEDULE_FROM
+        // Project stores this as a 16-bit value: 1 for forward-from-start and
+        // 0 for backward-from-finish.
+        if (FieldDecoders::readU16(value, 0, &direction))
+            out.scheduleFromStart = direction != 0;
+    }
     out.statusDate = projDate(props, 0x02400045u);   // PropsKey STATUS_DATE = 37748805
+    {
+        quint16 enabled = 0;
+        const QByteArray value = props.value(0x02400039u); // MULTIPLE_CRITICAL_PATHS
+        if (FieldDecoders::readU16(value, 0, &enabled))
+            out.multipleCriticalPaths = enabled != 0;
+    }
 
     // Project default calendar (PropsKey DEFAULT_CALENDAR_NAME = 37748750) is
     // stored by NAME; resolve it against the already-loaded calendars list.
@@ -1824,9 +2307,19 @@ bool DocSerializer::read(const CompoundFile &cf, schedule::Project &out, QString
             if (ve.fieldType == kFieldName) t.name = s;
             else if (ve.fieldType == kFieldWbs) t.wbs = s;
             else if (ve.fieldType == kFieldNotes) t.notes = s;
+            else if (ve.fieldType == kFieldHyperlink) t.hyperlink = s;
+            else if (ve.fieldType == kFieldHyperlinkAddress) t.hyperlinkAddress = s;
+            else if (ve.fieldType == kFieldHyperlinkSubAddress) t.hyperlinkSubAddress = s;
         }
         out.tasks.append(t);
     }
+    QSet<QString> customDefinitions;
+    for (const schedule::Task &task : std::as_const(out.tasks))
+        for (const schedule::CustomField &field : task.customFields)
+            if (!customDefinitions.contains(field.name)) {
+                out.customFieldDefinitions.append(field);
+                customDefinitions.insert(field.name);
+            }
 
     const StreamQuartet res = StreamQuartet::decode(readQuartet(cf, QStringLiteral("Resource")), &qerr);
     for (int i = 0; i < res.fixedRecords.size(); ++i) {
@@ -1837,6 +2330,7 @@ bool DocSerializer::read(const CompoundFile &cf, schedule::Project &out, QString
             if (ve.fieldType == kFieldBaselines) { r.baselines = unpackBaselines(ve.data); continue; }
             if (ve.fieldType == kFieldCustom)    { r.customFields = unpackCustom(ve.data); continue; }
             if (ve.fieldType == kFieldCostRates) { r.costRates = unpackCostRates(ve.data); continue; }
+            if (ve.fieldType == kFieldResourceExtra) { unpackResourceExtra(ve.data, r); continue; }
             const QString s = QString::fromUtf16(
                 reinterpret_cast<const char16_t *>(ve.data.constData()), ve.data.size() / 2);
             if (ve.fieldType == kFieldName) r.name = s;
@@ -1854,6 +2348,8 @@ bool DocSerializer::read(const CompoundFile &cf, schedule::Project &out, QString
                 continue;
             if (ve.fieldType == kFieldBaselines) a.baselines = unpackBaselines(ve.data);
             else if (ve.fieldType == kFieldCustom) a.customFields = unpackCustom(ve.data);
+            else if (ve.fieldType == kFieldAssignmentExtra) unpackAssignmentExtra(ve.data, a);
+            else if (ve.fieldType == kFieldTimephased) a.timephasedValues = unpackTimephased(ve.data);
             else if (ve.fieldType == kFieldNotes)
                 a.notes = QString::fromUtf16(reinterpret_cast<const char16_t *>(ve.data.constData()),
                                              ve.data.size() / 2);
@@ -1916,6 +2412,18 @@ bool DocSerializer::write(const schedule::Project &in, CompoundFile &cf, QString
             tasks.varEntries.append({ static_cast<quint32>(i), kFieldNotes,
                                       QByteArray(reinterpret_cast<const char *>(t.notes.utf16()),
                                                  t.notes.size() * 2) });
+        if (!t.hyperlink.isEmpty())
+            tasks.varEntries.append({ static_cast<quint32>(i), kFieldHyperlink,
+                                      QByteArray(reinterpret_cast<const char *>(t.hyperlink.utf16()),
+                                                 t.hyperlink.size() * 2) });
+        if (!t.hyperlinkAddress.isEmpty())
+            tasks.varEntries.append({ static_cast<quint32>(i), kFieldHyperlinkAddress,
+                                      QByteArray(reinterpret_cast<const char *>(t.hyperlinkAddress.utf16()),
+                                                 t.hyperlinkAddress.size() * 2) });
+        if (!t.hyperlinkSubAddress.isEmpty())
+            tasks.varEntries.append({ static_cast<quint32>(i), kFieldHyperlinkSubAddress,
+                                      QByteArray(reinterpret_cast<const char *>(t.hyperlinkSubAddress.utf16()),
+                                                 t.hyperlinkSubAddress.size() * 2) });
         if (!t.baselines.isEmpty())
             tasks.varEntries.append({ static_cast<quint32>(i), kFieldBaselines, packBaselines(t.baselines) });
         if (!t.customFields.isEmpty())
@@ -1924,7 +2432,8 @@ bool DocSerializer::write(const schedule::Project &in, CompoundFile &cf, QString
             || t.actualDurationMillis != 0 || t.actualWorkMillis != 0
             || t.evm != schedule::EarnedValue()
             || t.manual || t.effortDriven || t.taskType != 0 || t.priority != 500
-            || t.deadline.isValid();
+            || t.deadline.isValid() || t.ignoreResourceCalendar
+            || t.physicalPercentComplete != 0.0 || t.earnedValueMethod != 0;
         if (hasExtra)
             tasks.varEntries.append({ static_cast<quint32>(i), kFieldTaskExtra, packTaskExtra(t) });
     }
@@ -1953,6 +2462,8 @@ bool DocSerializer::write(const schedule::Project &in, CompoundFile &cf, QString
             res.varEntries.append({ static_cast<quint32>(i), kFieldCustom, packCustom(r.customFields) });
         if (!r.costRates.isEmpty())
             res.varEntries.append({ static_cast<quint32>(i), kFieldCostRates, packCostRates(r.costRates) });
+        res.varEntries.append({ static_cast<quint32>(i), kFieldResourceExtra,
+                                packResourceExtra(r) });
     }
     writeQuartet(cf, QStringLiteral("Resource"), res.encode());
 
@@ -1969,6 +2480,11 @@ bool DocSerializer::write(const schedule::Project &in, CompoundFile &cf, QString
             asn.varEntries.append({ static_cast<quint32>(i), kFieldBaselines, packBaselines(a.baselines) });
         if (!a.customFields.isEmpty())
             asn.varEntries.append({ static_cast<quint32>(i), kFieldCustom, packCustom(a.customFields) });
+        asn.varEntries.append({ static_cast<quint32>(i), kFieldAssignmentExtra,
+                                    packAssignmentExtra(a) });
+        if (!a.timephasedValues.isEmpty())
+            asn.varEntries.append({ static_cast<quint32>(i), kFieldTimephased,
+                                    packTimephased(a.timephasedValues) });
     }
     writeQuartet(cf, QStringLiteral("Assignment"), asn.encode());
 

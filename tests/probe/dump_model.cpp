@@ -55,11 +55,12 @@ int main(int argc, char **argv)
         p = io.project();
     }
 
-    printf("title='%s' author='%s' start=%s finish=%s calUid=%d version=%d\n",
+    printf("title='%s' author='%s' start=%s finish=%s calUid=%d version=%d multipleCritical=%d budgetCost=%.2f budgetWork=%lldm\n",
            qPrintable(p.title), qPrintable(p.author),
            qPrintable(p.startDate.toString(Qt::ISODate)),
            qPrintable(p.finishDate.toString(Qt::ISODate)),
-           p.calendarUniqueId, int(p.formatVersion));
+           p.calendarUniqueId, int(p.formatVersion), p.multipleCriticalPaths ? 1 : 0,
+           p.budgetCost, (long long)(p.budgetWorkMillis / 60000));
 
     printf("-- %lld tasks\n", (long long)p.tasks.size());
     for (const schedule::Task &t : p.tasks) {
@@ -73,19 +74,36 @@ int main(int argc, char **argv)
                qPrintable(t.start.toString(Qt::ISODate)),
                qPrintable(t.finish.toString(Qt::ISODate)),
                t.percentComplete);
+        for (const schedule::CustomField &field : t.customFields)
+            printf("      custom id=%d name='%s' value='%s' formula='%s' lookup=%lld indicators=%lld\n",
+                   field.fieldId, qPrintable(field.name), qPrintable(field.value.toString()),
+                   qPrintable(field.formula), (long long)field.lookupValues.size(),
+                   (long long)field.graphicalIndicators.size());
+        for (const schedule::TaskSegment &segment : t.segments)
+            printf("      segment %s..%s\n", qPrintable(segment.start.toString(Qt::ISODate)),
+                   qPrintable(segment.finish.toString(Qt::ISODate)));
     }
 
     printf("-- %lld resources\n", (long long)p.resources.size());
     for (const schedule::Resource &r : p.resources)
-        printf("  uid=%-3d '%s' maxUnits=%.2f calUid=%d costRates=%lld\n",
-               r.uniqueId, qPrintable(r.name), r.maxUnits, r.calendarUniqueId,
-               (long long)r.costRates.size());
+        printf("  uid=%-3d '%s' type=%d budget=%d budgetCost=%.2f budgetWork=%lldm maxUnits=%.2f calUid=%d costRates=%lld\n",
+               r.uniqueId, qPrintable(r.name), int(r.type), r.budget ? 1 : 0, r.budgetCost,
+               (long long)(r.budgetWorkMillis / 60000), r.maxUnits,
+               r.calendarUniqueId, (long long)r.costRates.size());
 
     printf("-- %lld assignments\n", (long long)p.assignments.size());
-    for (const schedule::Assignment &a : p.assignments)
-        printf("  task=%-3d res=%-3d units=%.2f work=%lldm\n",
+    for (const schedule::Assignment &a : p.assignments) {
+        printf("  task=%-3d res=%-3d units=%.2f work=%lldm cost=%.2f budget=%d budgetCost=%.2f budgetWork=%lldm timephased=%lld\n",
                a.taskUniqueId, a.resourceUniqueId, a.units,
-               (long long)(a.workMillis / 60000));
+               (long long)(a.workMillis / 60000), a.cost, a.budget ? 1 : 0,
+               a.budgetCost, (long long)(a.budgetWorkMillis / 60000),
+               (long long)a.timephasedValues.size());
+        for (const schedule::TimephasedValue &value : a.timephasedValues)
+            printf("      timephased type=%d baseline=%d %s..%s value='%s'\n",
+                   value.type, value.baselineNumber,
+                   qPrintable(value.start.toString(Qt::ISODate)),
+                   qPrintable(value.finish.toString(Qt::ISODate)), qPrintable(value.value));
+    }
 
     printf("-- %lld relations\n", (long long)p.relations.size());
     for (const schedule::Relation &r : p.relations)
@@ -93,10 +111,16 @@ int main(int argc, char **argv)
                r.successorTaskUid, int(r.type), (long long)(r.lagMillis / 60000));
 
     printf("-- %lld calendars\n", (long long)p.calendars.size());
-    for (const schedule::Calendar &c : p.calendars)
+    for (const schedule::Calendar &c : p.calendars) {
         printf("  uid=%-3d '%s' base=%d mask=0x%02x exceptions=%lld\n",
                c.uniqueId, qPrintable(c.name), c.baseCalendarUniqueId,
                unsigned(c.workingDayMask), (long long)c.exceptions.size());
+        for (const schedule::CalendarException &exception : c.exceptions)
+            printf("      exception '%s' %s..%s recurrence=%d interval=%d weekdays=0x%02x occurrences=%d\n",
+                   qPrintable(exception.name), qPrintable(exception.fromDate.toString(Qt::ISODate)),
+                   qPrintable(exception.toDate.toString(Qt::ISODate)), int(exception.recurrence),
+                   exception.interval, unsigned(exception.weekDayMask), exception.occurrences);
+    }
 
     return 0;
 }

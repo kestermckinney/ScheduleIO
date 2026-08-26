@@ -11,6 +11,7 @@
 #include "model/relation.h"
 #include "model/resource.h"
 #include "model/task.h"
+#include "model/usageviewsettings.h"
 #include "model/viewstyles.h"
 
 #include <QDateTime>
@@ -39,20 +40,34 @@ public:
     QString author;
     QDateTime startDate;
     QDateTime finishDate;
+    bool scheduleFromStart = true;   // false = calculate backward from finishDate
+    bool multipleCriticalPaths = false; // anchor every independent network at its own finish
     QDateTime statusDate;   // "as of" date for progress / earned-value calculations
     int calendarUniqueId = -1;   // the project calendar; -1 = the "Standard" calendar
+    double budgetCost = 0.0;
+    qint64 budgetWorkMillis = 0;
 
     QList<Task> tasks;
     QList<Resource> resources;
     QList<Assignment> assignments;
     QList<Calendar> calendars;
     QList<Relation> relations;
+    QList<CustomField> customFieldDefinitions; // formula/lookup/indicator metadata
 
     // Opaque MPP14 FONT_BASES payload ("   214/Props", key 0x03400000).
     // It is intentionally not part of semantic equality; it preserves the
     // source file's exact font-index mapping when the binary writer uses its
     // stock container template.
     QByteArray mppFontBases;
+
+    // Original MPP14 container used as the presentation template for an edited
+    // save.  The semantic model does not decode every view stream (notably the
+    // Microsoft Project Timeline view), so retaining the source lets the writer
+    // preserve native view and table rowsets from storage 214 while
+    // regenerating backend records from its stock template.
+    // Like mppFontBases, this is opaque and intentionally excluded from
+    // semantic equality.
+    QByteArray mppSourceTemplate;
 
     // View formatting template (text styles, gridline/date-line and bar colours),
     // mirroring the Gantt Chart view's stored properties. See ViewStyles.
@@ -61,6 +76,13 @@ public:
     // Separate style template for the Resource Usage view (text styles + the
     // overallocation highlight). Falls back to viewStyles when not present.
     ViewStyles resourceUsageStyles;
+
+    // Native Microsoft Project Gantt/Usage-view table columns and pane geometry.
+    // ScheduleVault-only geometry is intentionally not stored here.
+    UsageViewSettings ganttView;
+    UsageViewSettings resourceUsageView;
+    UsageViewSettings taskUsageView;
+    UsageViewSettings teamPlannerView;
 
     // Separate style template for the Team Planner view (text styles + bar
     // colours). Falls back to viewStyles when not present.

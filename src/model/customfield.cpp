@@ -9,7 +9,10 @@ bool CustomField::operator==(const CustomField &o) const
 {
     return fieldId == o.fieldId
         && name == o.name
-        && value == o.value;
+        && value == o.value
+        && formula == o.formula
+        && lookupValues == o.lookupValues
+        && graphicalIndicators == o.graphicalIndicators;
 }
 
 } // namespace schedule

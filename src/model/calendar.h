@@ -30,16 +30,28 @@ public:
 class SCHEDULEIO_EXPORT CalendarException
 {
 public:
+    enum class Recurrence { None, Daily, Weekly, MonthlyByDate, MonthlyByPosition, YearlyByDate, YearlyByPosition };
     QDate fromDate;
     QDate toDate;
     QString name;
     bool working = false;
     QList<TimeRange> workingTimes;
+    Recurrence recurrence = Recurrence::None;
+    int interval = 1;
+    quint8 weekDayMask = 0; // Monday bit0 .. Sunday bit6
+    int dayOfMonth = 0;
+    int month = 0;
+    int weekPosition = 0;   // 1 first, 2 second, 3 third, 4 fourth, 5 last
+    int occurrences = 0;    // 0 means bounded only by toDate
 
     bool operator==(const CalendarException &o) const
     {
         return fromDate == o.fromDate && toDate == o.toDate && name == o.name
-            && working == o.working && workingTimes == o.workingTimes;
+            && working == o.working && workingTimes == o.workingTimes
+            && recurrence == o.recurrence && interval == o.interval
+            && weekDayMask == o.weekDayMask && dayOfMonth == o.dayOfMonth
+            && month == o.month && weekPosition == o.weekPosition
+            && occurrences == o.occurrences;
     }
     bool operator!=(const CalendarException &o) const { return !(*this == o); }
 };

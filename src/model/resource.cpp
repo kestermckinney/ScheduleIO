@@ -11,6 +11,9 @@ bool Resource::operator==(const Resource &o) const
         && id == o.id
         && name == o.name
         && initials == o.initials
+        && type == o.type
+        && budget == o.budget
+        && materialLabel == o.materialLabel
         && qFuzzyCompare(maxUnits + 1.0, o.maxUnits + 1.0)
         && notes == o.notes
         && calendarUniqueId == o.calendarUniqueId
@@ -18,6 +21,8 @@ bool Resource::operator==(const Resource &o) const
         && actualCost == o.actualCost
         && remainingCost == o.remainingCost
         && costVariance == o.costVariance
+        && budgetCost == o.budgetCost
+        && budgetWorkMillis == o.budgetWorkMillis
         && baselines == o.baselines
         && customFields == o.customFields
         && costRates == o.costRates
