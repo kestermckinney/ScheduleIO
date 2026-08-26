@@ -146,8 +146,8 @@ void TstMpp14Timephased::materialQuantityUsesProjectTimephasedStorage()
 {
     schedule::Assignment assignment;
     assignment.uniqueId = 17;
-    const QDateTime from(QDate(2026, 8, 4), QTime(0, 0), Qt::UTC);
-    const QDateTime to(QDate(2026, 8, 5), QTime(0, 0), Qt::UTC);
+    const QDateTime from(QDate(2026, 8, 4), QTime(0, 0));
+    const QDateTime to(QDate(2026, 8, 5), QTime(0, 0));
 
     QVERIFY(assignment.setTimephasedMaterialInPeriod(
         schedule::TimephasedValue::RemainingWork, from, to, 7.25));

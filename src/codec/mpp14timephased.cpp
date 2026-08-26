@@ -180,12 +180,9 @@ double actualRate(const schedule::TimephasedValue &value,
 
 qint32 wallTimestampTenths(const QDateTime &value)
 {
-    if (!value.isValid())
-        return 0;
-    // MPP dates are timezone-less wall-clock values. Avoid shifting a local
-    // model datetime when converting it to the absolute-tenths representation.
-    return FieldDecoders::encodeTimestampTenths(
-        QDateTime(value.date(), value.time(), Qt::UTC));
+    // encodeTimestampTenths reads wall clock directly now, so there is nothing left to
+    // re-stamp here; the name is kept because it says what the callers want.
+    return FieldDecoders::encodeTimestampTenths(value);
 }
 
 } // namespace

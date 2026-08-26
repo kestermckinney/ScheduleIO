@@ -271,15 +271,15 @@ schedule::Project TstSemanticRoundtrip::makeSampleProject()
     p.formatVersion = schedule::Project::FormatVersion::Mpp14;
     p.title = QStringLiteral("Scaffold Plan");
     p.author = QStringLiteral("Paul");
-    p.startDate = QDateTime(QDate(2026, 1, 2), QTime(8, 0), Qt::UTC);
-    p.finishDate = QDateTime(QDate(2026, 3, 31), QTime(17, 0), Qt::UTC);
+    p.startDate = QDateTime(QDate(2026, 1, 2), QTime(8, 0));
+    p.finishDate = QDateTime(QDate(2026, 3, 31), QTime(17, 0));
     p.scheduleFromStart = false;
 
     schedule::Task t1;
     t1.uniqueId = 1; t1.id = 1; t1.outlineLevel = 1;
     t1.name = QStringLiteral("Design");
-    t1.start = QDateTime(QDate(2026, 1, 2), QTime(9, 0), Qt::UTC);
-    t1.finish = QDateTime(QDate(2026, 1, 9), QTime(17, 0), Qt::UTC);
+    t1.start = QDateTime(QDate(2026, 1, 2), QTime(9, 0));
+    t1.finish = QDateTime(QDate(2026, 1, 9), QTime(17, 0));
     t1.durationMillis = qint64(8) * 3600 * 1000;   // divisible by the duration unit
     t1.percentComplete = 0.5;
     t1.physicalPercentComplete = 0.35;
@@ -335,12 +335,12 @@ schedule::Project TstSemanticRoundtrip::makeSampleProject()
     r.uniqueId = 1; r.id = 1; r.name = QStringLiteral("Alice"); r.initials = QStringLiteral("A");
     r.maxUnits = 0.5;
     schedule::AvailabilityPeriod ap1;
-    ap1.startDate = QDateTime(QDate(2026, 1, 1), QTime(0, 0), Qt::UTC);
-    ap1.endDate = QDateTime(QDate(2026, 1, 31), QTime(23, 59), Qt::UTC);
+    ap1.startDate = QDateTime(QDate(2026, 1, 1), QTime(0, 0));
+    ap1.endDate = QDateTime(QDate(2026, 1, 31), QTime(23, 59));
     ap1.units = 0.5;
     schedule::AvailabilityPeriod ap2;
-    ap2.startDate = QDateTime(QDate(2026, 3, 1), QTime(0, 0), Qt::UTC);   // gap before this one
-    ap2.endDate = QDateTime(QDate(2026, 3, 31), QTime(23, 59), Qt::UTC);
+    ap2.startDate = QDateTime(QDate(2026, 3, 1), QTime(0, 0));   // gap before this one
+    ap2.endDate = QDateTime(QDate(2026, 3, 31), QTime(23, 59));
     ap2.units = 1.0;
     r.availabilityTable = { ap1, ap2 };
     p.resources = { r };
@@ -581,18 +581,18 @@ void TstSemanticRoundtrip::timephasedAssignmentRoundTrip()
     assignment.workMillis = 20LL * 3600 * 1000;
     assignment.actualWorkMillis = 4LL * 3600 * 1000;
     assignment.remainingWorkMillis = 16LL * 3600 * 1000;
-    assignment.start = QDateTime(QDate(2026, 1, 5), QTime(8, 0), Qt::UTC);
-    assignment.stop = QDateTime(QDate(2026, 1, 5), QTime(12, 0), Qt::UTC);
-    assignment.resume = QDateTime(QDate(2026, 1, 6), QTime(8, 0), Qt::UTC);
-    assignment.finish = QDateTime(QDate(2026, 1, 7), QTime(17, 0), Qt::UTC);
+    assignment.start = QDateTime(QDate(2026, 1, 5), QTime(8, 0));
+    assignment.stop = QDateTime(QDate(2026, 1, 5), QTime(12, 0));
+    assignment.resume = QDateTime(QDate(2026, 1, 6), QTime(8, 0));
+    assignment.finish = QDateTime(QDate(2026, 1, 7), QTime(17, 0));
 
     auto addBucket = [&](int type, const QDate &day, int hours,
                          const QTime &finish = QTime(17, 0)) {
         schedule::TimephasedValue value;
         value.type = type;
         value.uniqueId = assignment.uniqueId;
-        value.start = QDateTime(day, QTime(8, 0), Qt::UTC);
-        value.finish = QDateTime(day, finish, Qt::UTC);
+        value.start = QDateTime(day, QTime(8, 0));
+        value.finish = QDateTime(day, finish);
         value.unit = 1;
         value.value = QStringLiteral("PT%1H0M0S").arg(hours);
         assignment.timephasedValues.append(value);
@@ -604,8 +604,8 @@ void TstSemanticRoundtrip::timephasedAssignmentRoundTrip()
     // Jan 5 actuals and Jan 7 remaining work.
     QVERIFY(assignment.setTimephasedWorkInPeriod(
         schedule::TimephasedValue::RemainingWork,
-        QDateTime(QDate(2026, 1, 6), QTime(0, 0), Qt::UTC),
-        QDateTime(QDate(2026, 1, 7), QTime(0, 0), Qt::UTC),
+        QDateTime(QDate(2026, 1, 6), QTime(0, 0)),
+        QDateTime(QDate(2026, 1, 7), QTime(0, 0)),
         8LL * 3600 * 1000));
     QCOMPARE(assignment.remainingWorkMillis, 18LL * 3600 * 1000);
     QCOMPARE(assignment.workMillis, 22LL * 3600 * 1000);
@@ -665,8 +665,8 @@ void TstSemanticRoundtrip::nativeParityMetadataRoundTrip()
     work.type = schedule::TimephasedValue::BaselineWork;
     work.uniqueId = assignment.uniqueId;
     work.baselineNumber = 2;
-    work.start = QDateTime(QDate(2026, 1, 5), QTime(8, 0), Qt::UTC);
-    work.finish = QDateTime(QDate(2026, 1, 5), QTime(12, 0), Qt::UTC);
+    work.start = QDateTime(QDate(2026, 1, 5), QTime(8, 0));
+    work.finish = QDateTime(QDate(2026, 1, 5), QTime(12, 0));
     work.unit = 1;
     work.value = QStringLiteral("PT4H0M0S");
     schedule::TimephasedValue cost = work;
@@ -756,8 +756,8 @@ void TstSemanticRoundtrip::inconsistentProgressIsCanonicalizedForProject()
     partial.actualWorkMillis = partial.workMillis;         // contradicts 40%
 
     schedule::Task &unstarted = p.tasks[1];
-    unstarted.start = QDateTime(QDate(2026, 1, 12), QTime(9, 0), Qt::UTC);
-    unstarted.finish = QDateTime(QDate(2026, 1, 12), QTime(17, 0), Qt::UTC);
+    unstarted.start = QDateTime(QDate(2026, 1, 12), QTime(9, 0));
+    unstarted.finish = QDateTime(QDate(2026, 1, 12), QTime(17, 0));
     unstarted.durationMillis = 8LL * 3600 * 1000;
     unstarted.workMillis = 8LL * 3600 * 1000;
     unstarted.percentComplete = 0.0;

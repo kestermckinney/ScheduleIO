@@ -12,8 +12,23 @@ namespace FieldDecoders {
 
 QDateTime epoch()
 {
-    // MS Project counts time from 1984-01-01. Use UTC for cross-platform stability.
+    // MS Project counts time from 1984-01-01. The base is UTC so the arithmetic never
+    // meets a DST discontinuity; results are reinterpreted as wall clock on the way out.
     return QDateTime(QDate(1984, 1, 1), QTime(0, 0, 0), Qt::UTC);
+}
+
+QDateTime wallTimeFromUtc(const QDateTime &utc)
+{
+    // Take the instant's UTC calendar fields and re-stamp them as local time. Not a
+    // conversion: the digits stay put, only the spec changes.
+    return utc.isValid() ? QDateTime(utc.date(), utc.time()) : QDateTime();
+}
+
+QDateTime utcFromWallTime(const QDateTime &wall)
+{
+    // The inverse: read the datetime's own calendar fields as if they were UTC. Never
+    // wall.toUTC(), which would shift the wall clock by the local zone offset.
+    return wall.isValid() ? QDateTime(wall.date(), wall.time(), Qt::UTC) : QDateTime();
 }
 
 // Sentinel for "no date" (an invalid/null QDateTime), mirroring how MS Project
@@ -24,14 +39,14 @@ QDateTime decodeTimestampSeconds(quint32 seconds)
 {
     if (seconds == kNoDate)
         return QDateTime();   // invalid == "no date"
-    return epoch().addSecs(static_cast<qint64>(seconds));
+    return wallTimeFromUtc(epoch().addSecs(static_cast<qint64>(seconds)));
 }
 
 quint32 encodeTimestampSeconds(const QDateTime &dt)
 {
     if (!dt.isValid())
         return kNoDate;
-    const qint64 secs = epoch().secsTo(dt.toUTC());
+    const qint64 secs = epoch().secsTo(utcFromWallTime(dt));
     if (secs < 0)
         return 0;
     return static_cast<quint32>(secs);
@@ -47,20 +62,17 @@ QDateTime decodeMppTimestamp(const QByteArray &block, int offset)
     readU16(block, offset, &time);
     if (time == 65535)
         time = 0;
-    return QDateTime(QDate(1983, 12, 31), QTime(0, 0), Qt::UTC)
-        .addDays(days)
-        .addSecs(static_cast<qint64>(time) * 6);   // time is tenths of a minute
+    return wallTimeFromUtc(QDateTime(QDate(1983, 12, 31), QTime(0, 0), Qt::UTC)
+                               .addDays(days)
+                               .addSecs(static_cast<qint64>(time) * 6));   // tenths of a minute
 }
 
 quint32 encodeMppTimestamp(const QDateTime &dt)
 {
     if (!dt.isValid())
         return kNoDate;
-    // MPP timestamps are timezone-less wall-clock time. Use the datetime's own
-    // calendar fields, never a toUTC() conversion: the reader hands wall time
-    // back in a UTC-spec QDateTime (identity either way), but app-created
-    // datetimes carry local spec and a UTC conversion would shift the wall
-    // time by the timezone offset.
+    // Wall clock in, wall clock out -- see utcFromWallTime(). Reading the datetime's
+    // own calendar fields is what keeps the stored time from sliding by the zone offset.
     const qint64 days = QDate(1983, 12, 31).daysTo(dt.date());
     if (days <= 1 || days >= 0xFFFF)
         return kNoDate;   // out of the representable range == "no date"
@@ -73,14 +85,15 @@ QDateTime decodeTimestampTenths(const QByteArray &d, int offset)
     qint32 tenths = 0;
     if (!readI32(d, offset, &tenths))
         return QDateTime();
-    return epoch().addSecs(static_cast<qint64>(tenths) * 6);   // 1 tenth-minute == 6 s
+    // 1 tenth-minute == 6 s
+    return wallTimeFromUtc(epoch().addSecs(static_cast<qint64>(tenths) * 6));
 }
 
 qint32 encodeTimestampTenths(const QDateTime &dt)
 {
     if (!dt.isValid())
         return 0;
-    return static_cast<qint32>(epoch().secsTo(dt.toUTC()) / 6);
+    return static_cast<qint32>(epoch().secsTo(utcFromWallTime(dt)) / 6);
 }
 
 qint64 decodeDurationTenthMinutes(qint32 raw)

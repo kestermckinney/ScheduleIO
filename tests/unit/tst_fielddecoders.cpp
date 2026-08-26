@@ -7,6 +7,7 @@
 #include <QtEndian>
 
 #include <cstring>
+#include <ctime>
 
 using namespace FieldDecoders;
 
@@ -16,6 +17,8 @@ class TstFieldDecoders : public QObject
 private slots:
     void timestampRoundTrip_data();
     void timestampRoundTrip();
+    void timestampsAreWallClock_data();
+    void timestampsAreWallClock();
     void durationRoundTrip();
     void percentClampsAndScales();
     void guidRoundTrip();
@@ -37,8 +40,58 @@ void TstFieldDecoders::timestampRoundTrip()
 {
     QFETCH(quint32, minutes);
     const QDateTime dt = decodeTimestampSeconds(minutes);
-    QCOMPARE(dt.timeSpec(), Qt::UTC);
+    // MPP timestamps are timezone-less wall clock, carried as LocalTime so they compare
+    // directly against the dates the scheduling calendar computes.
+    QCOMPARE(dt.timeSpec(), Qt::LocalTime);
     QCOMPARE(encodeTimestampSeconds(dt), minutes);
+}
+
+void TstFieldDecoders::timestampsAreWallClock_data()
+{
+    QTest::addColumn<QByteArray>("zone");
+    for (const char *tz : { "UTC", "America/New_York", "Asia/Tokyo", "Pacific/Honolulu" })
+        QTest::newRow(tz) << QByteArray(tz);
+}
+
+// The wall clock a file names must survive decoding unchanged in every timezone, and
+// re-encode to the same bytes. Before wall-clock handling these came back as UTC-spec
+// instants, so the moment anything read them as local time -- the scheduler's calendar,
+// or a QDateTime crossing into QML -- the date slid by the zone offset.
+void TstFieldDecoders::timestampsAreWallClock()
+{
+    QFETCH(QByteArray, zone);
+    struct ZoneGuard {
+        QByteArray saved = qgetenv("TZ");
+        ~ZoneGuard() { saved.isEmpty() ? qunsetenv("TZ") : qputenv("TZ", saved); tzset(); }
+    } guard;
+    qputenv("TZ", zone);
+    tzset();
+
+    // 1984-01-01 08:00 + 30 days == 1984-01-31 08:00, whatever the local zone is.
+    const quint32 secs = 30u * 86400u + 8u * 3600u;
+    const QDateTime dt = decodeTimestampSeconds(secs);
+    QCOMPARE(dt.date(), QDate(1984, 1, 31));
+    QCOMPARE(dt.time(), QTime(8, 0));
+    QCOMPARE(encodeTimestampSeconds(dt), secs);
+
+    // The same wall clock built by hand (as the app or the XML reader would) must encode
+    // identically -- that equivalence is what makes file dates and computed dates mix.
+    QCOMPARE(encodeTimestampSeconds(QDateTime(QDate(1984, 1, 31), QTime(8, 0))), secs);
+
+    const qint32 tenths = qint32(secs / 6);
+    QByteArray buf(4, '\0');
+    qToLittleEndian<qint32>(tenths, buf.data());
+    const QDateTime viaTenths = decodeTimestampTenths(buf, 0);
+    QCOMPARE(viaTenths.date(), QDate(1984, 1, 31));
+    QCOMPARE(viaTenths.time(), QTime(8, 0));
+    QCOMPARE(encodeTimestampTenths(viaTenths), tenths);
+
+    const quint32 packed = encodeMppTimestamp(QDateTime(QDate(2026, 7, 16), QTime(8, 0)));
+    QByteArray mpp(4, '\0');
+    qToLittleEndian<quint32>(packed, mpp.data());
+    const QDateTime viaMpp = decodeMppTimestamp(mpp, 0);
+    QCOMPARE(viaMpp.date(), QDate(2026, 7, 16));
+    QCOMPARE(viaMpp.time(), QTime(8, 0));
 }
 
 void TstFieldDecoders::durationRoundTrip()

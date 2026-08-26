@@ -10,16 +10,33 @@
 #include <QUuid>
 
 // Scalar field codecs for the .mpp binary payload. Everything here is
-// little-endian (x64 PE) and timezone-stable (UTC) so that decoding a fixture
-// produces identical results on Windows, macOS and Linux.
+// little-endian (x64 PE) and decodes to the same wall clock on Windows, macOS and
+// Linux, in any timezone -- see the wall-clock note on wallTimeFromUtc() below.
 //
 // NOTE: the exact wire epoch and duration units must be confirmed against real
 // fixtures (see plan, Layer 3 oracle). The functions below are defined as exact
 // inverses of each other, which is what the Layer 1 unit tests assert.
 namespace FieldDecoders {
 
-// MS Project's documented timestamp epoch.
+// MS Project's documented timestamp epoch, as a UTC instant (the arithmetic base;
+// decoded values are handed back as wall clock, see below).
 QDateTime epoch();
+
+// Microsoft Project timestamps are timezone-less wall-clock values: a file says
+// "08:00", never "08:00 in some zone". The model represents them as LocalTime
+// QDateTimes -- the same spec the MSPDI/XML reader and the scheduling calendar
+// produce -- so that a date read from a file and a date computed by the scheduler
+// are directly comparable, and so that crossing into QML (which converts a
+// QDateTime as an absolute instant) does not slide the wall clock by the zone
+// offset. These two move between that representation and the UTC instants the
+// epoch arithmetic runs on, by REINTERPRETING the calendar fields rather than
+// converting them -- which is what keeps the wall clock intact.
+//
+// One caveat comes with LocalTime, and the XML reader already shares it: a wall
+// time inside a DST spring-forward gap does not exist locally, and Qt normalises it
+// forward by an hour.
+QDateTime wallTimeFromUtc(const QDateTime &utc);
+QDateTime utcFromWallTime(const QDateTime &wall);
 
 // Scaffold timestamp: u32 seconds since epoch() (0xFFFFFFFF == invalid/no date).
 // Second precision keeps it lossless for timestamps the reader produces.
@@ -28,7 +45,7 @@ quint32   encodeTimestampSeconds(const QDateTime &dt);
 
 // MPP fixed-data timestamp (MPXJ MPPUtility.getTimestamp): at `offset` a u16
 // time in tenths of a minute, at `offset+2` a u16 day count since 1983-12-31.
-// Returns an invalid QDateTime for the "no date" sentinels. UTC for stability.
+// Returns an invalid QDateTime for the "no date" sentinels.
 QDateTime decodeMppTimestamp(const QByteArray &block, int offset);
 
 // Inverse of decodeMppTimestamp, packed as one u32: low u16 = time in tenths of
@@ -37,7 +54,7 @@ QDateTime decodeMppTimestamp(const QByteArray &block, int offset);
 quint32 encodeMppTimestamp(const QDateTime &dt);
 
 // A 4-byte timestamp stored as a count of tenths of a minute since the epoch
-// (MPXJ getTimestampFromTenths) — used by the cost-rate tables. UTC for stability.
+// (MPXJ getTimestampFromTenths) — used by the cost-rate tables.
 QDateTime decodeTimestampTenths(const QByteArray &d, int offset);
 qint32    encodeTimestampTenths(const QDateTime &dt);
 

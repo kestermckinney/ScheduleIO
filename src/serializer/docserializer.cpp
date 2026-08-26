@@ -904,7 +904,8 @@ constexpr quint16 kCostRateVarKey[5] = { 61, 62, 63, 64, 65 };
 // (MPXJ LocalDateTimeHelper.END_DATE_NA = 2049-12-31 23:59.)
 inline QDateTime costRateEndNa()
 {
-    return QDateTime(QDate(2049, 12, 31), QTime(23, 59), Qt::UTC);
+    // Wall clock (LocalTime), like every decoded timestamp it is compared against.
+    return QDateTime(QDate(2049, 12, 31), QTime(23, 59));
 }
 
 // Convert a rate stored per-hour into the rate's display unit (MPXJ
@@ -980,21 +981,28 @@ constexpr quint16 kAvailabilityVarKey = 276;
 // FieldDecoders::decodeTimestampTenths (1984-01-01): empirically (checked
 // against tests/fixtures/mpp14availability.mpp + its XML oracle) they count
 // tenths-of-a-minute from 1983-12-31, the same epoch calendar exceptions use.
-inline QDateTime availabilityEpoch() { return QDateTime(QDate(1983, 12, 31), QTime(0, 0), Qt::UTC); }
+// UTC is the arithmetic base only; decoded boundaries come back as wall clock, the
+// same way FieldDecoders' timestamps do.
+inline QDateTime availabilityEpochUtc() { return QDateTime(QDate(1983, 12, 31), QTime(0, 0), Qt::UTC); }
+
+// The same instant as wall clock, for comparing against decoded boundaries.
+inline QDateTime availabilityEpoch() { return QDateTime(QDate(1983, 12, 31), QTime(0, 0)); }
 
 QDateTime decodeAvailabilityTimestamp(const QByteArray &d, int offset)
 {
     qint32 tenths = 0;
     if (!FieldDecoders::readI32(d, offset, &tenths))
         return QDateTime();
-    return availabilityEpoch().addSecs(static_cast<qint64>(tenths) * 6);
+    return FieldDecoders::wallTimeFromUtc(
+        availabilityEpochUtc().addSecs(static_cast<qint64>(tenths) * 6));
 }
 
 qint32 encodeAvailabilityTimestamp(const QDateTime &dt)
 {
     if (!dt.isValid())
         return 0;
-    return static_cast<qint32>(availabilityEpoch().secsTo(dt.toUTC()) / 6);
+    return static_cast<qint32>(
+        availabilityEpochUtc().secsTo(FieldDecoders::utcFromWallTime(dt)) / 6);
 }
 
 // Parse a resource availability-table var blob (MPXJ AvailabilityFactory): a

@@ -331,8 +331,10 @@ void TstTaskScheduling::calendarOracleArtifactRoundTrips()
     ann.name = QStringLiteral("Ann");
     ann.calendarUniqueId = 4;
     schedule::AvailabilityPeriod availability;
-    availability.startDate = QDateTime(QDate(2026, 7, 7), QTime(0, 0), Qt::UTC);
-    availability.endDate = QDateTime(QDate(2026, 7, 31), QTime(23, 59), Qt::UTC);
+    // Wall clock, the spec every model date carries: these are compared against values
+    // that have been through the .mpp codec below.
+    availability.startDate = QDateTime(QDate(2026, 7, 7), QTime(0, 0));
+    availability.endDate = QDateTime(QDate(2026, 7, 31), QTime(23, 59));
     availability.units = 1.0;
     ann.availabilityTable = { availability };
     p.resources.append(ann);

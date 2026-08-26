@@ -457,7 +457,7 @@ double rateToHours(double rate, quint16 fmt)
 // 44-byte entries. Open-ended entries store the "until further notice" end date.
 QByteArray costRateBlob(const QList<schedule::CostRate> &entries)
 {
-    const QDateTime endNa(QDate(2049, 12, 31), QTime(23, 59), Qt::UTC);
+    const QDateTime endNa(QDate(2049, 12, 31), QTime(23, 59));   // wall clock, like the model
     QByteArray b(16, '\0');
     // Native Project tables begin with [entryCount u16][record type=4 u16]
     // [header size=16 u16]. A zero-filled header round-trips through our reader
@@ -492,13 +492,14 @@ QByteArray costRateBlob(const QList<schedule::CostRate> &entries)
 // zero-unit segments.
 QByteArray availabilityBlob(const QList<schedule::AvailabilityPeriod> &periods)
 {
-    const QDateTime startNa(QDate(1983, 12, 31), QTime(0, 0), Qt::UTC);
-    const QDateTime endNa(QDate(2049, 12, 31), QTime(23, 59), Qt::UTC);
+    // Wall clock, matching the model dates these are sorted and compared against.
+    const QDateTime startNa(QDate(1983, 12, 31), QTime(0, 0));
+    const QDateTime endNa(QDate(2049, 12, 31), QTime(23, 59));
     auto encodeTs = [&](const QDateTime &dt) -> quint32 {
-        // MPP availability boundaries are wall-clock values. Converting a
-        // LocalTime QDateTime to UTC shifts the dates Project displays.
-        const QDateTime wall(dt.date(), dt.time(), Qt::UTC);
-        return quint32(static_cast<qint32>(startNa.secsTo(wall) / 6));
+        // Both sides read as wall clock, so the difference is the stored tenths.
+        return quint32(static_cast<qint32>(
+            FieldDecoders::utcFromWallTime(startNa).secsTo(
+                FieldDecoders::utcFromWallTime(dt)) / 6));
     };
 
     QList<schedule::AvailabilityPeriod> sorted = periods;

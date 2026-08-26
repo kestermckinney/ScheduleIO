@@ -76,15 +76,22 @@ QString formatIsoDuration(qint64 ms)
 
 QDateTime parseDateTime(const QString &s)
 {
-    return QDateTime::fromString(s.trimmed(), Qt::ISODate);
+    // MSPDI carries wall-clock times with no timezone marker, which Qt::ISODate parses
+    // as LocalTime -- the spec the whole model uses. Should a file carry a 'Z' anyway,
+    // keep its digits rather than its instant, so every date in the model still means
+    // the wall clock Project displays.
+    const QDateTime parsed = QDateTime::fromString(s.trimmed(), Qt::ISODate);
+    // date()/time() read the value in its own spec, so this keeps the digits the file
+    // wrote rather than the instant they denote.
+    return parsed.isValid() ? QDateTime(parsed.date(), parsed.time()) : QDateTime();
 }
 
 QString formatDateTime(const QDateTime &dt)
 {
-    // MSPDI carries local wall-clock times with no timezone marker. Qt::ISODate
-    // appends 'Z' for UTC-spec values (e.g. those decoded from a .mpp), which
-    // real MS Project exports never do and which makes MS Project shift or
-    // reject the value on import. Emit the wall-clock unchanged, no 'Z'.
+    // MSPDI carries local wall-clock times with no timezone marker. Qt::ISODate would
+    // append 'Z' for any UTC-spec value that reached here, which real MS Project
+    // exports never do and which makes MS Project shift or reject the value on
+    // import. Emit the wall clock unchanged, no 'Z'.
     return dt.toString(QStringLiteral("yyyy-MM-ddTHH:mm:ss"));
 }
 

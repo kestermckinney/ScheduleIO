@@ -15,8 +15,8 @@ schedule::Project materialProject()
     schedule::Task task;
     task.uniqueId = 1;
     task.name = QStringLiteral("Pour concrete");
-    task.start = QDateTime(QDate(2026, 8, 3), QTime(8, 0), Qt::UTC);
-    task.finish = QDateTime(QDate(2026, 8, 7), QTime(17, 0), Qt::UTC);
+    task.start = QDateTime(QDate(2026, 8, 3), QTime(8, 0));
+    task.finish = QDateTime(QDate(2026, 8, 7), QTime(17, 0));
     task.durationMillis = 40 * kHour;
     project.tasks.append(task);
 
@@ -71,9 +71,9 @@ void TstMaterialCosting::actualConsumptionMovesPerUseToActualCost()
 {
     schedule::Project project = materialProject();
     schedule::Assignment &assignment = project.assignments.first();
-    const QDateTime first(QDate(2026, 8, 3), QTime(0, 0), Qt::UTC);
-    const QDateTime second(QDate(2026, 8, 4), QTime(0, 0), Qt::UTC);
-    const QDateTime third(QDate(2026, 8, 5), QTime(0, 0), Qt::UTC);
+    const QDateTime first(QDate(2026, 8, 3), QTime(0, 0));
+    const QDateTime second(QDate(2026, 8, 4), QTime(0, 0));
+    const QDateTime third(QDate(2026, 8, 5), QTime(0, 0));
     QVERIFY(assignment.setTimephasedMaterialInPeriod(
         schedule::TimephasedValue::ActualWork, first, second, 10.0));
     QVERIFY(assignment.setTimephasedMaterialInPeriod(

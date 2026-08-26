@@ -15,7 +15,7 @@ schedule::Project contourProject()
     schedule::Project project;
     schedule::Task task;
     task.uniqueId = 1;
-    task.start = QDateTime(QDate(2026, 8, 3), QTime(8, 0), Qt::UTC);
+    task.start = QDateTime(QDate(2026, 8, 3), QTime(8, 0));
     task.durationMillis = 80 * kHour;
     task.finish = schedule::WorkCalendar().addWork(task.start, task.durationMillis);
     task.workMillis = 80 * kHour;
@@ -64,8 +64,8 @@ void TstWorkContouring::backAndFrontLoadedPreserveAggregate()
     schedule::Project project = contourProject();
     QVERIFY(schedule::TaskScheduling::setWorkContour(
         project, 10, schedule::WorkContouring::BackLoaded));
-    const QDateTime firstDay(QDate(2026, 8, 3), QTime(0, 0), Qt::UTC);
-    const QDateTime lastDay(QDate(2026, 8, 14), QTime(0, 0), Qt::UTC);
+    const QDateTime firstDay(QDate(2026, 8, 3), QTime(0, 0));
+    const QDateTime lastDay(QDate(2026, 8, 14), QTime(0, 0));
     const auto &back = project.assignments.first();
     QCOMPARE(back.workContour, int(schedule::WorkContouring::BackLoaded));
     QCOMPARE(back.timephasedWorkInPeriod(
@@ -94,8 +94,8 @@ void TstWorkContouring::customContourPreservesManualBuckets()
 {
     schedule::Project project = contourProject();
     schedule::Assignment &assignment = project.assignments.first();
-    const QDateTime from(QDate(2026, 8, 3), QTime(8, 0), Qt::UTC);
-    const QDateTime to(QDate(2026, 8, 3), QTime(17, 0), Qt::UTC);
+    const QDateTime from(QDate(2026, 8, 3), QTime(8, 0));
+    const QDateTime to(QDate(2026, 8, 3), QTime(17, 0));
     QVERIFY(assignment.setTimephasedWorkInPeriod(
         schedule::TimephasedValue::RemainingWork, from, to, 12 * kHour));
     assignment.workContour = schedule::WorkContouring::Contoured;
