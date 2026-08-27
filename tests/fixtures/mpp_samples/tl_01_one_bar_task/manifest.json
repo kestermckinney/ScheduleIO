@@ -1,0 +1,11 @@
+{
+  "fixture": "tl_01_one_bar_task",
+  "description": "one task on the timeline as a bar, default range",
+  "note": "Timeline state lives in the .mpp <TLViewData> XML only; MSPDI .xml carries none of it. This manifest records intent; comLog records which COM calls actually succeeded.",
+  "comLog": [
+    "TaskOnTimelineEx(id=2,bar=0): ok"
+  ],
+  "intent": "one task on the timeline as a bar, default range",
+  "onTimeline": [2],
+  "display": {"2": "bar"}
+}

@@ -1,0 +1,26 @@
+{
+  "fixture": "tl_05_two_bars",
+  "description": "two timeline bars; tasks 2,3 on bar 0 and 5,6 on bar 1",
+  "note": "Timeline state lives in the .mpp <TLViewData> XML only; MSPDI .xml carries none of it. This manifest records intent; comLog records which COM calls actually succeeded.",
+  "comLog": [
+    "InsertTimelineBar(1): ok",
+    "TaskOnTimelineEx(id=2,bar=0): ok",
+    "TaskOnTimelineEx(id=3,bar=0): ok",
+    "TaskOnTimelineEx(id=5,bar=1): ok",
+    "TaskOnTimelineEx(id=6,bar=1): ok"
+  ],
+  "intent": "two timeline bars; tasks 2,3 on bar 0 and 5,6 on bar 1",
+  "onTimeline": [
+    2,
+    3,
+    5,
+    6
+  ],
+  "bars": 2,
+  "barOf": {
+    "2": 0,
+    "3": 0,
+    "5": 1,
+    "6": 1
+  }
+}

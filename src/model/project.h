@@ -11,6 +11,7 @@
 #include "model/relation.h"
 #include "model/resource.h"
 #include "model/task.h"
+#include "model/timelineviewsettings.h"
 #include "model/usageviewsettings.h"
 #include "model/viewstyles.h"
 
@@ -61,10 +62,9 @@ public:
     QByteArray mppFontBases;
 
     // Original MPP14 container used as the presentation template for an edited
-    // save.  The semantic model does not decode every view stream (notably the
-    // Microsoft Project Timeline view), so retaining the source lets the writer
-    // preserve native view and table rowsets from storage 214 while
-    // regenerating backend records from its stock template.
+    // save.  Retaining the source lets the writer preserve native view and
+    // table rowsets from storage 214 that the semantic model does not decode
+    // while regenerating backend records from its stock template.
     // Like mppFontBases, this is opaque and intentionally excluded from
     // semantic equality.
     QByteArray mppSourceTemplate;
@@ -91,6 +91,11 @@ public:
     // Separate style template for the Calendar view (text styles + bar colours).
     // Falls back to viewStyles when not present.
     ViewStyles calendarStyles;
+
+    // Decoded Microsoft Project Timeline view (the <TLViewData> XML document in
+    // storage 214). Like the UsageViewSettings members above, this is not part
+    // of Project::operator==; the writer re-emits it when timelineView.modified.
+    TimelineViewSettings timelineView;
 
     // User-chosen accent colour for the report charts' primary series (0xRRGGBB), or
     // TextStyle::kAutomatic to keep the built-in blue. Persisted via XML/scaffold; MPP

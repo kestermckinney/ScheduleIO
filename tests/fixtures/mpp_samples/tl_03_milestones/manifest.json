@@ -1,0 +1,18 @@
+{
+  "fixture": "tl_03_milestones",
+  "description": "two milestones on the timeline",
+  "note": "Timeline state lives in the .mpp <TLViewData> XML only; MSPDI .xml carries none of it. This manifest records intent; comLog records which COM calls actually succeeded.",
+  "comLog": [
+    "TaskOnTimelineEx(id=4,bar=0): ok",
+    "TaskOnTimelineEx(id=7,bar=0): ok"
+  ],
+  "intent": "two milestones on the timeline",
+  "onTimeline": [
+    4,
+    7
+  ],
+  "milestones": [
+    4,
+    7
+  ]
+}

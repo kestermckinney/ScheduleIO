@@ -513,6 +513,53 @@ Hard-won behaviours:
 - The reader collapses records to `Task::rowFormat` with priority whole-row >
   Name cell > any other cell, applying only mask-gated properties.
 
+## Timeline view (DONE for the modelled subset — `src/codec/viewformat.cpp`)
+
+The Microsoft Project Timeline is **not** a binary blob: it is a self-describing
+UTF-16LE XML document, `<TLViewData>`, held **byte-identically in two places**:
+- the `   214/CV_iew` Var2Data record of type **47**, keyed by the timeline
+  view's uid (the view = FixedData record with `viewType u16@112 == 16`);
+- Props9 item key **574619695** (`0x2240000F`) of that view's type-6 PROPERTIES.
+
+MS Project keeps the two copies in lock-step; the writer re-emits both from the
+same `serializeTimelineXml()` output. Reverse-engineered 2026-08-27 from
+`tests/fixtures/mpp_samples/tl_*` (15 fixtures generated on the dpr2hw3 COM
+oracle by `generate_timeline_samples.py` — the Timeline object model has **no**
+`AddToTimeline`; the real members are `TaskOnTimelineEx` / `InsertTimelineBar` /
+`TimelineBarSetLabel` / `TimelineBarDateRange` / `TimelineShowHide` /
+`TimelineFormat` on the `_Global`/`_MSProject` typelib interfaces).
+
+`<TLViewData dfltTLView>` children:
+- `<tlbarSet>` — `<tl id>` bars. `id 0` is Project's hidden internal bar (always
+  spelled out in full, `label` last). `id 1..` are the visible bars; terse
+  `<tl id="N"/>` unless customised: `label`, `useCustomDates="1"` +
+  `startDate="YYYY/MM/DD"` + `finishDate` (label first, then the date trio).
+- `<tskSet>` `<t>` + `<mlSet>` `<m>` — **every member appears in BOTH sets**,
+  same GUID `id`, `uid`, `onTL="1"`, `barid` (= the owning `<tl id>`). A default
+  (unformatted) member carries only those four attrs; `fmt` (→ `<fmtSet>`),
+  `ch`, `x/y/h/top` appear only on the sentinel `uid="4294967295"` template row
+  and on members the user has custom-formatted. New members can use any UUID —
+  Project re-homes them into its own `...-F111-813A-<machine>` GUID family on the
+  next native save, no repair.
+- `<options>` — `dateFormat`, `numTextLines`, `showPanZoom`; and (names look
+  transposed vs Project's `PjTimelineShowHide` enum, verified against fixtures)
+  `showTS` = the **Today line** toggle, `showToday` = the **Timescale** toggle.
+  `panZoomT`/`timescaleT`/`todayT`/`labelTextStyle` are `<style>` id references.
+- `<txtSet>` `<style id type thm clr sz font bold ital und strk>` — one per
+  category `type` 0..11, overrides at id 12+. `thm="0001"` = theme colour,
+  `thm="0000"` + `clr="FFRRGGBB"` = explicit.
+- `<fltSet>`/`<fmtSet>` and any unknown `<options>` attrs are not modelled; the
+  writer transforms `rawXml` element-by-element (`QXmlStreamReader` → `Writer`)
+  and copies them through unchanged. Output is byte-identical for an unmodified
+  model, so an unedited resave routes through the verbatim CV_iew copy.
+
+Not decoded: the callout / text-only per-item display style (needs UI
+Automation — `TimelineInsertTask` pops a picker), and the "shown in the Gantt
+split" flag (in the CV_iew FixedData record bytes ~100-138, not the XML).
+Model: `src/model/timelineviewsettings.h` (not part of `Project::operator==`,
+like the Usage views — `modified` + `ViewFormat::wantsPatch()` drive the write).
+Probe: `tests/probe/dump_timeline.cpp`.
+
 ## Diagnostics
 
 - `dump_task <file.mpp>` — hex-dumps `TBkndTask` streams and tallies string-bearing field codes.

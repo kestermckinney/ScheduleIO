@@ -1,0 +1,21 @@
+{
+  "fixture": "tl_11_detailed",
+  "description": "TimelineFormat(NumLines=2, Minimized=False) -- detailed",
+  "note": "Timeline state lives in the .mpp <TLViewData> XML only; MSPDI .xml carries none of it. This manifest records intent; comLog records which COM calls actually succeeded.",
+  "comLog": [
+    "TaskOnTimelineEx(id=2,bar=0): ok",
+    "TaskOnTimelineEx(id=3,bar=0): ok",
+    "TaskOnTimelineEx(id=5,bar=0): ok",
+    "TimelineFormat(lines=2,min=False): ok"
+  ],
+  "intent": "TimelineFormat(NumLines=2, Minimized=False) -- detailed",
+  "onTimeline": [
+    2,
+    3,
+    5
+  ],
+  "option": {
+    "minimized": false,
+    "numLines": 2
+  }
+}

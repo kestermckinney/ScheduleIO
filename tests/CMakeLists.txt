@@ -64,6 +64,7 @@ scheduleio_add_test(tst_availability_oracle oracle/tst_availability_oracle.cpp)
 scheduleio_add_test(tst_calendar_oracle oracle/tst_calendar_oracle.cpp)
 scheduleio_add_test(tst_assignment_oracle oracle/tst_assignment_oracle.cpp)
 scheduleio_add_test(tst_format_oracle oracle/tst_format_oracle.cpp)
+scheduleio_add_test(tst_timeline_oracle oracle/tst_timeline_oracle.cpp)
 
 # XmlIO - MS Project compatible XML (MSPDI) read/write over the shared model
 scheduleio_add_test(tst_xml_roundtrip      xml/tst_xml_roundtrip.cpp)
@@ -123,6 +124,10 @@ target_include_directories(dump_fontbases PRIVATE ${CMAKE_SOURCE_DIR}/src)
 qt_add_executable(dump_cview probe/dump_cview.cpp)
 target_link_libraries(dump_cview PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_cview PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(dump_timeline probe/dump_timeline.cpp)
+target_link_libraries(dump_timeline PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_timeline PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 qt_add_executable(resave probe/resave.cpp)
 target_link_libraries(resave PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)

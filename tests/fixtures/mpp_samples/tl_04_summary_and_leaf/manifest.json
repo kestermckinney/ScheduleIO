@@ -1,0 +1,19 @@
+{
+  "fixture": "tl_04_summary_and_leaf",
+  "description": "a summary task plus leaves on the timeline",
+  "note": "Timeline state lives in the .mpp <TLViewData> XML only; MSPDI .xml carries none of it. This manifest records intent; comLog records which COM calls actually succeeded.",
+  "comLog": [
+    "TaskOnTimelineEx(id=1,bar=0): ok",
+    "TaskOnTimelineEx(id=2,bar=0): ok",
+    "TaskOnTimelineEx(id=3,bar=0): ok",
+    "TaskOnTimelineEx(id=5,bar=0): ok"
+  ],
+  "intent": "a summary task plus leaves on the timeline",
+  "onTimeline": [
+    1,
+    2,
+    3,
+    5
+  ],
+  "summaryOnTimeline": 1
+}

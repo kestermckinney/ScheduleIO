@@ -1,0 +1,8 @@
+{
+  "fixture": "tl_14_empty_timeline",
+  "description": "Timeline view present, zero tasks on it",
+  "note": "Timeline state lives in the .mpp <TLViewData> XML only; MSPDI .xml carries none of it. This manifest records intent; comLog records which COM calls actually succeeded.",
+  "comLog": [],
+  "intent": "Timeline view present, zero tasks on it",
+  "onTimeline": []
+}
