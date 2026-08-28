@@ -183,39 +183,74 @@ bool ResourceLeveling::isOverallocated(const Project &project, int resourceUniqu
     return !overForResource(project, resourceUniqueId).isEmpty();
 }
 
-qint64 ResourceLeveling::workInPeriod(const Project &project, const Assignment &assignment,
-                                      const QDateTime &from, const QDateTime &to)
+ResourceLeveling::WorkProfile ResourceLeveling::workProfile(const Project &project,
+                                                            const Assignment &assignment)
 {
-    qint64 timephased = 0;
-    bool hasAuthoritativeWork = false;
+    WorkProfile profile;
+    profile.assignment = &assignment;
     for (const TimephasedValue &v : assignment.timephasedValues) {
         if (v.type == TimephasedValue::RemainingWork
             || v.type == TimephasedValue::ActualWork) {
-            hasAuthoritativeWork = true;
-            timephased += v.durationInPeriod(from, to);
+            profile.timephased = true;
+            break;
         }
     }
-    if (hasAuthoritativeWork)
-        return timephased;
+    if (profile.timephased)
+        return profile;
 
     const Span s = spanOf(project, assignment);
     if (!s.start.isValid() || !s.finish.isValid() || s.finish <= s.start)
+        return profile;
+    profile.start = s.start;
+    profile.finish = s.finish;
+    const Task *task = taskByUid(project, assignment.taskUniqueId);
+    profile.calendar = task
+        ? SchedulingCalendar::assignment(project, *task, assignment)
+        : Scheduler::projectCalendar(project);
+    profile.spanWork = profile.calendar.workBetween(s.start, s.finish);
+
+    // The two ids that calendar was derived from -- kept in step with
+    // SchedulingCalendar::assignment(), which is what built it above.
+    if (task) {
+        profile.taskCalendarUid = task->calendarUniqueId;
+        const Resource *resource = resourceByUid(project, assignment.resourceUniqueId);
+        if (!task->manual && !task->ignoreResourceCalendar && resource
+            && resource->type == Resource::Type::Work)
+            profile.resourceCalendarUid = resource->calendarUniqueId;
+    }
+    return profile;
+}
+
+qint64 ResourceLeveling::workInPeriod(const WorkProfile &profile,
+                                      const QDateTime &from, const QDateTime &to)
+{
+    if (!profile.assignment)
+        return 0;
+    if (profile.timephased) {
+        qint64 timephased = 0;
+        for (const TimephasedValue &v : profile.assignment->timephasedValues)
+            if (v.type == TimephasedValue::RemainingWork
+                || v.type == TimephasedValue::ActualWork)
+                timephased += v.durationInPeriod(from, to);
+        return timephased;
+    }
+    if (!profile.start.isValid() || !profile.finish.isValid() || profile.spanWork <= 0)
         return 0;
     // Cheap reject first: most grid cells fall outside the assignment's span, so avoid
     // the (calendar-walking) work computations unless the period actually overlaps it.
-    const QDateTime a = qMax(s.start, from);
-    const QDateTime b = qMin(s.finish, to);
+    const QDateTime a = qMax(profile.start, from);
+    const QDateTime b = qMin(profile.finish, to);
     if (b <= a)
         return 0;
-    const Task *task = taskByUid(project, assignment.taskUniqueId);
-    const WorkCalendar calendar = task
-        ? SchedulingCalendar::assignment(project, *task, assignment)
-        : Scheduler::projectCalendar(project);
-    const qint64 total = calendar.workBetween(s.start, s.finish);
-    if (total <= 0)
-        return 0;
-    const qint64 overlap = calendar.workBetween(a, b);
-    return qint64(std::llround(double(assignment.workMillis) * double(overlap) / double(total)));
+    const qint64 overlap = profile.calendar.workBetween(a, b);
+    return qint64(std::llround(double(profile.assignment->workMillis) * double(overlap)
+                               / double(profile.spanWork)));
+}
+
+qint64 ResourceLeveling::workInPeriod(const Project &project, const Assignment &assignment,
+                                      const QDateTime &from, const QDateTime &to)
+{
+    return workInPeriod(workProfile(project, assignment), from, to);
 }
 
 qint64 ResourceLeveling::resourceWork(const Project &project, int resourceUniqueId)
