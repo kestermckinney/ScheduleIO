@@ -34,6 +34,7 @@ const QString kResourceUsageSelection = QStringLiteral("ResourceUsageDetailSelec
 // Props9 item keys (MPXJ PropsKey).
 constexpr quint32 kKeyStyleData = 574619656u;         // STYLE_DATA
 constexpr quint32 kKeyColumnProperties = 574619660u;  // COLUMN_PROPERTIES
+constexpr quint32 kKeyBarExceptions = 574619661u;     // BAR_EXCEPTION_STYLES
 constexpr quint32 kKeyTableName = 574619658u;         // TABLE_NAME
 constexpr quint32 kKeyTableProperties = 574619655u;   // TABLE_PROPERTIES
 constexpr quint32 kKeyViewFields = 574619708u;        // VIEW_FIELDS (Usage details)
@@ -808,6 +809,133 @@ QByteArray findViewRecord(const QByteArray &fixedMeta, const QByteArray &fixedDa
     return {};
 }
 
+// ---- Per-task bar formatting (BAR_EXCEPTION_STYLES) ---------------------------
+//
+// Format > Bar on a single task, as opposed to Format > Bar Styles which edits a
+// whole category. The Gantt view's Props9 item 574619661 is a bare array of
+// 71-byte records, one per formatted task, sorted by task unique id, and absent
+// entirely when nothing is formatted. Layout (established against files MS
+// Project itself wrote, sweeping GanttBarFormat over the colour, shape, pattern
+// and text arguments):
+//
+//     +0   u32  task unique id
+//     +4   u16  the bar style the exception is based on (0 for one Project
+//               writes for a plain colour change)
+//     +6   u8   middle shape
+//     +7   u8   middle pattern
+//     +8   4    middle colour (r,g,b + automatic flag), our Task::barColor
+//     +20  u8   start shape (v % 21) and type (v / 21)
+//     +21  4    start colour
+//     +33  u8   end shape and type
+//     +34  4    end colour
+//     +49  5x4  left/right/top/bottom/inside bar text, each a task field id
+//               (0x0B400000 | field index) or 0xFFFFFFFF for none
+//     +69  u16  trailing flag (0 or 2 in the wild)
+//
+// The gaps are zero in every sample and are carried through untouched, as is
+// everything but the middle colour: the record replaces a task's whole bar, so
+// dropping the parts we don't model would silently restyle bars formatted in
+// Project.
+constexpr int kBarExcSize = 71;
+constexpr int kBarExcUid = 0;
+constexpr int kBarExcMiddleShape = 6;
+constexpr int kBarExcMiddlePattern = 7;
+constexpr int kBarExcMiddleColor = 8;
+constexpr int kBarExcRightText = 53;
+constexpr int kBarExcTrailing = 69;
+
+// What MS Project writes into a brand-new exception when only the colour was
+// changed: a solid rectangle carrying the stock Gantt bar's right-hand text.
+constexpr quint8 kBarExcDefaultShape = 1;
+constexpr quint8 kBarExcDefaultPattern = 1;
+constexpr quint32 kBarExcDefaultRightText = 0x0B400031u;   // field 49
+constexpr quint16 kBarExcDefaultTrailing = 2;
+
+void readBarExceptions(const QByteArray &d, schedule::Project *out)
+{
+    QHash<int, int> rowByUid;
+    for (int i = 0; i < out->tasks.size(); ++i)
+        rowByUid.insert(out->tasks[i].uniqueId, i);
+
+    const int count = d.size() / kBarExcSize;
+    for (int i = 0; i < count; ++i) {
+        const int o = i * kBarExcSize;
+        const int uid = int(rdU32(d, o + kBarExcUid));
+        const auto row = rowByUid.constFind(uid);
+        if (row == rowByUid.constEnd())
+            continue;
+        // An all-zero colour is Project's "no override": a record can exist to
+        // carry a shape or a bar text on its own. Verified against Project
+        // itself -- a task whose record reads 00 00 00 00 draws the ordinary
+        // bar colour (#8ABBED on the stock Gantt), not black. The cost is that
+        // black is not expressible here; Project's own colour argument treats 0
+        // as automatic too, so it cannot set a black bar either.
+        const qint32 color = rdColor(d, o + kBarExcMiddleColor);
+        if (color == 0)
+            continue;
+        out->tasks[row.value()].barColor = color;
+    }
+}
+
+QByteArray buildBarExceptions(const schedule::Project &in)
+{
+    // Start from the source file's own array so a task Project formatted keeps
+    // its shapes, ends and bar text; only the colour is ours to say anything
+    // about.
+    QByteArray d = in.mppBarExceptions;
+    if (d.size() % kBarExcSize != 0)
+        d.clear();
+
+    QHash<int, int> recordByUid;
+    for (int i = 0; i < d.size() / kBarExcSize; ++i)
+        recordByUid.insert(int(rdU32(d, i * kBarExcSize + kBarExcUid)), i);
+
+    for (const schedule::Task &task : in.tasks) {
+        const auto existing = recordByUid.constFind(task.uniqueId);
+        if (existing != recordByUid.constEnd()) {
+            // Clearing a colour leaves the record in place with the colour set
+            // back to automatic: it may still carry shape or text formatting,
+            // and dropping it would take that with it.
+            wrColor(d, existing.value() * kBarExcSize + kBarExcMiddleColor, task.barColor);
+            continue;
+        }
+        if (task.barColor == schedule::TextStyle::kAutomatic)
+            continue;
+
+        QByteArray record(kBarExcSize, '\0');
+        wrU32(record, kBarExcUid, quint32(task.uniqueId));
+        // Style id stays 0, byte-for-byte what Project itself writes for a
+        // colour-only exception (verified by diffing our record against one
+        // Project authored for the same task and colour: identical).
+        record[kBarExcMiddleShape] = char(kBarExcDefaultShape);
+        record[kBarExcMiddlePattern] = char(kBarExcDefaultPattern);
+        wrColor(record, kBarExcMiddleColor, task.barColor);
+        for (int text = 49; text < 69; text += 4)
+            wrU32(record, text, 0xFFFFFFFFu);
+        wrU32(record, kBarExcRightText, kBarExcDefaultRightText);
+        wrU16(record, kBarExcTrailing, kBarExcDefaultTrailing);
+        recordByUid.insert(task.uniqueId, d.size() / kBarExcSize);
+        d.append(record);
+    }
+
+    // Project keeps the array in task-unique-id order; appended records have to
+    // be sorted back in or it re-sorts (and rewrites) the whole item on open.
+    const int count = d.size() / kBarExcSize;
+    QVector<QByteArray> records;
+    records.reserve(count);
+    for (int i = 0; i < count; ++i)
+        records.append(d.mid(i * kBarExcSize, kBarExcSize));
+    std::sort(records.begin(), records.end(),
+              [](const QByteArray &a, const QByteArray &b) {
+        return rdU32(a, kBarExcUid) < rdU32(b, kBarExcUid);
+    });
+    QByteArray sorted;
+    sorted.reserve(d.size());
+    for (const QByteArray &record : records)
+        sorted.append(record);
+    return sorted;
+}
+
 QByteArray buildColumnProperties(const schedule::Project &in)
 {
     QByteArray d;
@@ -1324,6 +1452,12 @@ void read(const CompoundFile &cf, schedule::Project *out)
         readStyleData(style->data, &out->viewStyles);
     if (const PropsItem *cols = props.find(kKeyColumnProperties))
         readColumnProperties(cols->data, out);
+    if (const PropsItem *bars = props.find(kKeyBarExceptions)) {
+        // Kept whole as well as decoded: a save has to hand back the shapes and
+        // bar text alongside the one field (the middle colour) we model.
+        out->mppBarExceptions = bars->data;
+        readBarExceptions(bars->data, out);
+    }
 
     // readStyleData() only decodes each text category's fontBaseIndex; resolve it
     // against the font table so callers (e.g. the Gantt view's bar/task-detail text)
@@ -1375,8 +1509,11 @@ bool wantsPatch(const schedule::Project &in)
         return true;
     if (in.timelineView.present && in.timelineView.modified)
         return true;
+    if (!in.mppBarExceptions.isEmpty())
+        return true;
     for (const schedule::Task &t : in.tasks)
-        if (!t.rowFormat.isDefault() || !t.cellFormats.isEmpty())
+        if (!t.rowFormat.isDefault() || !t.cellFormats.isEmpty()
+            || t.barColor != schedule::TextStyle::kAutomatic)
             return true;
     return false;
 }
@@ -1455,6 +1592,27 @@ bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &
                 // a nonzero flags value; match that rather than default to 0.
                 item.flags = 1;
                 item.data = colProps;
+                props.items.append(item);
+            }
+
+            const QByteArray barExceptions = buildBarExceptions(in);
+            if (PropsItem *bars = props.find(kKeyBarExceptions)) {
+                if (barExceptions.isEmpty()) {
+                    for (int i = 0; i < props.items.size(); ++i)
+                        if (props.items[i].key == kKeyBarExceptions) {
+                            props.items.removeAt(i);
+                            break;
+                        }
+                } else {
+                    bars->data = barExceptions;
+                    if (bars->flags == 0)
+                        bars->flags = 1;
+                }
+            } else if (!barExceptions.isEmpty()) {
+                PropsItem item;
+                item.key = kKeyBarExceptions;
+                item.flags = 1;
+                item.data = barExceptions;
                 props.items.append(item);
             }
             patched.insert(ganttRec, buildProps9(props));

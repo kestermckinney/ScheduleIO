@@ -61,6 +61,14 @@ public:
     // stock container template.
     QByteArray mppFontBases;
 
+    // Opaque MPP14 BAR_EXCEPTION_STYLES payload (the Gantt view Props9 item
+    // 574619661): MS Project's per-task bar formatting, 71 bytes a task. Only
+    // the middle-bar colour is modelled (Task::barColor); the rest -- shapes,
+    // patterns, start/end ends, bar text -- is preserved verbatim through a
+    // save so hand-formatting done in Project survives a round trip. Opaque and
+    // excluded from semantic equality, like mppFontBases.
+    QByteArray mppBarExceptions;
+
     // Original MPP14 container used as the presentation template for an edited
     // save.  Retaining the source lets the writer preserve native view and
     // table rowsets from storage 214 that the semantic model does not decode

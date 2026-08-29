@@ -125,6 +125,10 @@ qt_add_executable(dump_cview probe/dump_cview.cpp)
 target_link_libraries(dump_cview PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_cview PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+qt_add_executable(dump_barexc probe/dump_barexc.cpp)
+target_link_libraries(dump_barexc PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_barexc PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
 qt_add_executable(dump_timeline probe/dump_timeline.cpp)
 target_link_libraries(dump_timeline PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_timeline PRIVATE ${CMAKE_SOURCE_DIR}/src)

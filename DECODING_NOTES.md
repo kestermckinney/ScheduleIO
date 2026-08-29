@@ -513,6 +513,51 @@ Hard-won behaviours:
 - The reader collapses records to `Task::rowFormat` with priority whole-row >
   Name cell > any other cell, applying only mask-gated properties.
 
+## Per-task bar formatting (BAR_EXCEPTION_STYLES) — DONE
+
+Format > Bar on a single task, as against Format > Bar Styles which edits a whole
+category. The Gantt view's Props9 item **574619661** is a bare array of **71-byte**
+records, one per formatted task, **sorted by task unique id**, and absent entirely
+when nothing is formatted. Established against files MS Project itself wrote,
+sweeping `Application.GanttBarFormat` over the colour, shape, pattern, end and
+bar-text arguments.
+
+| offset | size | field |
+|--------|------|-------|
+| +0  | 4 | task unique id |
+| +4  | 2 | bar style the exception is based on (0 for a plain colour change) |
+| +6  | 1 | middle shape |
+| +7  | 1 | middle pattern |
+| +8  | 4 | middle colour — r, g, b + automatic flag |
+| +20 | 1 | start shape (`v % 21`) and type (`v / 21`) |
+| +21 | 4 | start colour |
+| +33 | 1 | end shape and type |
+| +34 | 4 | end colour |
+| +49 | 5x4 | left/right/top/bottom/inside bar text: a task field id (`0x0B400000 | index`) or `0xFFFFFFFF` for none |
+| +69 | 2 | trailing flag (0 or 2 in the wild) |
+
+The remaining bytes are zero in every sample seen and are carried through
+untouched. Only the middle colour is modelled (`Task::barColor`); the whole array
+is also kept verbatim on `Project::mppBarExceptions`, because the record replaces
+a task's entire bar and dropping the parts we do not model would silently restyle
+bars formatted in Project.
+
+- `GanttBarFormat`'s colour arguments take a **palette index, not an RGB**, and
+  the record stores the resolved RGB: 1 red, 2 yellow, 3 lime, 4 aqua, 5 blue,
+  6 fuchsia, 7 white, 8 maroon, 9 green, 10 olive, 11 navy, 12 teal, 13 purple,
+  14 silver, 15 gray. **0 is automatic**, and there is no black — writing an
+  explicit `#000000` is therefore indistinguishable from "no override".
+- An all-zero colour means **inherit**, not black: a task carrying such a record
+  draws the ordinary bar colour (`#8ABBED` on the stock Gantt), confirmed by
+  screenshotting Project. Project normalises our all-zero back to `00 00 00 FF`
+  on re-save, which is the same statement in its own canonical form.
+- MS Project's automation rejects `GanttBarFormat` with positional
+  `Type::Missing` placeholders ("The argument value is not valid", even for a
+  no-op). Passing the arguments **by name** through
+  `InvokeMember(..., namedParameters)` works.
+- Our writer emits records byte-identical to Project's own for the same task and
+  colour, and Project preserves them through an open + re-save.
+
 ## Timeline view (DONE for the modelled subset — `src/codec/viewformat.cpp`)
 
 The Microsoft Project Timeline is **not** a binary blob: it is a self-describing

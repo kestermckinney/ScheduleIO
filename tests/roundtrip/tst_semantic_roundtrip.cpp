@@ -87,6 +87,8 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
                              .arg(x.customFields.at(n).name, x.customFields.at(n).value.toString(),
                                   y.customFields.at(n).name, y.customFields.at(n).value.toString());
         }
+        if (x.barColor != y.barColor)
+            f << QStringLiteral("barColor %1/%2").arg(x.barColor).arg(y.barColor);
         if (x.rowFormat != y.rowFormat)
             f << QStringLiteral("rowFormat b%1%2 i%3%4 u%5%6 s%7%8 color %9/%10 back %11/%12 pat %13/%14")
                      .arg(x.rowFormat.bold).arg(y.rowFormat.bold)
@@ -258,6 +260,7 @@ private slots:
     void normalRowWeightIsWrittenExplicitly();
     void parentRowsetManifestsAreConsistent();
     void timelineViewSurvivesEditedFixtureSave();
+    void perTaskBarColorSurvivesEditedFixtureSave();
     void realFixtures_data();
     void realFixtures();
 
@@ -997,6 +1000,83 @@ void TstSemanticRoundtrip::parentRowsetManifestsAreConsistent()
         return issue.contains(QStringLiteral("TBkndTask"))
             && issue.contains(QStringLiteral("declares 4 rows"));
     }));
+}
+
+// Format > Bar on a single task: BAR_EXCEPTION_STYLES (Gantt view Props9 item
+// 574619661, 71 bytes a record). A colour set here has to survive a save, and a
+// task Project itself formatted has to keep the parts of the record we do not
+// model -- shape, pattern, ends, bar text.
+void TstSemanticRoundtrip::perTaskBarColorSurvivesEditedFixtureSave()
+{
+    QString fixturePath;
+    for (const QString &path : fixtures::mppFiles()) {
+        if (QFileInfo(path).fileName().compare(QStringLiteral("Average Project.mpp"),
+                                               Qt::CaseInsensitive) == 0) {
+            fixturePath = path;
+            break;
+        }
+    }
+    if (fixturePath.isEmpty())
+        QSKIP("Average Project.mpp fixture is not installed");
+
+    MppIO reader;
+    QVERIFY2(reader.open(fixturePath), qPrintable(reader.errorString()));
+    schedule::Project project = reader.project();
+    QVERIFY(!project.mppBarExceptions.isEmpty());   // the fixture carries records
+    QVERIFY(project.tasks.size() > 3);
+
+    // A task with no record of its own, so the writer has to create one, and a
+    // second colour on a different task to prove the array stays sorted.
+    const int firstUid = project.tasks.at(1).uniqueId;
+    const int secondUid = project.tasks.at(3).uniqueId;
+    project.tasks[1].barColor = 0xC0392B;
+    project.tasks[3].barColor = 0x1F8A4C;
+
+    MppIO writer;
+    writer.setProject(project);
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString path = temp.filePath(QStringLiteral("barcolor.mpp"));
+    QVERIFY2(writer.save(path), qPrintable(writer.errorString()));
+
+    MppIO back;
+    QVERIFY2(back.open(path), qPrintable(back.errorString()));
+    const auto colorOf = [&back](int uid) -> qint32 {
+        for (const schedule::Task &t : back.project().tasks)
+            if (t.uniqueId == uid)
+                return t.barColor;
+        return schedule::TextStyle::kAutomatic;
+    };
+    QCOMPARE(colorOf(firstUid), 0xC0392B);
+    QCOMPARE(colorOf(secondUid), 0x1F8A4C);
+
+    // Records are kept in unique-id order, the way Project writes them.
+    const QByteArray &array = back.project().mppBarExceptions;
+    QCOMPARE(array.size() % 71, 0);
+    quint32 previous = 0;
+    for (int o = 0; o + 71 <= array.size(); o += 71) {
+        const quint32 uid = qFromLittleEndian<quint32>(
+            reinterpret_cast<const uchar *>(array.constData()) + o);
+        QVERIFY2(uid > previous, "bar exception records must be sorted by task uid");
+        previous = uid;
+    }
+
+    // Clearing a colour leaves the record in place with the colour automatic --
+    // it may still carry shape or bar-text formatting that is not ours to drop.
+    schedule::Project cleared = back.project();
+    for (schedule::Task &t : cleared.tasks)
+        if (t.uniqueId == firstUid)
+            t.barColor = schedule::TextStyle::kAutomatic;
+    MppIO rewriter;
+    rewriter.setProject(cleared);
+    const QString clearedPath = temp.filePath(QStringLiteral("cleared.mpp"));
+    QVERIFY2(rewriter.save(clearedPath), qPrintable(rewriter.errorString()));
+    MppIO afterClear;
+    QVERIFY2(afterClear.open(clearedPath), qPrintable(afterClear.errorString()));
+    QCOMPARE(afterClear.project().mppBarExceptions.size(), array.size());
+    for (const schedule::Task &t : afterClear.project().tasks)
+        if (t.uniqueId == firstUid)
+            QCOMPARE(t.barColor, schedule::TextStyle::kAutomatic);
 }
 
 void TstSemanticRoundtrip::timelineViewSurvivesEditedFixtureSave()
