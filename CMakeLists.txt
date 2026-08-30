@@ -73,6 +73,7 @@ set(SCHEDULEIO_HEADERS
     src/codec/fieldmap.h
     src/codec/bkndvardata.h
     src/codec/propsreader.h
+    src/codec/propskeys.h
     src/codec/mppfieldids.h
     src/codec/viewformat.h
     src/model/project.h

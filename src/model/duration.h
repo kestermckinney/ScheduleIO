@@ -28,16 +28,34 @@ enum Unit {
 };
 
 // Working-time conversion constants, mirroring MS Project's defaults
-// (Options > Schedule): 8 hours/day, 40 hours/week, 20 days/month.
+// (Options > Calendar): 8 hours/day, 40 hours/week, 20 days/month. These are the
+// fall-back values; the live per-document figures come from the working-time
+// profile below.
 constexpr qint64 kMillisPerMinute = 60LL * 1000LL;
 constexpr qint64 kMillisPerHour   = 60LL * kMillisPerMinute;
 constexpr qint64 kMillisPerDay    = 8LL * kMillisPerHour;
 constexpr qint64 kMillisPerWeek   = 5LL * kMillisPerDay;
 constexpr qint64 kMillisPerMonth  = 20LL * kMillisPerDay;
 // Elapsed (calendar-time) variants: 24-hour days, 7-day weeks, 30-day months.
+// Never affected by the project's hours-per-day option.
 constexpr qint64 kMillisPerElapsedDay   = 24LL * kMillisPerHour;
 constexpr qint64 kMillisPerElapsedWeek  = 7LL * kMillisPerElapsedDay;
 constexpr qint64 kMillisPerElapsedMonth = 30LL * kMillisPerElapsedDay;
+
+// The active project's "hours per day / hours per week / days per month" (File >
+// Options > Calendar), as milliseconds of working time per Days/Weeks/Months
+// unit. It is document-global in Microsoft Project, so it is process-global
+// here: the app sets it when a project becomes active and resets it on close.
+// Codecs never touch it -- Project::minutesPerDay etc. are the persisted values.
+struct WorkingTimeProfile {
+    qint64 millisPerDay   = kMillisPerDay;
+    qint64 millisPerWeek  = kMillisPerWeek;
+    qint64 millisPerMonth = kMillisPerMonth;
+};
+SCHEDULEIO_EXPORT void setWorkingTimeProfile(int minutesPerDay, int minutesPerWeek,
+                                             int daysPerMonth);
+SCHEDULEIO_EXPORT void resetWorkingTimeProfile();
+SCHEDULEIO_EXPORT WorkingTimeProfile workingTimeProfile();
 
 SCHEDULEIO_EXPORT bool isElapsed(int unit);
 

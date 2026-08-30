@@ -28,7 +28,41 @@ bool Project::operator==(const Project &o) const
         && resourceUsageStyles == o.resourceUsageStyles
         && teamPlannerStyles == o.teamPlannerStyles
         && calendarStyles == o.calendarStyles
-        && reportAccentColor == o.reportAccentColor;
+        && reportAccentColor == o.reportAccentColor
+        // Project options (File > Options)
+        && newTasksManual == o.newTasksManual
+        && newTaskStartIsProjectStart == o.newTaskStartIsProjectStart
+        && defaultTaskType == o.defaultTaskType
+        && defaultDurationUnits == o.defaultDurationUnits
+        && defaultWorkUnits == o.defaultWorkUnits
+        && newTasksEffortDriven == o.newTasksEffortDriven
+        && autoLinkTasks == o.autoLinkTasks
+        && splitInProgressTasks == o.splitInProgressTasks
+        && honorConstraints == o.honorConstraints
+        && criticalSlackLimit == o.criticalSlackLimit
+        && weekStartDay == o.weekStartDay
+        && fiscalYearStartMonth == o.fiscalYearStartMonth
+        && fiscalYearUsesStartYear == o.fiscalYearUsesStartYear
+        && defaultStartTime == o.defaultStartTime
+        && defaultEndTime == o.defaultEndTime
+        && minutesPerDay == o.minutesPerDay
+        && minutesPerWeek == o.minutesPerWeek
+        && daysPerMonth == o.daysPerMonth
+        && moveCompletedEndsBack == o.moveCompletedEndsBack
+        && moveRemainingStartsBack == o.moveRemainingStartsBack
+        && moveRemainingStartsForward == o.moveRemainingStartsForward
+        && moveCompletedEndsForward == o.moveCompletedEndsForward
+        && statusUpdatesResource == o.statusUpdatesResource
+        && currencySymbol == o.currencySymbol
+        && currencySymbolPosition == o.currencySymbolPosition
+        && currencyDigits == o.currencyDigits
+        && currencyCode == o.currencyCode
+        && defaultStandardRate == o.defaultStandardRate
+        && defaultOvertimeRate == o.defaultOvertimeRate
+        && defaultFixedCostAccrual == o.defaultFixedCostAccrual
+        && defaultEarnedValueMethod == o.defaultEarnedValueMethod
+        && baselineForEarnedValue == o.baselineForEarnedValue
+        && showProjectSummaryTask == o.showProjectSummaryTask;
 }
 
 } // namespace schedule

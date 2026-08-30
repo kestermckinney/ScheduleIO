@@ -19,6 +19,7 @@
 #include <QByteArray>
 #include <QList>
 #include <QString>
+#include <QTime>
 
 namespace schedule {
 
@@ -109,6 +110,54 @@ public:
     // TextStyle::kAutomatic to keep the built-in blue. Persisted via XML/scaffold; MPP
     // persistence is a known gap.
     qint32 reportAccentColor = TextStyle::kAutomatic;
+
+    // ---- Project options (MS Project File > Options) --------------------------
+    // The subset ScheduleVault's Options dialog edits. All round-trip through
+    // MSPDI today; the .mpp side follows once each "   114/Props" key id is
+    // reverse-engineered (see src/codec/propskeys.h). Values and defaults mirror
+    // MS Project's own (e.g. WeekStartDay is MSPDI's 0=Sunday..6=Saturday, not
+    // Qt's 1=Monday..7=Sunday -- callers convert).
+
+    // Schedule
+    bool newTasksManual = false;              // NEW_TASKS_ARE_MANUAL
+    bool newTaskStartIsProjectStart = true;   // NEW_TASK_START_IS_PROJECT_START (0=start,1=current)
+    int defaultTaskType = 0;                  // DEFAULT_TASK_TYPE (0=Fixed Units,1=Fixed Duration,2=Fixed Work)
+    int defaultDurationUnits = 7;             // DEFAULT_DURATION_UNITS (MSPDI DurationFormat; 7=days)
+    int defaultWorkUnits = 2;                 // DEFAULT_WORK_UNITS (MSPDI WorkFormat; 2=hours)
+    bool newTasksEffortDriven = false;        // NEW_TASKS_EFFORT_DRIVEN
+    bool autoLinkTasks = true;               // AUTO_LINK (MSPDI Autolink)
+    bool splitInProgressTasks = true;        // SPLIT_IN_PROGRESS_TASKS
+    bool honorConstraints = false;           // HONOR_CONSTRAINTS
+    int criticalSlackLimit = 0;              // CRITICAL_SLACK_LIMIT (whole days)
+
+    // Calendar
+    int weekStartDay = 0;                    // WEEK_START_DAY (0=Sunday..6=Saturday)
+    int fiscalYearStartMonth = 1;           // FISCAL_YEAR_START_MONTH (MSPDI FYStartDate; 1..12)
+    bool fiscalYearUsesStartYear = false;    // MSPDI FiscalYearStart
+    QTime defaultStartTime = QTime(8, 0);   // DEFAULT_START_TIME
+    QTime defaultEndTime = QTime(17, 0);    // DEFAULT_END_TIME
+    int minutesPerDay = 480;                // MINUTES_PER_DAY
+    int minutesPerWeek = 2400;              // MINUTES_PER_WEEK
+    int daysPerMonth = 20;                  // DAYS_PER_MONTH
+
+    // Calculation options for this project
+    bool moveCompletedEndsBack = false;      // MOVE_COMPLETED_ENDS_BACK
+    bool moveRemainingStartsBack = false;    // MOVE_REMAINING_STARTS_BACK
+    bool moveRemainingStartsForward = false; // MOVE_REMAINING_STARTS_FORWARD
+    bool moveCompletedEndsForward = false;   // MOVE_COMPLETED_ENDS_FORWARD
+    bool statusUpdatesResource = true;       // UPDATING_TASK_STATUS_UPDATES_RESOURCE_STATUS (MSPDI TaskUpdatesResource)
+
+    // Financial
+    QString currencySymbol;                  // CURRENCY_SYMBOL (empty = MS Project's own default)
+    int currencySymbolPosition = 0;         // CURRENCY_SYMBOL_POSITION (0=before,1=after,2=before+space,3=after+space)
+    int currencyDigits = 2;                 // CURRENCY_DIGITS
+    QString currencyCode;                    // CURRENCY_CODE
+    double defaultStandardRate = 0.0;        // DEFAULT_STANDARD_RATE
+    double defaultOvertimeRate = 0.0;        // DEFAULT_OVERTIME_RATE
+    int defaultFixedCostAccrual = 3;        // DEFAULT_FIXED_COST_ACCRUAL (1=Start,2=End,3=Prorated)
+    int defaultEarnedValueMethod = 0;      // EARNED_VALUE_METHOD (0=% Complete,1=Physical % Complete)
+    int baselineForEarnedValue = 0;         // BASELINE_FOR_EARNED_VALUE (0=Baseline,1..10=Baseline1..10)
+    bool showProjectSummaryTask = true;     // SHOW_PROJECT_SUMMARY_TASK
 
     bool operator==(const Project &o) const;
     bool operator!=(const Project &o) const { return !(*this == o); }

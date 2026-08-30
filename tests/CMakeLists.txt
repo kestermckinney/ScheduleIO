@@ -85,6 +85,10 @@ qt_add_executable(dump_props probe/dump_props.cpp)
 target_link_libraries(dump_props PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_props PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+qt_add_executable(cfb_streams probe/cfb_streams.cpp)
+target_link_libraries(cfb_streams PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(cfb_streams PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
 qt_add_executable(dump_dates probe/dump_dates.cpp)
 target_link_libraries(dump_dates PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_dates PRIVATE ${CMAKE_SOURCE_DIR}/src)

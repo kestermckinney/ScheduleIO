@@ -11,6 +11,35 @@
 namespace schedule {
 namespace Duration {
 
+namespace {
+WorkingTimeProfile &profile()
+{
+    static WorkingTimeProfile p;
+    return p;
+}
+}
+
+void setWorkingTimeProfile(int minutesPerDay, int minutesPerWeek, int daysPerMonth)
+{
+    WorkingTimeProfile &p = profile();
+    p.millisPerDay = minutesPerDay > 0 ? qint64(minutesPerDay) * kMillisPerMinute
+                                       : kMillisPerDay;
+    p.millisPerWeek = minutesPerWeek > 0 ? qint64(minutesPerWeek) * kMillisPerMinute
+                                         : 5 * p.millisPerDay;
+    p.millisPerMonth = daysPerMonth > 0 ? qint64(daysPerMonth) * p.millisPerDay
+                                        : 20 * p.millisPerDay;
+}
+
+void resetWorkingTimeProfile()
+{
+    profile() = WorkingTimeProfile{};
+}
+
+WorkingTimeProfile workingTimeProfile()
+{
+    return profile();
+}
+
 bool isElapsed(int unit)
 {
     switch (unit) {
@@ -32,13 +61,13 @@ qint64 unitMillis(int unit)
     case ElapsedMinutes: return kMillisPerMinute;
     case Hours:          return kMillisPerHour;
     case ElapsedHours:   return kMillisPerHour;
-    case Days:           return kMillisPerDay;
+    case Days:           return profile().millisPerDay;
     case ElapsedDays:    return kMillisPerElapsedDay;
-    case Weeks:          return kMillisPerWeek;
+    case Weeks:          return profile().millisPerWeek;
     case ElapsedWeeks:   return kMillisPerElapsedWeek;
-    case Months:         return kMillisPerMonth;
+    case Months:         return profile().millisPerMonth;
     case ElapsedMonths:  return kMillisPerElapsedMonth;
-    default:             return kMillisPerDay;
+    default:             return profile().millisPerDay;
     }
 }
 

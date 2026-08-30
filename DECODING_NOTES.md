@@ -615,3 +615,37 @@ Probe: `tests/probe/dump_timeline.cpp`.
 - `tst_fixture_cfb` — prints any fixture's full storage tree.
 - `SCHEDULEIO_MPP14_TEMPLATE=<file.mpp>` (env) — makes the MPP14 writer use any real file as
   its container template; isolates regenerated-stream bugs from template bugs.
+
+## Project options ("   114/Props" scalars) — RE 2026-08-30
+
+MS Project's File > Options "for this project" settings live as scalar items in
+`   114/Props`, in a dense block around `0x02400010`-`0x02400047` plus a second
+cluster near `0x0240138F`-`0x024013BB`. Ids below found by diffing single-option
+`.mpp` files saved from real MS Project 2016 (dpr2hw3, `MSProject.Application`
+`OptionsCalendar`/`OptionsCalculation`/`OptionsSchedule`/`OptionsViewEx`/
+`OptionsGeneralEx` + `FileSaveAs`) against a baseline, then re-reading each with
+`dump_model` and resaving byte-clean through `MppIO`. Table: `src/codec/propskeys.h`.
+
+- Times (`DefaultStartTime` 0x0240001C, `DefaultEndTime` 0x02400021): **u16
+  tenths-of-a-minute since midnight** (08:00 -> 480 min -> 4800). Not a timestamp.
+- `MinutesPerDay` 0x0240001D / `MinutesPerWeek` 0x0240001E: u32 minutes.
+  `DaysPerMonth` 0x0240138F: **u16** (not u32).
+- `WeekStartDay` 0x02400025: 0=Sunday..6=Saturday — identical to MSPDI.
+- `BaselineForEarnedValue` 0x024013AE: **binary value = MSPDI value + 1**
+  (binary 1 == "Baseline", 2 == "Baseline1", ...). Model + MSPDI keep 0 == "Baseline".
+- `NewTaskStartIsProjectStart` 0x02400017: stored 0 = project start, 1 = current date.
+- `DefaultStandardRate` 0x0240001F / `DefaultOvertimeRate` 0x02400020: 8-byte IEEE
+  double, item flags 0x00000009.
+- `DefaultDurationUnits` 0x02400015 = PjUnit (7=days); `DefaultWorkUnits`
+  0x02400016 = MSPDI WorkFormat (2=hours) — both stored identically to MSPDI.
+- Currency strings: `CurrencySymbol` 0x02400010, `CurrencyCode` 0x024013BB (UTF-16LE).
+- NOT in `   114/Props` (stay MSPDI-only): new-tasks-manual default, `Autolink`,
+  `HonorConstraints`, "show project summary task" (per-view). Changing any of
+  these in MS Project left the Props stream unchanged.
+
+Confirmed NOT in "   114/Props" (2026-08-30, `cfb_streams` full-tree diff of
+single-option MS Project saves): "Autolink inserted or moved tasks",
+"Tasks will always honor their constraint dates" (toggling either changed only
+save-counter / GUID / title items), and "Show project summary task" (a per-view
+flag in "   214/CV_iew"). "New tasks created Manual/Auto" has no
+`MSProject.Application` COM member and could not be probed automatically.

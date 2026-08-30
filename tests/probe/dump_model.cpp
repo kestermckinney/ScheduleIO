@@ -62,6 +62,23 @@ int main(int argc, char **argv)
            p.calendarUniqueId, int(p.formatVersion), p.multipleCriticalPaths ? 1 : 0,
            p.budgetCost, (long long)(p.budgetWorkMillis / 60000));
 
+    printf("opts: taskType=%d durUnits=%d workUnits=%d effortDriven=%d startOnCur=%d split=%d "
+           "critSlack=%d weekStart=%d fyMonth=%d fyStartYear=%d startTime=%s endTime=%s "
+           "minPerDay=%d minPerWeek=%d daysPerMonth=%d moveCEB=%d moveRSB=%d moveRSF=%d moveCEF=%d "
+           "updRes=%d curSym='%s' curPos=%d curDig=%d curCode='%s' stdRate=%.2f otRate=%.2f "
+           "accrual=%d evMethod=%d evBaseline=%d\n",
+           p.defaultTaskType, p.defaultDurationUnits, p.defaultWorkUnits, p.newTasksEffortDriven ? 1 : 0,
+           p.newTaskStartIsProjectStart ? 0 : 1, p.splitInProgressTasks ? 1 : 0,
+           p.criticalSlackLimit, p.weekStartDay, p.fiscalYearStartMonth, p.fiscalYearUsesStartYear ? 1 : 0,
+           qPrintable(p.defaultStartTime.toString(QStringLiteral("HH:mm"))),
+           qPrintable(p.defaultEndTime.toString(QStringLiteral("HH:mm"))),
+           p.minutesPerDay, p.minutesPerWeek, p.daysPerMonth,
+           p.moveCompletedEndsBack ? 1 : 0, p.moveRemainingStartsBack ? 1 : 0,
+           p.moveRemainingStartsForward ? 1 : 0, p.moveCompletedEndsForward ? 1 : 0,
+           p.statusUpdatesResource ? 1 : 0, qPrintable(p.currencySymbol), p.currencySymbolPosition,
+           p.currencyDigits, qPrintable(p.currencyCode), p.defaultStandardRate, p.defaultOvertimeRate,
+           p.defaultFixedCostAccrual, p.defaultEarnedValueMethod, p.baselineForEarnedValue);
+
     printf("-- %lld tasks\n", (long long)p.tasks.size());
     for (const schedule::Task &t : p.tasks) {
         printf("  uid=%-3d id=%-3d L%d %s'%s'%s%s%s dur=%lldm %s..%s pct=%.0f\n",

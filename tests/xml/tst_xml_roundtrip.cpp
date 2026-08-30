@@ -36,6 +36,42 @@ void TstXmlRoundtrip::synthetic()
     p.scheduleFromStart = false;
     p.statusDate = QDateTime(QDate(2026, 1, 30), QTime(17, 0));
 
+    // Project options (File > Options) -- every field off its default, so the
+    // MSPDI writer/reader pair is proven lossless for them.
+    p.newTasksManual = true;
+    p.newTaskStartIsProjectStart = false;
+    p.defaultTaskType = 2;
+    p.defaultDurationUnits = 5;
+    p.defaultWorkUnits = 3;
+    p.newTasksEffortDriven = true;
+    p.autoLinkTasks = false;
+    p.splitInProgressTasks = false;
+    p.honorConstraints = true;
+    p.criticalSlackLimit = 3;
+    p.weekStartDay = 1;
+    p.fiscalYearStartMonth = 7;
+    p.fiscalYearUsesStartYear = true;
+    p.defaultStartTime = QTime(9, 30);
+    p.defaultEndTime = QTime(18, 15);
+    p.minutesPerDay = 450;
+    p.minutesPerWeek = 2250;
+    p.daysPerMonth = 22;
+    p.moveCompletedEndsBack = true;
+    p.moveRemainingStartsBack = true;
+    p.moveRemainingStartsForward = true;
+    p.moveCompletedEndsForward = true;
+    p.statusUpdatesResource = false;
+    p.currencySymbol = QStringLiteral("kr");
+    p.currencySymbolPosition = 3;
+    p.currencyDigits = 0;
+    p.currencyCode = QStringLiteral("SEK");
+    p.defaultStandardRate = 50.0;
+    p.defaultOvertimeRate = 75.0;
+    p.defaultFixedCostAccrual = 1;
+    p.defaultEarnedValueMethod = 1;
+    p.baselineForEarnedValue = 3;
+    p.showProjectSummaryTask = false;
+
     schedule::Task summary;
     summary.uniqueId = 1;
     summary.id = 1;
@@ -73,6 +109,7 @@ void TstXmlRoundtrip::synthetic()
     task.notes = QStringLiteral("{\\rtf1 line one}");
     task.cost = 1234.5;
     task.fixedCost = 100.0;
+    task.fixedCostAccrual = 1;   // Start
     task.actualCost = 600.0;
     task.remainingCost = 634.5;
     task.costVariance = 34.5;

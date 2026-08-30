@@ -46,10 +46,15 @@ public:
 
     bool operator==(const TextStyle &o) const
     {
+        // fontName / fontSize / fontBaseIndex are intentionally excluded: the
+        // family and size are "deliberately not modelled" (see the class note and
+        // tst_format_oracle) -- the writer normalises them and the reader
+        // re-derives them from the font-base table, so semantic equality must not
+        // hinge on a value neither side round-trips. Emphasis and colours are the
+        // modelled, comparable state.
         return bold == o.bold && italic == o.italic && underline == o.underline
             && strikethrough == o.strikethrough && color == o.color
-            && backColor == o.backColor && backPattern == o.backPattern
-            && fontName == o.fontName && fontSize == o.fontSize;
+            && backColor == o.backColor && backPattern == o.backPattern;
     }
     bool operator!=(const TextStyle &o) const { return !(*this == o); }
 };

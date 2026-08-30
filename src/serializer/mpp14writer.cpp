@@ -7,6 +7,7 @@
 #include "codec/fieldmap.h"
 #include "codec/mppfieldids.h"
 #include "codec/mpp14timephased.h"
+#include "codec/propskeys.h"
 #include "codec/propsreader.h"
 #include "codec/viewformat.h"
 #include "ole/compoundfile.h"
@@ -774,8 +775,30 @@ void copyTree(const CompoundFile &tpl, CompoundFile &out, const QStringList &pat
     }
 }
 
+// Append a new Props item [u32 dataLen][u32 key][u32 flags=0][data] and grow the
+// two header "byteSize" fields by its size -- the tail patchPropsString already
+// uses for an absent key, factored out so the scalar patchers share it. The
+// stock write template carries most project keys, so this only fires for a key
+// it happens to lack; the on-disk width for a freshly added scalar should be
+// re-checked against a real MS Project save when its id is reverse-engineered.
+void appendPropsItem(QByteArray &props, quint32 key, const QByteArray &data)
+{
+    QByteArray item;
+    appU32(item, quint32(data.size()));
+    appU32(item, key);
+    appU32(item, 0u);
+    item += data;
+    props += item;
+    quint32 sz0 = 0, sz1 = 0;
+    readU32(props, 0, &sz0);
+    readU32(props, 4, &sz1);
+    pokeU32(props, 0, quint32(int(sz0) + item.size()));
+    pokeU32(props, 4, quint32(int(sz1) + item.size()));
+}
+
 // Patch a 4-byte Props item value in place (same walk as PropsReader::parse),
-// leaving every other byte of the stream untouched.
+// leaving every other byte of the stream untouched. Appends the item if the
+// template does not already carry the key.
 bool patchPropsU32(QByteArray &props, quint32 key, quint32 value)
 {
     int o = 16;
@@ -790,7 +813,32 @@ bool patchPropsU32(QByteArray &props, quint32 key, quint32 value)
             return pokeU32(props, o, value);
         o += int(len);
     }
-    return false;
+    QByteArray data;
+    appU32(data, value);
+    appendPropsItem(props, key, data);
+    return true;
+}
+
+// 8-byte IEEE-double Props item (default standard/overtime rate). Same in-place
+// walk as the scalar patchers; appends if the key is absent.
+bool patchPropsDouble(QByteArray &props, quint32 key, double value)
+{
+    int o = 16;
+    while (o + 12 <= props.size()) {
+        quint32 len = 0, k = 0;
+        readU32(props, o, &len);
+        readU32(props, o + 4, &k);
+        o += 12;
+        if (len > quint32(props.size() - o))
+            return false;
+        if (k == key && len >= 8)
+            return pokeDouble(props, o, value);
+        o += int(len);
+    }
+    QByteArray data;
+    appDouble(data, value);
+    appendPropsItem(props, key, data);
+    return true;
 }
 
 QByteArray hyperlinkBlob(const schedule::Task &task)
@@ -815,7 +863,8 @@ QByteArray hyperlinkBlob(const schedule::Task &task)
 }
 
 // Some scalar Props values, including SCHEDULE_FROM, are 16-bit even though
-// their keys occupy the same project-level property stream.
+// their keys occupy the same project-level property stream. Appends the item
+// (as a 2-byte value) if the template does not already carry the key.
 bool patchPropsU16(QByteArray &props, quint32 key, quint16 value)
 {
     int o = 16;
@@ -830,7 +879,10 @@ bool patchPropsU16(QByteArray &props, quint32 key, quint16 value)
             return pokeU16(props, o, value);
         o += int(len);
     }
-    return false;
+    QByteArray data;
+    appU16(data, value);
+    appendPropsItem(props, key, data);
+    return true;
 }
 
 // Patch a UTF-16LE (null-terminated) Props string item, matching
@@ -1050,6 +1102,79 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     // here, NOT from \005SummaryInformation -- leaving it unpatched made every
     // written file open as "blank_template" (the template's stale value).
     patchPropsString(props, 0x02400008u, in.title);
+
+    // ---- Project options (File > Options) ------------------------------------
+    // "   114/Props" is read from the stock template, so every key written here
+    // is written on EVERY save -- an unset model field still lands as its
+    // default. A key whose id is not yet reverse-engineered (PropsKey::kUnknown)
+    // is skipped: MSPDI carries it, the binary side waits. Fill the constant in
+    // propskeys.h and the matching line lights up.
+    const auto putU16 = [&props](quint32 key, int value) {
+        if (key != PropsKey::kUnknown)
+            patchPropsU16(props, key, quint16(value));
+    };
+    const auto putBool = [&props](quint32 key, bool value) {
+        if (key != PropsKey::kUnknown)
+            patchPropsU16(props, key, value ? 1u : 0u);
+    };
+    const auto putU32 = [&props](quint32 key, quint32 value) {
+        if (key != PropsKey::kUnknown)
+            patchPropsU32(props, key, value);
+    };
+    const auto putDouble = [&props](quint32 key, double value) {
+        if (key != PropsKey::kUnknown)
+            patchPropsDouble(props, key, value);
+    };
+    const auto putString = [&props](quint32 key, const QString &value) {
+        if (key != PropsKey::kUnknown)
+            patchPropsString(props, key, value);
+    };
+    // "   114/Props" stores a time of day as u16 tenths-of-a-minute since
+    // midnight (08:00 -> 480 min -> 4800).
+    const auto tenthsOfMinute = [](const QTime &t) {
+        return t.isValid() ? t.msecsSinceStartOfDay() / 6000 : 0;
+    };
+
+    putBool(PropsKey::NewTasksAreManual, in.newTasksManual);
+    // 0 = new tasks scheduled on the project start date, 1 = on the current date.
+    putU16(PropsKey::NewTaskStartIsProjectStart, in.newTaskStartIsProjectStart ? 0 : 1);
+    putU16(PropsKey::DefaultTaskType, in.defaultTaskType);
+    putU16(PropsKey::DefaultDurationUnits, in.defaultDurationUnits);
+    putU16(PropsKey::DefaultWorkUnits, in.defaultWorkUnits);
+    putBool(PropsKey::NewTasksEffortDriven, in.newTasksEffortDriven);
+    putBool(PropsKey::AutoLink, in.autoLinkTasks);
+    putBool(PropsKey::SplitInProgressTasks, in.splitInProgressTasks);
+    putBool(PropsKey::HonorConstraints, in.honorConstraints);
+    putU32(PropsKey::CriticalSlackLimit, quint32(qMax(0, in.criticalSlackLimit)));
+
+    putU16(PropsKey::WeekStartDay, in.weekStartDay);
+    putU16(PropsKey::FiscalYearStartMonth, in.fiscalYearStartMonth);
+    putBool(PropsKey::FiscalYearUsesStartYear, in.fiscalYearUsesStartYear);
+    putU16(PropsKey::DefaultStartTime, tenthsOfMinute(in.defaultStartTime));
+    putU16(PropsKey::DefaultEndTime, tenthsOfMinute(in.defaultEndTime));
+    putU32(PropsKey::MinutesPerDay, quint32(qMax(0, in.minutesPerDay)));
+    putU32(PropsKey::MinutesPerWeek, quint32(qMax(0, in.minutesPerWeek)));
+    putU16(PropsKey::DaysPerMonth, in.daysPerMonth);
+
+    putBool(PropsKey::MoveCompletedEndsBack, in.moveCompletedEndsBack);
+    putBool(PropsKey::MoveRemainingStartsBack, in.moveRemainingStartsBack);
+    putBool(PropsKey::MoveRemainingStartsForward, in.moveRemainingStartsForward);
+    putBool(PropsKey::MoveCompletedEndsForward, in.moveCompletedEndsForward);
+    putBool(PropsKey::UpdatingTaskStatusUpdatesResourceStatus, in.statusUpdatesResource);
+
+    putString(PropsKey::CurrencySymbol, in.currencySymbol);
+    putU16(PropsKey::CurrencySymbolPosition, in.currencySymbolPosition);
+    putU16(PropsKey::CurrencyDigits, in.currencyDigits);
+    putString(PropsKey::CurrencyCode, in.currencyCode);
+    putDouble(PropsKey::DefaultStandardRate, in.defaultStandardRate);
+    putDouble(PropsKey::DefaultOvertimeRate, in.defaultOvertimeRate);
+    putU16(PropsKey::DefaultFixedCostAccrual, in.defaultFixedCostAccrual);
+    putU16(PropsKey::EarnedValueMethod, in.defaultEarnedValueMethod);
+    // Binary stores 1 = "Baseline", 2 = "Baseline1", ...; the model (and MSPDI)
+    // use 0 = "Baseline", 1 = "Baseline1", ...
+    putU16(PropsKey::BaselineForEarnedValue, in.baselineForEarnedValue + 1);
+    putBool(PropsKey::ShowProjectSummaryTask, in.showProjectSummaryTask);
+
     cf.addStream({ kDataStorage, QStringLiteral("Props") }, props);
     cf.addStream({ summaryName }, summaryInformationStream(in.title, in.author));
 
