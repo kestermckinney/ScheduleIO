@@ -1040,6 +1040,12 @@ void parseTimelineXml(const QByteArray &utf16, schedule::TimelineViewSettings *t
         return QDate::fromString(a.value(name).toString(), QStringLiteral("yyyy/MM/dd"));
     };
 
+    // MS Project marks a callout member with an <ft> row in <fltSet> (which is
+    // emitted before <tskSet>), and drops its <tskSet> <t> row to onTL="0". The
+    // <mlSet> <m> row is untouched. Collect the callout task uids first so the
+    // <t> pass can tag them.
+    QSet<int> calloutUids;
+
     while (!r.atEnd()) {
         if (r.readNext() != QXmlStreamReader::StartElement)
             continue;
@@ -1048,6 +1054,10 @@ void parseTimelineXml(const QByteArray &utf16, schedule::TimelineViewSettings *t
 
         if (name == QLatin1String("TLViewData")) {
             tv->dfltTLView = boolAttr(a, QLatin1String("dfltTLView"), true);
+        } else if (name == QLatin1String("ft")) {           // a callout member (<fltSet>)
+            const quint32 uid = a.value(QLatin1String("uid")).toUInt();
+            if (uid != kTimelineSentinelUid && boolAttr(a, QLatin1String("onTL"), true))
+                calloutUids.insert(int(uid));
         } else if (name == QLatin1String("tl")) {           // a timeline bar
             schedule::TimelineBar bar;
             bar.id = a.value(QLatin1String("id")).toInt();
@@ -1066,6 +1076,12 @@ void parseTimelineXml(const QByteArray &utf16, schedule::TimelineViewSettings *t
             it.barId = a.hasAttribute(QLatin1String("barid"))
                 ? a.value(QLatin1String("barid")).toInt() : 1;
             it.onTimeline = boolAttr(a, QLatin1String("onTL"), true);
+            if (calloutUids.contains(int(uid))) {
+                // A callout: the <t> row carries onTL="0" but the task is on the
+                // timeline, shown as a callout via its <ft> row.
+                it.display = schedule::TimelineItemDisplay::Callout;
+                it.onTimeline = true;
+            }
             tv->items.append(it);
             // <mlSet> mirrors these rows; the writer re-emits both from `items`.
         } else if (name == QLatin1String("style")) {        // <txtSet>
@@ -1139,13 +1155,29 @@ QByteArray serializeTimelineXml(const schedule::TimelineViewSettings &tv)
     for (const schedule::TimelineTextStyle &s : tv.textStyles)
         styleById.insert(s.id, &s);
 
-    const auto writeItem = [](QXmlStreamWriter &w, const QString &tag,
+    // A callout's <tskSet> row carries onTL="0" (the task rides in <fltSet>
+    // instead); its <mlSet> row and a bar's rows all carry onTL="1".
+    const auto onTlFor = [](const schedule::TimelineItem &it, const QString &tag) {
+        const bool off = tag == QLatin1String("t")
+            && it.display == schedule::TimelineItemDisplay::Callout;
+        return (it.onTimeline && !off) ? QStringLiteral("1") : QStringLiteral("0");
+    };
+    const auto writeItem = [&onTlFor](QXmlStreamWriter &w, const QString &tag,
                               const schedule::TimelineItem &it) {
         w.writeEmptyElement(tag);
         w.writeAttribute(QStringLiteral("id"), it.guid);
         w.writeAttribute(QStringLiteral("uid"), QString::number(quint32(it.taskUid)));
-        w.writeAttribute(QStringLiteral("onTL"), it.onTimeline ? QStringLiteral("1")
-                                                              : QStringLiteral("0"));
+        w.writeAttribute(QStringLiteral("onTL"), onTlFor(it, tag));
+        w.writeAttribute(QStringLiteral("barid"), QString::number(it.barId));
+    };
+    // A callout member's <fltSet> row. Attribute order per MS Project:
+    // id uid onTL top barid.
+    const auto writeFt = [](QXmlStreamWriter &w, const schedule::TimelineItem &it) {
+        w.writeEmptyElement(QStringLiteral("ft"));
+        w.writeAttribute(QStringLiteral("id"), it.guid);
+        w.writeAttribute(QStringLiteral("uid"), QString::number(quint32(it.taskUid)));
+        w.writeAttribute(QStringLiteral("onTL"), QStringLiteral("1"));
+        w.writeAttribute(QStringLiteral("top"), QStringLiteral("1"));
         w.writeAttribute(QStringLiteral("barid"), QString::number(it.barId));
     };
     // Attribute order matches MS Project: the internal bar 0 always spells out
@@ -1180,6 +1212,7 @@ QByteArray serializeTimelineXml(const schedule::TimelineViewSettings &tv)
 
     QSet<int> emittedItems;
     QSet<int> emittedBars;
+    QSet<int> emittedFts;
     while (!r.atEnd()) {
         switch (r.readNext()) {
         case QXmlStreamReader::StartElement: {
@@ -1199,17 +1232,36 @@ QByteArray serializeTimelineXml(const schedule::TimelineViewSettings &tv)
                 }
                 w.writeStartElement(n);
                 bool sawBarid = false;
+                bool sawOnTl = false;
                 for (const QXmlStreamAttribute &at : a) {
                     if (at.name() == QLatin1String("barid")) {
                         w.writeAttribute(QStringLiteral("barid"), QString::number(mi->barId));
                         sawBarid = true;
+                    } else if (at.name() == QLatin1String("onTL")) {
+                        w.writeAttribute(QStringLiteral("onTL"), onTlFor(*mi, n));
+                        sawOnTl = true;
                     } else {
                         w.writeAttribute(at.qualifiedName().toString(), at.value().toString());
                     }
                 }
+                if (!sawOnTl)
+                    w.writeAttribute(QStringLiteral("onTL"), onTlFor(*mi, n));
                 if (!sawBarid)
                     w.writeAttribute(QStringLiteral("barid"), QString::number(mi->barId));
                 emittedItems.insert(int(uid));
+            } else if (n == QLatin1String("ft")) {
+                const quint32 uid = a.value(QLatin1String("uid")).toUInt();
+                if (uid == kTimelineSentinelUid) {
+                    w.writeStartElement(n);
+                    w.writeAttributes(a);           // the template row: verbatim
+                    break;
+                }
+                const schedule::TimelineItem *mi = itemByUid.value(int(uid));
+                if (mi && mi->display == schedule::TimelineItemDisplay::Callout) {
+                    writeFt(w, *mi);
+                    emittedFts.insert(int(uid));
+                }
+                r.skipCurrentElement();             // no longer a callout / removed
             } else if (n == QLatin1String("tl")) {
                 const int id = a.value(QLatin1String("id")).toInt();
                 const schedule::TimelineBar *mb = barById.value(id);
@@ -1277,7 +1329,13 @@ QByteArray serializeTimelineXml(const schedule::TimelineViewSettings &tv)
         }
         case QXmlStreamReader::EndElement: {
             const QString n = r.name().toString();
-            if (n == QLatin1String("tskSet") || n == QLatin1String("mlSet")) {
+            if (n == QLatin1String("fltSet")) {
+                for (const schedule::TimelineItem &it : tv.items)
+                    if (it.display == schedule::TimelineItemDisplay::Callout
+                        && !emittedFts.contains(it.taskUid))
+                        writeFt(w, it);
+                emittedFts.clear();
+            } else if (n == QLatin1String("tskSet") || n == QLatin1String("mlSet")) {
                 const QString tag = n == QLatin1String("tskSet") ? QStringLiteral("t")
                                                                 : QStringLiteral("m");
                 for (const schedule::TimelineItem &it : tv.items)

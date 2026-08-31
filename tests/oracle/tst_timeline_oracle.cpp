@@ -27,6 +27,8 @@ private slots:
     void timelineMatchesManifest();
     void richFixtureDecodes();
     void membershipEditRoundTrips();
+    void calloutDecodesFromRealMsp();
+    void calloutEditRoundTrips();
     void propsEditRoundTrips();
     void barAssignmentRoundTrips();
     void untouchedWhenOtherViewPatched();
@@ -92,6 +94,95 @@ void TstTimelineOracle::membershipEditRoundTrips()
     QVERIFY2(!after.contains(3), "removed member came back");
     QVERIFY2(after.contains(4), "added member missing");
     QCOMPARE(after, (before - QSet<int>{3}) | QSet<int>{4});
+}
+
+// tl_16_callout.mpp was produced on real MS Project 2016: uid 1 stays a bar,
+// uid 2 was switched to "Display as Callout". Confirms our reader recognises
+// MS Project's own callout encoding (<t onTL="0"> + an <ft> row in <fltSet>).
+void TstTimelineOracle::calloutDecodesFromRealMsp()
+{
+    const QString path = fixture(QStringLiteral("tl_16_callout.mpp"));
+    if (path.isEmpty())
+        QSKIP("tl_16 fixture not installed");
+    MppIO io;
+    QVERIFY2(io.open(path), qPrintable(io.errorString()));
+    const schedule::Project p = io.project();
+    QVERIFY(p.timelineView.present);
+
+    schedule::TimelineItemDisplay d1{}, d2{};
+    bool s1 = false, s2 = false;
+    for (const schedule::TimelineItem &it : p.timelineView.items) {
+        QVERIFY2(it.onTimeline, "callout member must still read as on-timeline");
+        if (it.taskUid == 1) { d1 = it.display; s1 = true; }
+        if (it.taskUid == 2) { d2 = it.display; s2 = true; }
+    }
+    QVERIFY2(s1 && s2, "expected timeline members uid 1 and 2");
+    QCOMPARE(d1, schedule::TimelineItemDisplay::Bar);
+    QCOMPARE(d2, schedule::TimelineItemDisplay::Callout);
+}
+
+// A bar->callout edit (and back) must survive our own save/reload, and the
+// emitted <TLViewData> must carry MS Project's callout encoding.
+void TstTimelineOracle::calloutEditRoundTrips()
+{
+    const QString path = fixture(QStringLiteral("tl_02_many_bar_tasks.mpp"));
+    if (path.isEmpty())
+        QSKIP("tl_02 fixture not installed");
+    MppIO io;
+    QVERIFY2(io.open(path), qPrintable(io.errorString()));
+    schedule::Project p = io.project();
+
+    int target = -1;
+    for (const schedule::TimelineItem &it : p.timelineView.items) {
+        QCOMPARE(it.display, schedule::TimelineItemDisplay::Bar);
+        if (target < 0)
+            target = it.taskUid;
+    }
+    QVERIFY(target > 0);
+
+    // bar -> callout
+    for (schedule::TimelineItem &it : p.timelineView.items)
+        if (it.taskUid == target)
+            it.display = schedule::TimelineItemDisplay::Callout;
+    p.timelineView.touch();
+
+    schedule::Project rp = reload(p);
+    QVERIFY(rp.timelineView.present);
+    const QString xml = QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(rp.timelineView.rawXml.constData()),
+        rp.timelineView.rawXml.size() / 2);
+    QVERIFY2(xml.contains(QStringLiteral("<ft id=")), "no <ft> callout row emitted");
+    QVERIFY2(xml.contains(QStringLiteral("uid=\"%1\" onTL=\"1\" top=\"1\"").arg(target)),
+             "callout <ft> row missing expected attributes");
+    QVERIFY2(xml.contains(QStringLiteral("<t id=\"") )
+                 && xml.contains(QStringLiteral("uid=\"%1\" onTL=\"0\"").arg(target)),
+             "callout <t> row should carry onTL=\"0\"");
+    bool seenCallout = false;
+    for (const schedule::TimelineItem &it : rp.timelineView.items) {
+        if (it.taskUid == target) {
+            QCOMPARE(it.display, schedule::TimelineItemDisplay::Callout);
+            QVERIFY(it.onTimeline);
+            seenCallout = true;
+        } else {
+            QCOMPARE(it.display, schedule::TimelineItemDisplay::Bar);
+        }
+    }
+    QVERIFY2(seenCallout, "callout member lost after reload");
+
+    // callout -> bar
+    for (schedule::TimelineItem &it : rp.timelineView.items)
+        if (it.taskUid == target)
+            it.display = schedule::TimelineItemDisplay::Bar;
+    rp.timelineView.touch();
+
+    const schedule::Project rp2 = reload(rp);
+    const QString xml2 = QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(rp2.timelineView.rawXml.constData()),
+        rp2.timelineView.rawXml.size() / 2);
+    QVERIFY2(!xml2.contains(QStringLiteral("uid=\"%1\" onTL=\"1\" top=\"1\"").arg(target)),
+             "callout <ft> row should be gone after reverting to bar");
+    for (const schedule::TimelineItem &it : rp2.timelineView.items)
+        QCOMPARE(it.display, schedule::TimelineItemDisplay::Bar);
 }
 
 void TstTimelineOracle::propsEditRoundTrips()
@@ -301,6 +392,19 @@ void TstTimelineOracle::timelineMatchesManifest()
                 found = true;
             }
         QVERIFY(found);
+    }
+
+    // --- display style (bar / callout) --------------------------------
+    const QJsonObject disp = man.value(QStringLiteral("display")).toObject();
+    for (auto it = disp.begin(); it != disp.end(); ++it) {
+        bool found = false;
+        for (const schedule::TimelineItem &m : tv.items)
+            if (m.taskUid == it.key().toInt()) {
+                const bool wantCallout = it.value().toString() == QLatin1String("callout");
+                QCOMPARE(m.display == schedule::TimelineItemDisplay::Callout, wantCallout);
+                found = true;
+            }
+        QVERIFY2(found, qPrintable(QStringLiteral("display: uid %1 not on the timeline").arg(it.key())));
     }
 }
 
