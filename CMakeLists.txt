@@ -30,6 +30,7 @@ set(SCHEDULEIO_SOURCES
     src/codec/bkndvardata.cpp
     src/codec/propsreader.cpp
     src/codec/mppfieldids.cpp
+    src/codec/barstylecodec.cpp
     src/codec/viewformat.cpp
     src/codec/mpp14timephased.cpp
     src/model/project.cpp
@@ -75,6 +76,7 @@ set(SCHEDULEIO_HEADERS
     src/codec/propsreader.h
     src/codec/propskeys.h
     src/codec/mppfieldids.h
+    src/codec/barstylecodec.h
     src/codec/viewformat.h
     src/model/project.h
     src/model/task.h

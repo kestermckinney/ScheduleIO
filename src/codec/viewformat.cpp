@@ -3,6 +3,7 @@
 
 #include "codec/viewformat.h"
 
+#include "codec/barstylecodec.h"
 #include "codec/bkndvardata.h"
 #include "codec/mppfieldids.h"
 #include "model/project.h"
@@ -500,18 +501,32 @@ void writeGridLine(QByteArray &d, int o, const schedule::ViewLineStyle &g)
     d[o + 13] = char(g.lineStyle);
 }
 
-// Map a default bar style's name onto the ViewStyles category it edits.
-schedule::ViewBarStyle *barForName(schedule::ViewStyles &vs, const QString &name)
+// The four default bar-style names whose colours Schedule Vault always
+// round-tripped; used only by the short-blob fallback below.
+bool isColourRoundTripBar(const QString &name)
 {
-    if (name.compare(QLatin1String("Task"), Qt::CaseInsensitive) == 0)
-        return &vs.taskBar;
-    if (name.compare(QLatin1String("Milestone"), Qt::CaseInsensitive) == 0)
-        return &vs.milestone;
-    if (name.compare(QLatin1String("Summary"), Qt::CaseInsensitive) == 0)
-        return &vs.summaryBar;
-    if (name.compare(QLatin1String("Project Summary"), Qt::CaseInsensitive) == 0)
-        return &vs.projectSummaryBar;
+    return name.compare(QLatin1String("Task"), Qt::CaseInsensitive) == 0
+        || name.compare(QLatin1String("Milestone"), Qt::CaseInsensitive) == 0
+        || name.compare(QLatin1String("Summary"), Qt::CaseInsensitive) == 0
+        || name.compare(QLatin1String("Project Summary"), Qt::CaseInsensitive) == 0;
+}
+
+// The existing row for `name`, or nullptr when the table has no such row.
+const schedule::ViewBarStyle *findBar(const schedule::ViewStyles &vs, const QString &name)
+{
+    for (const schedule::ViewBarStyle &b : vs.barStyles)
+        if (b.name.compare(name, Qt::CaseInsensitive) == 0)
+            return &b;
     return nullptr;
+}
+
+// True when the STYLE_DATA blob is the full standard Gantt layout: 200 fixed
+// 195-byte bar-style slots (2255..41255) plus the 108-byte end trailer.
+bool hasFullBarLayout(const QByteArray &d)
+{
+    return d.size() >= BarStyleCodec::kFirstRecord
+        + BarStyleCodec::kMaxRecords * BarStyleCodec::kRecordSize
+        + BarStyleCodec::kTrailerBytes;
 }
 
 void readStyleData(const QByteArray &d, schedule::ViewStyles *vs)
@@ -527,17 +542,15 @@ void readStyleData(const QByteArray &d, schedule::ViewStyles *vs)
     vs->currentDateLine = readGridLine(d, kGridCurrentDate);
     vs->statusDateLine = readGridLine(d, kGridStatusDate);
 
+    // The whole default bar-style table, in file order (= draw order).
     const int barCount = uchar(d.at(kBarCountOffset));
+    vs->barStyles.clear();
+    vs->barStyles.reserve(barCount);
     for (int i = 0; i < barCount; ++i) {
         const int o = kBarStylesBase + i * kBarStyleSize;
         if (o + kBarStyleSize > d.size())
             break;
-        const QString name = rdUtf16(d, o + 91, kBarStyleSize - 91);
-        if (schedule::ViewBarStyle *bar = barForName(*vs, name)) {
-            bar->middleColor = rdColor(d, o + 2);
-            bar->startColor = rdColor(d, o + 16);
-            bar->endColor = rdColor(d, o + 29);
-        }
+        vs->barStyles.append(BarStyleCodec::readRecord(d, o));
     }
 }
 
@@ -553,14 +566,40 @@ void patchStyleData(QByteArray &d, const schedule::ViewStyles &vs)
     writeGridLine(d, kGridCurrentDate, vs.currentDateLine);
     writeGridLine(d, kGridStatusDate, vs.statusDateLine);
 
+    if (vs.barStyles.isEmpty())
+        return;   // styles never touched -> leave the template's bar table as-is
+
+    if (hasFullBarLayout(d)) {
+        // Rewrite the bar array from the model. The 200-slot region is a fixed
+        // size, so this needs no blob resize and never moves the end trailer.
+        // NOTE: this writes barCount != the template's 41 whenever the table was
+        // edited. Real MS Project's acceptance of a non-stock barCount is still
+        // pending a dpr2hw3 open + ViewApply check (plan Phase 0.4).
+        const int trailerStart = d.size() - BarStyleCodec::kTrailerBytes;
+        const int maxSlots = qMin(BarStyleCodec::kMaxRecords,
+                                  (trailerStart - kBarStylesBase) / kBarStyleSize);
+        const int prevCount = uchar(d.at(kBarCountOffset));
+        const int n = qMin(vs.barStyles.size(), maxSlots);
+        for (int i = 0; i < n; ++i)
+            BarStyleCodec::writeRecord(d, kBarStylesBase + i * kBarStyleSize,
+                                       vs.barStyles.at(i));
+        for (int i = n; i < prevCount && i < maxSlots; ++i)
+            std::memset(d.data() + kBarStylesBase + i * kBarStyleSize, 0, kBarStyleSize);
+        d[kBarCountOffset] = char(quint8(n));
+        return;
+    }
+
+    // Fallback for a non-standard/short STYLE_DATA blob: patch the three colours
+    // of the four stock categories in place, as the codec always did.
     const int barCount = uchar(d.at(kBarCountOffset));
     for (int i = 0; i < barCount; ++i) {
         const int o = kBarStylesBase + i * kBarStyleSize;
         if (o + kBarStyleSize > d.size())
             break;
         const QString name = rdUtf16(d, o + 91, kBarStyleSize - 91);
-        const schedule::ViewBarStyle *bar = barForName(const_cast<schedule::ViewStyles &>(vs), name);
-        if (bar) {
+        if (!isColourRoundTripBar(name))
+            continue;
+        if (const schedule::ViewBarStyle *bar = findBar(vs, name)) {
             wrColor(d, o + 2, bar->middleColor);
             wrColor(d, o + 16, bar->startColor);
             wrColor(d, o + 29, bar->endColor);

@@ -88,10 +88,10 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
         if (a.viewStyles.ganttRows != b.viewStyles.ganttRows) vs << QStringLiteral("ganttRows");
         if (a.viewStyles.currentDateLine != b.viewStyles.currentDateLine) vs << QStringLiteral("currentDateLine");
         if (a.viewStyles.statusDateLine != b.viewStyles.statusDateLine) vs << QStringLiteral("statusDateLine");
-        if (a.viewStyles.taskBar != b.viewStyles.taskBar) vs << QStringLiteral("taskBar");
-        if (a.viewStyles.milestone != b.viewStyles.milestone) vs << QStringLiteral("milestone");
-        if (a.viewStyles.summaryBar != b.viewStyles.summaryBar) vs << QStringLiteral("summaryBar");
-        if (a.viewStyles.projectSummaryBar != b.viewStyles.projectSummaryBar) vs << QStringLiteral("projectSummaryBar");
+        if (a.viewStyles.barStyles != b.viewStyles.barStyles) {
+            vs << QStringLiteral("barStyles (a=%1 rows, b=%2 rows)")
+                      .arg(a.viewStyles.barStyles.size()).arg(b.viewStyles.barStyles.size());
+        }
         d << QStringLiteral("viewStyles differ { %1 }").arg(vs.join(QStringLiteral("; ")));
     }
     if (!(a.resourceUsageStyles == b.resourceUsageStyles)) d << QStringLiteral("resourceUsageStyles differ");
@@ -406,10 +406,17 @@ schedule::Project TstSemanticRoundtrip::makeSampleProject()
     p.viewStyles.statusDateLine = { 0xE04040, 3 };
     p.viewStyles.currentDateLine = { 0x5B7C99, 4 };
     p.viewStyles.ganttRows = { 0xE2E2E2, 1 };
-    p.viewStyles.taskBar = { 0x9FC5E8, 0x4A7EBB, 0x4A7EBB };
-    p.viewStyles.milestone = { 0x101010, 0x101010, 0x101010 };
-    p.viewStyles.summaryBar = { 0x202020, 0x202020, 0x202020 };
-    p.viewStyles.projectSummaryBar = { 0x808080, 0x808080, 0x808080 };
+    // Seed the four colour-round-tripped bar categories. Set fields individually
+    // so the accessor-created row keeps its name (the codec's match key).
+    auto seedBar = [](schedule::ViewBarStyle &b, qint32 mid, qint32 start, qint32 end) {
+        b.middleColor = mid;
+        b.startColor = start;
+        b.endColor = end;
+    };
+    seedBar(p.viewStyles.taskBar(), 0x9FC5E8, 0x4A7EBB, 0x4A7EBB);
+    seedBar(p.viewStyles.milestone(), 0x101010, 0x101010, 0x101010);
+    seedBar(p.viewStyles.summaryBar(), 0x202020, 0x202020, 0x202020);
+    seedBar(p.viewStyles.projectSummaryBar(), 0x808080, 0x808080, 0x808080);
 
     schedule::Resource r;
     r.uniqueId = 1; r.id = 1; r.name = QStringLiteral("Alice"); r.initials = QStringLiteral("A");
