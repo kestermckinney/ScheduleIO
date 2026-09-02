@@ -40,6 +40,7 @@ scheduleio_add_test(tst_progressupdating unit/tst_progressupdating.cpp)
 scheduleio_add_test(tst_workcontouring unit/tst_workcontouring.cpp)
 scheduleio_add_test(tst_paritygaps unit/tst_paritygaps.cpp)
 scheduleio_add_test(tst_usageviewsettings unit/tst_usageviewsettings.cpp)
+scheduleio_add_test(tst_barstylecodec   unit/tst_barstylecodec.cpp)
 
 if(WIN32 AND SCHEDULEIO_ORACLE_MSPROJECT)
     scheduleio_add_test(tst_msproject_usage_view interop/tst_msproject_usage_view.cpp)
@@ -64,6 +65,7 @@ scheduleio_add_test(tst_availability_oracle oracle/tst_availability_oracle.cpp)
 scheduleio_add_test(tst_calendar_oracle oracle/tst_calendar_oracle.cpp)
 scheduleio_add_test(tst_assignment_oracle oracle/tst_assignment_oracle.cpp)
 scheduleio_add_test(tst_format_oracle oracle/tst_format_oracle.cpp)
+scheduleio_add_test(tst_timeline_oracle oracle/tst_timeline_oracle.cpp)
 
 # XmlIO - MS Project compatible XML (MSPDI) read/write over the shared model
 scheduleio_add_test(tst_xml_roundtrip      xml/tst_xml_roundtrip.cpp)
@@ -83,6 +85,10 @@ target_include_directories(dump_task PRIVATE ${CMAKE_SOURCE_DIR}/src)
 qt_add_executable(dump_props probe/dump_props.cpp)
 target_link_libraries(dump_props PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_props PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(cfb_streams probe/cfb_streams.cpp)
+target_link_libraries(cfb_streams PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(cfb_streams PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 qt_add_executable(dump_dates probe/dump_dates.cpp)
 target_link_libraries(dump_dates PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
@@ -123,6 +129,18 @@ target_include_directories(dump_fontbases PRIVATE ${CMAKE_SOURCE_DIR}/src)
 qt_add_executable(dump_cview probe/dump_cview.cpp)
 target_link_libraries(dump_cview PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_cview PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(dump_barexc probe/dump_barexc.cpp)
+target_link_libraries(dump_barexc PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_barexc PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(dump_barstyles probe/dump_barstyles.cpp)
+target_link_libraries(dump_barstyles PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_barstyles PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(dump_timeline probe/dump_timeline.cpp)
+target_link_libraries(dump_timeline PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_timeline PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 qt_add_executable(resave probe/resave.cpp)
 target_link_libraries(resave PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)

@@ -1,0 +1,15 @@
+{
+  "fixture": "tl_16_callout",
+  "description": "two tasks on the timeline: uid 1 as a bar, uid 2 as a callout",
+  "note": "Generated on real MS Project 2016 (dpr2hw3): both tasks added with TaskOnTimeline, then uid 2 switched via the Timeline Format ribbon 'Display as Callout' button (driven by UI Automation). Callout encoding: <t> row gets onTL=\"0\" and the task gains an <ft> row in <fltSet> with onTL=\"1\" top=\"1\".",
+  "comLog": [
+    "Projects.Add: ok",
+    "TaskOnTimeline(uid=1): ok",
+    "TaskOnTimeline(uid=2): ok",
+    "UIA invoke 'Display as Callout' on uid 2: ok",
+    "FileSaveAs: ok"
+  ],
+  "intent": "one bar, one callout",
+  "onTimeline": [1, 2],
+  "display": {"1": "bar", "2": "callout"}
+}

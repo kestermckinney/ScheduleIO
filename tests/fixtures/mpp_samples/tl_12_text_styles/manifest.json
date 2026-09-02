@@ -1,0 +1,28 @@
+{
+  "fixture": "tl_12_text_styles",
+  "description": "timeline text styles set across Item codes 0..11",
+  "note": "Timeline state lives in the .mpp <TLViewData> XML only; MSPDI .xml carries none of it. This manifest records intent; comLog records which COM calls actually succeeded.",
+  "comLog": [
+    "TaskOnTimelineEx(id=2,bar=0): ok",
+    "TaskOnTimelineEx(id=3,bar=0): ok",
+    "TaskOnTimelineEx(id=4,bar=0): ok",
+    "TextStylesEx(item=0): ok",
+    "TextStylesEx(item=1): ok",
+    "TextStylesEx(item=2): ok",
+    "TextStylesEx(item=3): ok",
+    "TextStylesEx(item=4): ok",
+    "TextStylesEx(item=5): ok",
+    "TextStylesEx(item=6): ok",
+    "TextStylesEx(item=7): ok",
+    "TextStylesEx(item=8): ok",
+    "TextStylesEx(item=9): ok",
+    "TextStylesEx(item=10): ok",
+    "TextStylesEx(item=11): ok"
+  ],
+  "intent": "timeline text styles set across Item codes 0..11",
+  "onTimeline": [
+    2,
+    3,
+    4
+  ]
+}

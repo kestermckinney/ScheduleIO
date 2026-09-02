@@ -127,6 +127,11 @@ public:
     // Cost (in the project's currency unit).
     double cost = 0.0;
     double fixedCost = 0.0;
+    // How the task's fixed cost is booked over its span: 1 = Start, 2 = End,
+    // 3 = Prorated (MS Project's default). Seeded from Project::defaultFixedCostAccrual
+    // on task creation. Round-trips via MSPDI and the scaffold; MPP-binary
+    // persistence of the per-task field is a known gap.
+    int fixedCostAccrual = 3;
     double actualCost = 0.0;
     double remainingCost = 0.0;
     double costVariance = 0.0;

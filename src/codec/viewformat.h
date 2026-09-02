@@ -9,8 +9,9 @@
 class CompoundFile;
 namespace schedule { class Project; }
 
-// Gantt-view formatting codec for `   214/CV_iew` (ported from MPXJ's
-// GanttChartView14 / ViewFactory14, github.com/joniles/mpxj):
+// View codec for `   214/CV_iew`: Gantt-view formatting (ported from MPXJ's
+// GanttChartView14 / ViewFactory14, github.com/joniles/mpxj) plus the Microsoft
+// Project Timeline view (read + write, into Project::timelineView).
 //
 //   CV_iew holds one 138-byte FixedData record per view (view id u32@0,
 //   UTF-16 name@4, splitViewFlag u16@110, viewType u16@112; GANTT_CHART = 1)
@@ -32,11 +33,18 @@ namespace schedule { class Project; }
 //   colour 8, font 16, backColour 64, backPattern 128).
 //
 //   Colours are r,g,b + a flag byte (0 = explicit, nonzero = "Automatic").
+//
+//   The Timeline view (FixedData viewType 16) is a self-describing UTF-16
+//   "<TLViewData>" XML document held identically in two places: the CV_iew
+//   Var2Data record of type 47 (keyed by the timeline view uid) and Props9 item
+//   key 574619695. read()/patch() decode/re-emit both. See DECODING_NOTES.md
+//   "Timeline view" and src/model/timelineviewsettings.h.
 namespace ViewFormat {
 
-// Read the Gantt Chart view's formatting into the project: fills
-// Project::viewStyles and each task's rowFormat. Missing or short view data
-// leaves everything at defaults (viewStyles.present == false).
+// Read the Gantt Chart view's formatting into the project (Project::viewStyles
+// and each task's rowFormat) and, when present, decode the Timeline view's
+// <TLViewData> document into Project::timelineView. Missing or short view data
+// leaves everything at defaults (viewStyles.present / timelineView.present false).
 void read(const CompoundFile &cf, schedule::Project *out);
 
 // Ensure every requested font family/size has a FONT_BASES entry and update
@@ -46,16 +54,19 @@ void read(const CompoundFile &cf, schedule::Project *out);
 void prepareFontBases(schedule::Project *project, const QByteArray &fallback);
 
 // Whether the project carries any formatting the writer must patch into the
-// template's view data (styles present, or any task row/cell formatted).
+// template's view data (styles present, any task row/cell formatted, or the
+// Timeline view edited -- timelineView.present && timelineView.modified).
 bool wantsPatch(const schedule::Project &in);
 
 // Whether either native Usage table carries edited column widths.
 bool wantsTablePatch(const schedule::Project &in);
 
 // Rebuild the template's CV_iew VarMeta/Var2Data with the project's formatting
-// patched into the Gantt Chart view's Props9 block, adding both streams to
-// `out`. Returns false (adding nothing) when the template has no usable Gantt
-// view; the caller should then copy the template's streams verbatim.
+// patched into the Gantt Chart view's Props9 block (and, when timelineView is
+// modified, the re-serialised <TLViewData> written into both the type-47 record
+// and Props9 item 574619695), adding both streams to `out`. Returns false
+// (adding nothing) when there is nothing to patch; the caller then copies the
+// template's streams verbatim.
 bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in);
 
 // Patch the Task/Resource Usage table column widths in `   214/CTable` while

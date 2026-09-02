@@ -26,6 +26,77 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
     if (a.statusDate != b.statusDate) d << QStringLiteral("statusDate");
     if (a.calendarUniqueId != b.calendarUniqueId)
         d << QStringLiteral("calendarUniqueId %1 vs %2").arg(a.calendarUniqueId).arg(b.calendarUniqueId);
+#define DIFF_OPT(f) do { if (a.f != b.f) d << QStringLiteral(#f " %1 vs %2").arg(QVariant(a.f).toString(), QVariant(b.f).toString()); } while (0)
+    DIFF_OPT(newTasksManual); DIFF_OPT(newTaskStartIsProjectStart); DIFF_OPT(defaultTaskType);
+    DIFF_OPT(defaultDurationUnits); DIFF_OPT(defaultWorkUnits); DIFF_OPT(newTasksEffortDriven);
+    DIFF_OPT(autoLinkTasks); DIFF_OPT(splitInProgressTasks); DIFF_OPT(honorConstraints);
+    DIFF_OPT(criticalSlackLimit); DIFF_OPT(weekStartDay); DIFF_OPT(fiscalYearStartMonth);
+    DIFF_OPT(fiscalYearUsesStartYear); DIFF_OPT(minutesPerDay); DIFF_OPT(minutesPerWeek);
+    DIFF_OPT(daysPerMonth); DIFF_OPT(moveCompletedEndsBack); DIFF_OPT(moveRemainingStartsBack);
+    DIFF_OPT(moveRemainingStartsForward); DIFF_OPT(moveCompletedEndsForward);
+    DIFF_OPT(statusUpdatesResource); DIFF_OPT(currencySymbol); DIFF_OPT(currencySymbolPosition);
+    DIFF_OPT(currencyDigits); DIFF_OPT(currencyCode); DIFF_OPT(defaultStandardRate);
+    DIFF_OPT(defaultOvertimeRate); DIFF_OPT(defaultFixedCostAccrual); DIFF_OPT(defaultEarnedValueMethod);
+    DIFF_OPT(baselineForEarnedValue); DIFF_OPT(showProjectSummaryTask);
+    if (a.defaultStartTime != b.defaultStartTime)
+        d << QStringLiteral("defaultStartTime %1 vs %2").arg(a.defaultStartTime.toString(), b.defaultStartTime.toString());
+    if (a.defaultEndTime != b.defaultEndTime)
+        d << QStringLiteral("defaultEndTime %1 vs %2").arg(a.defaultEndTime.toString(), b.defaultEndTime.toString());
+    DIFF_OPT(multipleCriticalPaths);
+#undef DIFF_OPT
+    if (a.formatVersion != b.formatVersion)
+        d << QStringLiteral("formatVersion %1 vs %2").arg(int(a.formatVersion)).arg(int(b.formatVersion));
+    if (a.budgetCost != b.budgetCost)
+        d << QStringLiteral("budgetCost %1 vs %2").arg(a.budgetCost).arg(b.budgetCost);
+    if (a.budgetWorkMillis != b.budgetWorkMillis)
+        d << QStringLiteral("budgetWorkMillis %1 vs %2").arg(a.budgetWorkMillis).arg(b.budgetWorkMillis);
+    if (a.reportAccentColor != b.reportAccentColor)
+        d << QStringLiteral("reportAccentColor %1 vs %2").arg(a.reportAccentColor).arg(b.reportAccentColor);
+    if (a.customFieldDefinitions.size() != b.customFieldDefinitions.size())
+        d << QStringLiteral("customFieldDefinitions count %1 vs %2")
+             .arg(a.customFieldDefinitions.size()).arg(b.customFieldDefinitions.size());
+    else if (!(a.customFieldDefinitions == b.customFieldDefinitions))
+        d << QStringLiteral("customFieldDefinitions differ");
+    if (a.resources.size() != b.resources.size())
+        d << QStringLiteral("resource count %1 vs %2").arg(a.resources.size()).arg(b.resources.size());
+    else if (!(a.resources == b.resources))
+        d << QStringLiteral("resources differ");
+    if (a.assignments.size() != b.assignments.size())
+        d << QStringLiteral("assignment count %1 vs %2").arg(a.assignments.size()).arg(b.assignments.size());
+    else if (!(a.assignments == b.assignments))
+        d << QStringLiteral("assignments differ");
+    if (a.calendars.size() != b.calendars.size())
+        d << QStringLiteral("calendar count %1 vs %2").arg(a.calendars.size()).arg(b.calendars.size());
+    else if (!(a.calendars == b.calendars))
+        d << QStringLiteral("calendars differ");
+    if (a.relations.size() != b.relations.size())
+        d << QStringLiteral("relation count %1 vs %2").arg(a.relations.size()).arg(b.relations.size());
+    else if (!(a.relations == b.relations))
+        d << QStringLiteral("relations differ");
+    if (!(a.viewStyles == b.viewStyles)) {
+        QStringList vs;
+        if (a.viewStyles.present != b.viewStyles.present) vs << QStringLiteral("present");
+        for (int i = 0; i < schedule::ViewStyles::TextCategoryCount; ++i) {
+            const schedule::TextStyle &x = a.viewStyles.text[i], &y = b.viewStyles.text[i];
+            if (x != y)
+                vs << QStringLiteral("text[%1] b%2/%3 i%4/%5 u%6/%7 s%8/%9 col %10/%11 back %12/%13 pat %14/%15")
+                      .arg(i).arg(x.bold).arg(y.bold).arg(x.italic).arg(y.italic)
+                      .arg(x.underline).arg(y.underline).arg(x.strikethrough).arg(y.strikethrough)
+                      .arg(x.color).arg(y.color).arg(x.backColor).arg(y.backColor)
+                      .arg(x.backPattern).arg(y.backPattern);
+        }
+        if (a.viewStyles.ganttRows != b.viewStyles.ganttRows) vs << QStringLiteral("ganttRows");
+        if (a.viewStyles.currentDateLine != b.viewStyles.currentDateLine) vs << QStringLiteral("currentDateLine");
+        if (a.viewStyles.statusDateLine != b.viewStyles.statusDateLine) vs << QStringLiteral("statusDateLine");
+        if (a.viewStyles.barStyles != b.viewStyles.barStyles) {
+            vs << QStringLiteral("barStyles (a=%1 rows, b=%2 rows)")
+                      .arg(a.viewStyles.barStyles.size()).arg(b.viewStyles.barStyles.size());
+        }
+        d << QStringLiteral("viewStyles differ { %1 }").arg(vs.join(QStringLiteral("; ")));
+    }
+    if (!(a.resourceUsageStyles == b.resourceUsageStyles)) d << QStringLiteral("resourceUsageStyles differ");
+    if (!(a.teamPlannerStyles == b.teamPlannerStyles)) d << QStringLiteral("teamPlannerStyles differ");
+    if (!(a.calendarStyles == b.calendarStyles)) d << QStringLiteral("calendarStyles differ");
     if (a.tasks.size() != b.tasks.size())
         d << QStringLiteral("task count %1 vs %2").arg(a.tasks.size()).arg(b.tasks.size());
     for (int i = 0; i < qMin(a.tasks.size(), b.tasks.size()); ++i) {
@@ -65,6 +136,8 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
         if (!(x.evm == y.evm)) f << QStringLiteral("evm");
         if (x.cost != y.cost) f << QStringLiteral("cost %1/%2").arg(x.cost).arg(y.cost);
         if (x.fixedCost != y.fixedCost) f << QStringLiteral("fixedCost");
+        if (x.fixedCostAccrual != y.fixedCostAccrual)
+            f << QStringLiteral("fixedCostAccrual %1/%2").arg(x.fixedCostAccrual).arg(y.fixedCostAccrual);
         if (x.actualCost != y.actualCost) f << QStringLiteral("actualCost");
         if (x.remainingCost != y.remainingCost) f << QStringLiteral("remainingCost");
         if (x.costVariance != y.costVariance) f << QStringLiteral("costVariance");
@@ -87,6 +160,8 @@ static QString diffProjects(const schedule::Project &a, const schedule::Project 
                              .arg(x.customFields.at(n).name, x.customFields.at(n).value.toString(),
                                   y.customFields.at(n).name, y.customFields.at(n).value.toString());
         }
+        if (x.barColor != y.barColor)
+            f << QStringLiteral("barColor %1/%2").arg(x.barColor).arg(y.barColor);
         if (x.rowFormat != y.rowFormat)
             f << QStringLiteral("rowFormat b%1%2 i%3%4 u%5%6 s%7%8 color %9/%10 back %11/%12 pat %13/%14")
                      .arg(x.rowFormat.bold).arg(y.rowFormat.bold)
@@ -246,6 +321,7 @@ class TstSemanticRoundtrip : public QObject
     Q_OBJECT
 private slots:
     void syntheticRoundTrip();
+    void projectOptionsRoundTrip();
     void writerIsDeterministic();
     void taskDisplayOrderOrdinalIsWritten();
     void inconsistentProgressIsCanonicalizedForProject();
@@ -258,6 +334,7 @@ private slots:
     void normalRowWeightIsWrittenExplicitly();
     void parentRowsetManifestsAreConsistent();
     void timelineViewSurvivesEditedFixtureSave();
+    void perTaskBarColorSurvivesEditedFixtureSave();
     void realFixtures_data();
     void realFixtures();
 
@@ -284,6 +361,9 @@ schedule::Project TstSemanticRoundtrip::makeSampleProject()
     t1.percentComplete = 0.5;
     t1.physicalPercentComplete = 0.35;
     t1.earnedValueMethod = 1;
+    // NB: fixedCostAccrual intentionally left at the default here -- the real
+    // MPP-binary per-task field is a known gap (see Task::fixedCostAccrual);
+    // MSPDI + scaffold round-trips are exercised elsewhere.
     t1.workMillis = qint64(16) * 3600 * 1000;                // task-level Work
     t1.levelingDelayMillis = qint64(4) * 3600 * 1000;        // resource-leveling delay
     t1.ignoreResourceCalendar = true;
@@ -326,10 +406,17 @@ schedule::Project TstSemanticRoundtrip::makeSampleProject()
     p.viewStyles.statusDateLine = { 0xE04040, 3 };
     p.viewStyles.currentDateLine = { 0x5B7C99, 4 };
     p.viewStyles.ganttRows = { 0xE2E2E2, 1 };
-    p.viewStyles.taskBar = { 0x9FC5E8, 0x4A7EBB, 0x4A7EBB };
-    p.viewStyles.milestone = { 0x101010, 0x101010, 0x101010 };
-    p.viewStyles.summaryBar = { 0x202020, 0x202020, 0x202020 };
-    p.viewStyles.projectSummaryBar = { 0x808080, 0x808080, 0x808080 };
+    // Seed the four colour-round-tripped bar categories. Set fields individually
+    // so the accessor-created row keeps its name (the codec's match key).
+    auto seedBar = [](schedule::ViewBarStyle &b, qint32 mid, qint32 start, qint32 end) {
+        b.middleColor = mid;
+        b.startColor = start;
+        b.endColor = end;
+    };
+    seedBar(p.viewStyles.taskBar(), 0x9FC5E8, 0x4A7EBB, 0x4A7EBB);
+    seedBar(p.viewStyles.milestone(), 0x101010, 0x101010, 0x101010);
+    seedBar(p.viewStyles.summaryBar(), 0x202020, 0x202020, 0x202020);
+    seedBar(p.viewStyles.projectSummaryBar(), 0x808080, 0x808080, 0x808080);
 
     schedule::Resource r;
     r.uniqueId = 1; r.id = 1; r.name = QStringLiteral("Alice"); r.initials = QStringLiteral("A");
@@ -376,6 +463,77 @@ void TstSemanticRoundtrip::syntheticRoundTrip()
 
     // Primary correctness gate: model survives read -> write -> read.
     QVERIFY2(reader.project() == original, qPrintable(diffProjects(original, reader.project())));
+}
+
+// The File > Options project fields whose "   114/Props" key ids were
+// reverse-engineered from real MS Project saves survive an MPP write -> read.
+void TstSemanticRoundtrip::projectOptionsRoundTrip()
+{
+    schedule::Project p = makeSampleProject();
+    p.defaultTaskType = 2;
+    p.defaultDurationUnits = 9;
+    p.defaultWorkUnits = 5;
+    p.newTasksEffortDriven = true;
+    p.newTaskStartIsProjectStart = false;
+    p.splitInProgressTasks = false;
+    p.statusUpdatesResource = false;
+    p.criticalSlackLimit = 13;
+    p.weekStartDay = 3;
+    p.fiscalYearStartMonth = 9;
+    p.fiscalYearUsesStartYear = true;
+    p.defaultStartTime = QTime(9, 30);
+    p.defaultEndTime = QTime(18, 15);
+    p.minutesPerDay = 450;
+    p.minutesPerWeek = 2460;
+    p.daysPerMonth = 23;
+    p.moveCompletedEndsBack = true;
+    p.moveRemainingStartsBack = true;
+    p.moveRemainingStartsForward = true;
+    p.moveCompletedEndsForward = true;
+    p.currencySymbol = QStringLiteral("Kzz");
+    p.currencySymbolPosition = 2;
+    p.currencyDigits = 1;
+    p.currencyCode = QStringLiteral("NOK");
+    p.defaultStandardRate = 12.5;
+    p.defaultOvertimeRate = 18.75;
+    p.defaultFixedCostAccrual = 2;
+    p.defaultEarnedValueMethod = 1;
+    p.baselineForEarnedValue = 3;
+
+    MppIO w; w.setProject(p);
+    const QByteArray bytes = w.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(w.errorString()));
+    MppIO r;
+    QVERIFY2(r.openFromData(bytes), qPrintable(r.errorString()));
+    const schedule::Project &d = r.project();
+
+    QCOMPARE(d.defaultTaskType, 2);
+    QCOMPARE(d.defaultDurationUnits, 9);
+    QCOMPARE(d.defaultWorkUnits, 5);
+    QVERIFY(d.newTasksEffortDriven);
+    QVERIFY(!d.newTaskStartIsProjectStart);
+    QVERIFY(!d.splitInProgressTasks);
+    QVERIFY(!d.statusUpdatesResource);
+    QCOMPARE(d.criticalSlackLimit, 13);
+    QCOMPARE(d.weekStartDay, 3);
+    QCOMPARE(d.fiscalYearStartMonth, 9);
+    QVERIFY(d.fiscalYearUsesStartYear);
+    QCOMPARE(d.defaultStartTime, QTime(9, 30));
+    QCOMPARE(d.defaultEndTime, QTime(18, 15));
+    QCOMPARE(d.minutesPerDay, 450);
+    QCOMPARE(d.minutesPerWeek, 2460);
+    QCOMPARE(d.daysPerMonth, 23);
+    QVERIFY(d.moveCompletedEndsBack && d.moveRemainingStartsBack
+            && d.moveRemainingStartsForward && d.moveCompletedEndsForward);
+    QCOMPARE(d.currencySymbol, QStringLiteral("Kzz"));
+    QCOMPARE(d.currencySymbolPosition, 2);
+    QCOMPARE(d.currencyDigits, 1);
+    QCOMPARE(d.currencyCode, QStringLiteral("NOK"));
+    QCOMPARE(d.defaultStandardRate, 12.5);
+    QCOMPARE(d.defaultOvertimeRate, 18.75);
+    QCOMPARE(d.defaultFixedCostAccrual, 2);
+    QCOMPARE(d.defaultEarnedValueMethod, 1);
+    QCOMPARE(d.baselineForEarnedValue, 3);
 }
 
 void TstSemanticRoundtrip::writerIsDeterministic()
@@ -997,6 +1155,83 @@ void TstSemanticRoundtrip::parentRowsetManifestsAreConsistent()
         return issue.contains(QStringLiteral("TBkndTask"))
             && issue.contains(QStringLiteral("declares 4 rows"));
     }));
+}
+
+// Format > Bar on a single task: BAR_EXCEPTION_STYLES (Gantt view Props9 item
+// 574619661, 71 bytes a record). A colour set here has to survive a save, and a
+// task Project itself formatted has to keep the parts of the record we do not
+// model -- shape, pattern, ends, bar text.
+void TstSemanticRoundtrip::perTaskBarColorSurvivesEditedFixtureSave()
+{
+    QString fixturePath;
+    for (const QString &path : fixtures::mppFiles()) {
+        if (QFileInfo(path).fileName().compare(QStringLiteral("Average Project.mpp"),
+                                               Qt::CaseInsensitive) == 0) {
+            fixturePath = path;
+            break;
+        }
+    }
+    if (fixturePath.isEmpty())
+        QSKIP("Average Project.mpp fixture is not installed");
+
+    MppIO reader;
+    QVERIFY2(reader.open(fixturePath), qPrintable(reader.errorString()));
+    schedule::Project project = reader.project();
+    QVERIFY(!project.mppBarExceptions.isEmpty());   // the fixture carries records
+    QVERIFY(project.tasks.size() > 3);
+
+    // A task with no record of its own, so the writer has to create one, and a
+    // second colour on a different task to prove the array stays sorted.
+    const int firstUid = project.tasks.at(1).uniqueId;
+    const int secondUid = project.tasks.at(3).uniqueId;
+    project.tasks[1].barColor = 0xC0392B;
+    project.tasks[3].barColor = 0x1F8A4C;
+
+    MppIO writer;
+    writer.setProject(project);
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString path = temp.filePath(QStringLiteral("barcolor.mpp"));
+    QVERIFY2(writer.save(path), qPrintable(writer.errorString()));
+
+    MppIO back;
+    QVERIFY2(back.open(path), qPrintable(back.errorString()));
+    const auto colorOf = [&back](int uid) -> qint32 {
+        for (const schedule::Task &t : back.project().tasks)
+            if (t.uniqueId == uid)
+                return t.barColor;
+        return schedule::TextStyle::kAutomatic;
+    };
+    QCOMPARE(colorOf(firstUid), 0xC0392B);
+    QCOMPARE(colorOf(secondUid), 0x1F8A4C);
+
+    // Records are kept in unique-id order, the way Project writes them.
+    const QByteArray &array = back.project().mppBarExceptions;
+    QCOMPARE(array.size() % 71, 0);
+    quint32 previous = 0;
+    for (int o = 0; o + 71 <= array.size(); o += 71) {
+        const quint32 uid = qFromLittleEndian<quint32>(
+            reinterpret_cast<const uchar *>(array.constData()) + o);
+        QVERIFY2(uid > previous, "bar exception records must be sorted by task uid");
+        previous = uid;
+    }
+
+    // Clearing a colour leaves the record in place with the colour automatic --
+    // it may still carry shape or bar-text formatting that is not ours to drop.
+    schedule::Project cleared = back.project();
+    for (schedule::Task &t : cleared.tasks)
+        if (t.uniqueId == firstUid)
+            t.barColor = schedule::TextStyle::kAutomatic;
+    MppIO rewriter;
+    rewriter.setProject(cleared);
+    const QString clearedPath = temp.filePath(QStringLiteral("cleared.mpp"));
+    QVERIFY2(rewriter.save(clearedPath), qPrintable(rewriter.errorString()));
+    MppIO afterClear;
+    QVERIFY2(afterClear.open(clearedPath), qPrintable(afterClear.errorString()));
+    QCOMPARE(afterClear.project().mppBarExceptions.size(), array.size());
+    for (const schedule::Task &t : afterClear.project().tasks)
+        if (t.uniqueId == firstUid)
+            QCOMPARE(t.barColor, schedule::TextStyle::kAutomatic);
 }
 
 void TstSemanticRoundtrip::timelineViewSurvivesEditedFixtureSave()

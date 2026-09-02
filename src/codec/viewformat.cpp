@@ -3,11 +3,13 @@
 
 #include "codec/viewformat.h"
 
+#include "codec/barstylecodec.h"
 #include "codec/bkndvardata.h"
 #include "codec/mppfieldids.h"
 #include "model/project.h"
 #include "ole/compoundfile.h"
 
+#include <QDate>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -15,6 +17,8 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <QXmlStreamReader>
+#include <QXmlStreamWriter>
 
 #include <algorithm>
 #include <cstring>
@@ -31,6 +35,7 @@ const QString kResourceUsageSelection = QStringLiteral("ResourceUsageDetailSelec
 // Props9 item keys (MPXJ PropsKey).
 constexpr quint32 kKeyStyleData = 574619656u;         // STYLE_DATA
 constexpr quint32 kKeyColumnProperties = 574619660u;  // COLUMN_PROPERTIES
+constexpr quint32 kKeyBarExceptions = 574619661u;     // BAR_EXCEPTION_STYLES
 constexpr quint32 kKeyTableName = 574619658u;         // TABLE_NAME
 constexpr quint32 kKeyTableProperties = 574619655u;   // TABLE_PROPERTIES
 constexpr quint32 kKeyViewFields = 574619708u;        // VIEW_FIELDS (Usage details)
@@ -44,7 +49,16 @@ constexpr quint16 kViewTypeResourceUsage = 15;
 constexpr quint16 kViewTypeTaskUsage = 14;
 constexpr quint16 kViewTypeTeamPlanner = 9;
 constexpr quint16 kViewTypeCalendar = 13;
+constexpr quint16 kViewTypeTimeline = 16;
 constexpr int kViewRecordSize = 138;    // CV_iew FixedData block size
+
+// The Timeline view is a self-describing UTF-16 "<TLViewData>" XML document held
+// identically in two places: the CV_iew Var2Data record of type 47 keyed by the
+// timeline view uid, and Props9 item key 574619695 of that view's PROPERTIES.
+// See src/model/timelineviewsettings.h and memory reference-mpp-timeline-tlviewdata.
+constexpr quint16 kTimelineXmlVarType = 47;
+constexpr quint32 kKeyTimelineXml = 574619695u;   // 0x2240000F
+constexpr quint32 kTimelineSentinelUid = 4294967295u;   // template rows / "none"
 
 // Non-Gantt views store text styles in the same STYLE_DATA structure but their
 // gridline/bar sections (and category count) differ and are undecoded, so only
@@ -487,18 +501,32 @@ void writeGridLine(QByteArray &d, int o, const schedule::ViewLineStyle &g)
     d[o + 13] = char(g.lineStyle);
 }
 
-// Map a default bar style's name onto the ViewStyles category it edits.
-schedule::ViewBarStyle *barForName(schedule::ViewStyles &vs, const QString &name)
+// The four default bar-style names whose colours Schedule Vault always
+// round-tripped; used only by the short-blob fallback below.
+bool isColourRoundTripBar(const QString &name)
 {
-    if (name.compare(QLatin1String("Task"), Qt::CaseInsensitive) == 0)
-        return &vs.taskBar;
-    if (name.compare(QLatin1String("Milestone"), Qt::CaseInsensitive) == 0)
-        return &vs.milestone;
-    if (name.compare(QLatin1String("Summary"), Qt::CaseInsensitive) == 0)
-        return &vs.summaryBar;
-    if (name.compare(QLatin1String("Project Summary"), Qt::CaseInsensitive) == 0)
-        return &vs.projectSummaryBar;
+    return name.compare(QLatin1String("Task"), Qt::CaseInsensitive) == 0
+        || name.compare(QLatin1String("Milestone"), Qt::CaseInsensitive) == 0
+        || name.compare(QLatin1String("Summary"), Qt::CaseInsensitive) == 0
+        || name.compare(QLatin1String("Project Summary"), Qt::CaseInsensitive) == 0;
+}
+
+// The existing row for `name`, or nullptr when the table has no such row.
+const schedule::ViewBarStyle *findBar(const schedule::ViewStyles &vs, const QString &name)
+{
+    for (const schedule::ViewBarStyle &b : vs.barStyles)
+        if (b.name.compare(name, Qt::CaseInsensitive) == 0)
+            return &b;
     return nullptr;
+}
+
+// True when the STYLE_DATA blob is the full standard Gantt layout: 200 fixed
+// 195-byte bar-style slots (2255..41255) plus the 108-byte end trailer.
+bool hasFullBarLayout(const QByteArray &d)
+{
+    return d.size() >= BarStyleCodec::kFirstRecord
+        + BarStyleCodec::kMaxRecords * BarStyleCodec::kRecordSize
+        + BarStyleCodec::kTrailerBytes;
 }
 
 void readStyleData(const QByteArray &d, schedule::ViewStyles *vs)
@@ -514,17 +542,15 @@ void readStyleData(const QByteArray &d, schedule::ViewStyles *vs)
     vs->currentDateLine = readGridLine(d, kGridCurrentDate);
     vs->statusDateLine = readGridLine(d, kGridStatusDate);
 
+    // The whole default bar-style table, in file order (= draw order).
     const int barCount = uchar(d.at(kBarCountOffset));
+    vs->barStyles.clear();
+    vs->barStyles.reserve(barCount);
     for (int i = 0; i < barCount; ++i) {
         const int o = kBarStylesBase + i * kBarStyleSize;
         if (o + kBarStyleSize > d.size())
             break;
-        const QString name = rdUtf16(d, o + 91, kBarStyleSize - 91);
-        if (schedule::ViewBarStyle *bar = barForName(*vs, name)) {
-            bar->middleColor = rdColor(d, o + 2);
-            bar->startColor = rdColor(d, o + 16);
-            bar->endColor = rdColor(d, o + 29);
-        }
+        vs->barStyles.append(BarStyleCodec::readRecord(d, o));
     }
 }
 
@@ -540,14 +566,40 @@ void patchStyleData(QByteArray &d, const schedule::ViewStyles &vs)
     writeGridLine(d, kGridCurrentDate, vs.currentDateLine);
     writeGridLine(d, kGridStatusDate, vs.statusDateLine);
 
+    if (vs.barStyles.isEmpty())
+        return;   // styles never touched -> leave the template's bar table as-is
+
+    if (hasFullBarLayout(d)) {
+        // Rewrite the bar array from the model. The 200-slot region is a fixed
+        // size, so this needs no blob resize and never moves the end trailer.
+        // NOTE: this writes barCount != the template's 41 whenever the table was
+        // edited. Real MS Project's acceptance of a non-stock barCount is still
+        // pending a dpr2hw3 open + ViewApply check (plan Phase 0.4).
+        const int trailerStart = d.size() - BarStyleCodec::kTrailerBytes;
+        const int maxSlots = qMin(BarStyleCodec::kMaxRecords,
+                                  (trailerStart - kBarStylesBase) / kBarStyleSize);
+        const int prevCount = uchar(d.at(kBarCountOffset));
+        const int n = qMin(vs.barStyles.size(), maxSlots);
+        for (int i = 0; i < n; ++i)
+            BarStyleCodec::writeRecord(d, kBarStylesBase + i * kBarStyleSize,
+                                       vs.barStyles.at(i));
+        for (int i = n; i < prevCount && i < maxSlots; ++i)
+            std::memset(d.data() + kBarStylesBase + i * kBarStyleSize, 0, kBarStyleSize);
+        d[kBarCountOffset] = char(quint8(n));
+        return;
+    }
+
+    // Fallback for a non-standard/short STYLE_DATA blob: patch the three colours
+    // of the four stock categories in place, as the codec always did.
     const int barCount = uchar(d.at(kBarCountOffset));
     for (int i = 0; i < barCount; ++i) {
         const int o = kBarStylesBase + i * kBarStyleSize;
         if (o + kBarStyleSize > d.size())
             break;
         const QString name = rdUtf16(d, o + 91, kBarStyleSize - 91);
-        const schedule::ViewBarStyle *bar = barForName(const_cast<schedule::ViewStyles &>(vs), name);
-        if (bar) {
+        if (!isColourRoundTripBar(name))
+            continue;
+        if (const schedule::ViewBarStyle *bar = findBar(vs, name)) {
             wrColor(d, o + 2, bar->middleColor);
             wrColor(d, o + 16, bar->startColor);
             wrColor(d, o + 29, bar->endColor);
@@ -796,6 +848,133 @@ QByteArray findViewRecord(const QByteArray &fixedMeta, const QByteArray &fixedDa
     return {};
 }
 
+// ---- Per-task bar formatting (BAR_EXCEPTION_STYLES) ---------------------------
+//
+// Format > Bar on a single task, as opposed to Format > Bar Styles which edits a
+// whole category. The Gantt view's Props9 item 574619661 is a bare array of
+// 71-byte records, one per formatted task, sorted by task unique id, and absent
+// entirely when nothing is formatted. Layout (established against files MS
+// Project itself wrote, sweeping GanttBarFormat over the colour, shape, pattern
+// and text arguments):
+//
+//     +0   u32  task unique id
+//     +4   u16  the bar style the exception is based on (0 for one Project
+//               writes for a plain colour change)
+//     +6   u8   middle shape
+//     +7   u8   middle pattern
+//     +8   4    middle colour (r,g,b + automatic flag), our Task::barColor
+//     +20  u8   start shape (v % 21) and type (v / 21)
+//     +21  4    start colour
+//     +33  u8   end shape and type
+//     +34  4    end colour
+//     +49  5x4  left/right/top/bottom/inside bar text, each a task field id
+//               (0x0B400000 | field index) or 0xFFFFFFFF for none
+//     +69  u16  trailing flag (0 or 2 in the wild)
+//
+// The gaps are zero in every sample and are carried through untouched, as is
+// everything but the middle colour: the record replaces a task's whole bar, so
+// dropping the parts we don't model would silently restyle bars formatted in
+// Project.
+constexpr int kBarExcSize = 71;
+constexpr int kBarExcUid = 0;
+constexpr int kBarExcMiddleShape = 6;
+constexpr int kBarExcMiddlePattern = 7;
+constexpr int kBarExcMiddleColor = 8;
+constexpr int kBarExcRightText = 53;
+constexpr int kBarExcTrailing = 69;
+
+// What MS Project writes into a brand-new exception when only the colour was
+// changed: a solid rectangle carrying the stock Gantt bar's right-hand text.
+constexpr quint8 kBarExcDefaultShape = 1;
+constexpr quint8 kBarExcDefaultPattern = 1;
+constexpr quint32 kBarExcDefaultRightText = 0x0B400031u;   // field 49
+constexpr quint16 kBarExcDefaultTrailing = 2;
+
+void readBarExceptions(const QByteArray &d, schedule::Project *out)
+{
+    QHash<int, int> rowByUid;
+    for (int i = 0; i < out->tasks.size(); ++i)
+        rowByUid.insert(out->tasks[i].uniqueId, i);
+
+    const int count = d.size() / kBarExcSize;
+    for (int i = 0; i < count; ++i) {
+        const int o = i * kBarExcSize;
+        const int uid = int(rdU32(d, o + kBarExcUid));
+        const auto row = rowByUid.constFind(uid);
+        if (row == rowByUid.constEnd())
+            continue;
+        // An all-zero colour is Project's "no override": a record can exist to
+        // carry a shape or a bar text on its own. Verified against Project
+        // itself -- a task whose record reads 00 00 00 00 draws the ordinary
+        // bar colour (#8ABBED on the stock Gantt), not black. The cost is that
+        // black is not expressible here; Project's own colour argument treats 0
+        // as automatic too, so it cannot set a black bar either.
+        const qint32 color = rdColor(d, o + kBarExcMiddleColor);
+        if (color == 0)
+            continue;
+        out->tasks[row.value()].barColor = color;
+    }
+}
+
+QByteArray buildBarExceptions(const schedule::Project &in)
+{
+    // Start from the source file's own array so a task Project formatted keeps
+    // its shapes, ends and bar text; only the colour is ours to say anything
+    // about.
+    QByteArray d = in.mppBarExceptions;
+    if (d.size() % kBarExcSize != 0)
+        d.clear();
+
+    QHash<int, int> recordByUid;
+    for (int i = 0; i < d.size() / kBarExcSize; ++i)
+        recordByUid.insert(int(rdU32(d, i * kBarExcSize + kBarExcUid)), i);
+
+    for (const schedule::Task &task : in.tasks) {
+        const auto existing = recordByUid.constFind(task.uniqueId);
+        if (existing != recordByUid.constEnd()) {
+            // Clearing a colour leaves the record in place with the colour set
+            // back to automatic: it may still carry shape or text formatting,
+            // and dropping it would take that with it.
+            wrColor(d, existing.value() * kBarExcSize + kBarExcMiddleColor, task.barColor);
+            continue;
+        }
+        if (task.barColor == schedule::TextStyle::kAutomatic)
+            continue;
+
+        QByteArray record(kBarExcSize, '\0');
+        wrU32(record, kBarExcUid, quint32(task.uniqueId));
+        // Style id stays 0, byte-for-byte what Project itself writes for a
+        // colour-only exception (verified by diffing our record against one
+        // Project authored for the same task and colour: identical).
+        record[kBarExcMiddleShape] = char(kBarExcDefaultShape);
+        record[kBarExcMiddlePattern] = char(kBarExcDefaultPattern);
+        wrColor(record, kBarExcMiddleColor, task.barColor);
+        for (int text = 49; text < 69; text += 4)
+            wrU32(record, text, 0xFFFFFFFFu);
+        wrU32(record, kBarExcRightText, kBarExcDefaultRightText);
+        wrU16(record, kBarExcTrailing, kBarExcDefaultTrailing);
+        recordByUid.insert(task.uniqueId, d.size() / kBarExcSize);
+        d.append(record);
+    }
+
+    // Project keeps the array in task-unique-id order; appended records have to
+    // be sorted back in or it re-sorts (and rewrites) the whole item on open.
+    const int count = d.size() / kBarExcSize;
+    QVector<QByteArray> records;
+    records.reserve(count);
+    for (int i = 0; i < count; ++i)
+        records.append(d.mid(i * kBarExcSize, kBarExcSize));
+    std::sort(records.begin(), records.end(),
+              [](const QByteArray &a, const QByteArray &b) {
+        return rdU32(a, kBarExcUid) < rdU32(b, kBarExcUid);
+    });
+    QByteArray sorted;
+    sorted.reserve(d.size());
+    for (const QByteArray &record : records)
+        sorted.append(record);
+    return sorted;
+}
+
 QByteArray buildColumnProperties(const schedule::Project &in)
 {
     QByteArray d;
@@ -859,6 +1038,414 @@ struct VarRecord {
     quint16 typeLow = 0;
     quint16 typeHigh = 0;
 };
+
+// ---- Timeline ("<TLViewData>" XML) --------------------------------------------
+
+// The UTF-16 view name held at offset 4..110 of a 138-byte CV_iew record.
+QString viewRecordName(const QByteArray &rec)
+{
+    QString s;
+    for (int o = 4; o + 1 < 110 && o + 1 < rec.size(); o += 2) {
+        const ushort ch = rdU16(rec, o);
+        if (ch == 0)
+            break;
+        s.append(QChar(ch));
+    }
+    return s;
+}
+
+// Decode a "<TLViewData>" UTF-16LE document into the model. Anything not modelled
+// stays in TimelineViewSettings::rawXml so the writer can re-emit it verbatim.
+void parseTimelineXml(const QByteArray &utf16, schedule::TimelineViewSettings *tv)
+{
+    if (utf16.size() < 4)
+        return;
+    const QString xml = QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(utf16.constData()), utf16.size() / 2);
+    QXmlStreamReader r(xml);
+
+    const auto boolAttr = [](const QXmlStreamAttributes &a, QLatin1String name, bool dflt) {
+        const QStringView v = a.value(name);
+        return v.isEmpty() ? dflt : (v != QLatin1String("0"));
+    };
+    const auto colorAttr = [](const QXmlStreamAttributes &a) -> qint32 {
+        if (a.value(QLatin1String("thm")).toString() != QLatin1String("0000"))
+            return schedule::TimelineTextStyle::kAutomatic;   // a theme colour
+        bool ok = false;
+        const quint32 argb = a.value(QLatin1String("clr")).toUInt(&ok, 16);
+        return ok ? qint32(argb & 0xFFFFFFu) : schedule::TimelineTextStyle::kAutomatic;
+    };
+    const auto dateAttr = [](const QXmlStreamAttributes &a, QLatin1String name) {
+        return QDate::fromString(a.value(name).toString(), QStringLiteral("yyyy/MM/dd"));
+    };
+
+    // MS Project marks a callout member with an <ft> row in <fltSet> (which is
+    // emitted before <tskSet>), and drops its <tskSet> <t> row to onTL="0". The
+    // <mlSet> <m> row is untouched. Collect the callout task uids first so the
+    // <t> pass can tag them.
+    QSet<int> calloutUids;
+
+    while (!r.atEnd()) {
+        if (r.readNext() != QXmlStreamReader::StartElement)
+            continue;
+        const QXmlStreamAttributes a = r.attributes();
+        const QStringView name = r.name();
+
+        if (name == QLatin1String("TLViewData")) {
+            tv->dfltTLView = boolAttr(a, QLatin1String("dfltTLView"), true);
+        } else if (name == QLatin1String("ft")) {           // a callout member (<fltSet>)
+            const quint32 uid = a.value(QLatin1String("uid")).toUInt();
+            if (uid != kTimelineSentinelUid && boolAttr(a, QLatin1String("onTL"), true))
+                calloutUids.insert(int(uid));
+        } else if (name == QLatin1String("tl")) {           // a timeline bar
+            schedule::TimelineBar bar;
+            bar.id = a.value(QLatin1String("id")).toInt();
+            bar.label = a.value(QLatin1String("label")).toString();
+            bar.useCustomDates = boolAttr(a, QLatin1String("useCustomDates"), false);
+            bar.customStart = dateAttr(a, QLatin1String("startDate"));
+            bar.customFinish = dateAttr(a, QLatin1String("finishDate"));
+            tv->bars.append(bar);
+        } else if (name == QLatin1String("t")) {            // a task member (<tskSet>)
+            const quint32 uid = a.value(QLatin1String("uid")).toUInt();
+            if (uid == kTimelineSentinelUid)
+                continue;                                    // the template row
+            schedule::TimelineItem it;
+            it.guid = a.value(QLatin1String("id")).toString();
+            it.taskUid = int(uid);
+            it.barId = a.hasAttribute(QLatin1String("barid"))
+                ? a.value(QLatin1String("barid")).toInt() : 1;
+            it.onTimeline = boolAttr(a, QLatin1String("onTL"), true);
+            if (calloutUids.contains(int(uid))) {
+                // A callout: the <t> row carries onTL="0" but the task is on the
+                // timeline, shown as a callout via its <ft> row.
+                it.display = schedule::TimelineItemDisplay::Callout;
+                it.onTimeline = true;
+            }
+            tv->items.append(it);
+            // <mlSet> mirrors these rows; the writer re-emits both from `items`.
+        } else if (name == QLatin1String("style")) {        // <txtSet>
+            schedule::TimelineTextStyle s;
+            s.id = a.value(QLatin1String("id")).toInt();
+            s.type = a.value(QLatin1String("type")).toInt();
+            s.color = colorAttr(a);
+            s.fontName = a.value(QLatin1String("font")).toString();
+            s.fontSize = a.value(QLatin1String("sz")).toInt();
+            s.bold = boolAttr(a, QLatin1String("bold"), false);
+            s.italic = boolAttr(a, QLatin1String("ital"), false);
+            s.underline = boolAttr(a, QLatin1String("und"), false);
+            s.strikethrough = boolAttr(a, QLatin1String("strk"), false);
+            tv->textStyles.append(s);
+        } else if (name == QLatin1String("options")) {
+            if (a.hasAttribute(QLatin1String("dateFormat")))
+                tv->dateFormat = a.value(QLatin1String("dateFormat")).toInt();
+            if (a.hasAttribute(QLatin1String("numTextLines")))
+                tv->numTextLines = a.value(QLatin1String("numTextLines")).toInt();
+            // On disk the Today-line / timescale attribute names look transposed
+            // relative to their meaning (see timelineviewsettings.h).
+            tv->showTodayLine    = boolAttr(a, QLatin1String("showTS"), tv->showTodayLine);
+            tv->showTimescale    = boolAttr(a, QLatin1String("showToday"), tv->showTimescale);
+            tv->showPanZoom      = boolAttr(a, QLatin1String("showPanZoom"), tv->showPanZoom);
+            tv->showDates        = boolAttr(a, QLatin1String("showDates"), tv->showDates);
+            tv->showOverlaps     = boolAttr(a, QLatin1String("showOverlaps"), tv->showOverlaps);
+            tv->showTaskProgress = boolAttr(a, QLatin1String("showTaskProgress"), tv->showTaskProgress);
+        }
+    }
+}
+
+QString timelineDateStr(const QDate &d)
+{
+    return d.isValid() ? d.toString(QStringLiteral("yyyy/MM/dd")) : QString();
+}
+
+QString timelineColorStr(qint32 rgb)
+{
+    return QStringLiteral("FF%1").arg(quint32(rgb) & 0xFFFFFFu, 6, 16, QChar('0')).toUpper();
+}
+
+// Re-emit the "<TLViewData>" document with the modelled fields brought up to date
+// and everything else (the <fltSet>/<fmtSet> shape records, per-item fmt/ch/x/y
+// attributes, unrecognised <options> attributes, ...) copied through untouched.
+// Deterministic: iteration order over the model lists is stable and no value is
+// hashed. Returns UTF-16LE bytes with no BOM / no XML declaration, as MS Project
+// writes it.
+QByteArray serializeTimelineXml(const schedule::TimelineViewSettings &tv)
+{
+    if (tv.rawXml.isEmpty())
+        return {};
+    QString src = QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(tv.rawXml.constData()), tv.rawXml.size() / 2);
+    // The var blob can carry a trailing UTF-16 NUL (and/or padding) past the
+    // closing tag; QXmlStreamReader would flag it as "extra content". Strip it
+    // for parsing, then re-append the exact bytes so the re-emit keeps MS
+    // Project's framing.
+    QString trailer;
+    while (!src.isEmpty() && (src.back() == QChar(0) || src.back().isSpace())) {
+        trailer.prepend(src.back());
+        src.chop(1);
+    }
+
+    QHash<int, const schedule::TimelineItem *> itemByUid;
+    for (const schedule::TimelineItem &it : tv.items)
+        itemByUid.insert(it.taskUid, &it);
+    QHash<int, const schedule::TimelineBar *> barById;
+    for (const schedule::TimelineBar &b : tv.bars)
+        barById.insert(b.id, &b);
+    QHash<int, const schedule::TimelineTextStyle *> styleById;
+    for (const schedule::TimelineTextStyle &s : tv.textStyles)
+        styleById.insert(s.id, &s);
+
+    // A callout's <tskSet> row carries onTL="0" (the task rides in <fltSet>
+    // instead); its <mlSet> row and a bar's rows all carry onTL="1".
+    const auto onTlFor = [](const schedule::TimelineItem &it, const QString &tag) {
+        const bool off = tag == QLatin1String("t")
+            && it.display == schedule::TimelineItemDisplay::Callout;
+        return (it.onTimeline && !off) ? QStringLiteral("1") : QStringLiteral("0");
+    };
+    const auto writeItem = [&onTlFor](QXmlStreamWriter &w, const QString &tag,
+                              const schedule::TimelineItem &it) {
+        w.writeEmptyElement(tag);
+        w.writeAttribute(QStringLiteral("id"), it.guid);
+        w.writeAttribute(QStringLiteral("uid"), QString::number(quint32(it.taskUid)));
+        w.writeAttribute(QStringLiteral("onTL"), onTlFor(it, tag));
+        w.writeAttribute(QStringLiteral("barid"), QString::number(it.barId));
+    };
+    // A callout member's <fltSet> row. Attribute order per MS Project:
+    // id uid onTL top barid.
+    const auto writeFt = [](QXmlStreamWriter &w, const schedule::TimelineItem &it) {
+        w.writeEmptyElement(QStringLiteral("ft"));
+        w.writeAttribute(QStringLiteral("id"), it.guid);
+        w.writeAttribute(QStringLiteral("uid"), QString::number(quint32(it.taskUid)));
+        w.writeAttribute(QStringLiteral("onTL"), QStringLiteral("1"));
+        w.writeAttribute(QStringLiteral("top"), QStringLiteral("1"));
+        w.writeAttribute(QStringLiteral("barid"), QString::number(it.barId));
+    };
+    // Attribute order matches MS Project: the internal bar 0 always spells out
+    // every attribute with `label` last; a visible bar carries `label` right
+    // after `id` (when set) and the date trio only when custom.
+    const auto writeBar = [](QXmlStreamWriter &w, const schedule::TimelineBar &b) {
+        w.writeEmptyElement(QStringLiteral("tl"));
+        w.writeAttribute(QStringLiteral("id"), QString::number(b.id));
+        if (b.id == 0) {
+            w.writeAttribute(QStringLiteral("useCustomDates"),
+                             b.useCustomDates ? QStringLiteral("1") : QStringLiteral("0"));
+            w.writeAttribute(QStringLiteral("startDate"),
+                             b.useCustomDates ? timelineDateStr(b.customStart) : QString());
+            w.writeAttribute(QStringLiteral("finishDate"),
+                             b.useCustomDates ? timelineDateStr(b.customFinish) : QString());
+            w.writeAttribute(QStringLiteral("label"), b.label);
+            return;
+        }
+        if (!b.label.isEmpty())
+            w.writeAttribute(QStringLiteral("label"), b.label);
+        if (b.useCustomDates) {
+            w.writeAttribute(QStringLiteral("useCustomDates"), QStringLiteral("1"));
+            w.writeAttribute(QStringLiteral("startDate"), timelineDateStr(b.customStart));
+            w.writeAttribute(QStringLiteral("finishDate"), timelineDateStr(b.customFinish));
+        }
+    };
+
+    QString outStr;
+    QXmlStreamReader r(src);
+    QXmlStreamWriter w(&outStr);
+    w.setAutoFormatting(false);
+
+    QSet<int> emittedItems;
+    QSet<int> emittedBars;
+    QSet<int> emittedFts;
+    while (!r.atEnd()) {
+        switch (r.readNext()) {
+        case QXmlStreamReader::StartElement: {
+            const QString n = r.name().toString();
+            const QXmlStreamAttributes a = r.attributes();
+            if (n == QLatin1String("t") || n == QLatin1String("m")) {
+                const quint32 uid = a.value(QLatin1String("uid")).toUInt();
+                if (uid == kTimelineSentinelUid) {
+                    w.writeStartElement(n);
+                    w.writeAttributes(a);           // the template row: verbatim
+                    break;
+                }
+                const schedule::TimelineItem *mi = itemByUid.value(int(uid));
+                if (!mi) {
+                    r.skipCurrentElement();          // member was removed
+                    break;
+                }
+                w.writeStartElement(n);
+                bool sawBarid = false;
+                bool sawOnTl = false;
+                for (const QXmlStreamAttribute &at : a) {
+                    if (at.name() == QLatin1String("barid")) {
+                        w.writeAttribute(QStringLiteral("barid"), QString::number(mi->barId));
+                        sawBarid = true;
+                    } else if (at.name() == QLatin1String("onTL")) {
+                        w.writeAttribute(QStringLiteral("onTL"), onTlFor(*mi, n));
+                        sawOnTl = true;
+                    } else {
+                        w.writeAttribute(at.qualifiedName().toString(), at.value().toString());
+                    }
+                }
+                if (!sawOnTl)
+                    w.writeAttribute(QStringLiteral("onTL"), onTlFor(*mi, n));
+                if (!sawBarid)
+                    w.writeAttribute(QStringLiteral("barid"), QString::number(mi->barId));
+                emittedItems.insert(int(uid));
+            } else if (n == QLatin1String("ft")) {
+                const quint32 uid = a.value(QLatin1String("uid")).toUInt();
+                if (uid == kTimelineSentinelUid) {
+                    w.writeStartElement(n);
+                    w.writeAttributes(a);           // the template row: verbatim
+                    break;
+                }
+                const schedule::TimelineItem *mi = itemByUid.value(int(uid));
+                if (mi && mi->display == schedule::TimelineItemDisplay::Callout) {
+                    writeFt(w, *mi);
+                    emittedFts.insert(int(uid));
+                }
+                r.skipCurrentElement();             // no longer a callout / removed
+            } else if (n == QLatin1String("tl")) {
+                const int id = a.value(QLatin1String("id")).toInt();
+                const schedule::TimelineBar *mb = barById.value(id);
+                if (!mb) {
+                    r.skipCurrentElement();          // bar was removed
+                    break;
+                }
+                writeBar(w, *mb);
+                emittedBars.insert(id);
+                r.skipCurrentElement();
+            } else if (n == QLatin1String("options")) {
+                w.writeStartElement(QStringLiteral("options"));
+                for (const QXmlStreamAttribute &at : a) {
+                    const QString an = at.name().toString();
+                    QString av = at.value().toString();
+                    if (an == QLatin1String("showTS"))
+                        av = tv.showTodayLine ? QStringLiteral("1") : QStringLiteral("0");
+                    else if (an == QLatin1String("showToday"))
+                        av = tv.showTimescale ? QStringLiteral("1") : QStringLiteral("0");
+                    else if (an == QLatin1String("showPanZoom"))
+                        av = tv.showPanZoom ? QStringLiteral("1") : QStringLiteral("0");
+                    else if (an == QLatin1String("showOverlaps"))
+                        av = tv.showOverlaps ? QStringLiteral("1") : QStringLiteral("0");
+                    else if (an == QLatin1String("showDates"))
+                        av = tv.showDates ? QStringLiteral("1") : QStringLiteral("0");
+                    else if (an == QLatin1String("showTaskProgress"))
+                        av = tv.showTaskProgress ? QStringLiteral("1") : QStringLiteral("0");
+                    else if (an == QLatin1String("numTextLines"))
+                        av = QString::number(tv.numTextLines);
+                    else if (an == QLatin1String("dateFormat"))
+                        av = QString::number(tv.dateFormat);
+                    w.writeAttribute(an, av);
+                }
+            } else if (n == QLatin1String("style")) {
+                const schedule::TimelineTextStyle *ms =
+                    styleById.value(a.value(QLatin1String("id")).toInt());
+                w.writeStartElement(QStringLiteral("style"));
+                for (const QXmlStreamAttribute &at : a) {
+                    const QString an = at.name().toString();
+                    QString av = at.value().toString();
+                    if (ms) {
+                        if (an == QLatin1String("bold"))
+                            av = ms->bold ? QStringLiteral("1") : QStringLiteral("0");
+                        else if (an == QLatin1String("ital"))
+                            av = ms->italic ? QStringLiteral("1") : QStringLiteral("0");
+                        else if (an == QLatin1String("und"))
+                            av = ms->underline ? QStringLiteral("1") : QStringLiteral("0");
+                        else if (an == QLatin1String("strk"))
+                            av = ms->strikethrough ? QStringLiteral("1") : QStringLiteral("0");
+                        else if (an == QLatin1String("sz") && ms->fontSize > 0)
+                            av = QString::number(ms->fontSize);
+                        else if (an == QLatin1String("font") && !ms->fontName.isEmpty())
+                            av = ms->fontName;
+                        else if (an == QLatin1String("clr")
+                                 && ms->color != schedule::TimelineTextStyle::kAutomatic)
+                            av = timelineColorStr(ms->color);
+                    }
+                    w.writeAttribute(an, av);
+                }
+            } else {
+                w.writeStartElement(n);
+                w.writeAttributes(a);
+            }
+            break;
+        }
+        case QXmlStreamReader::EndElement: {
+            const QString n = r.name().toString();
+            if (n == QLatin1String("fltSet")) {
+                for (const schedule::TimelineItem &it : tv.items)
+                    if (it.display == schedule::TimelineItemDisplay::Callout
+                        && !emittedFts.contains(it.taskUid))
+                        writeFt(w, it);
+                emittedFts.clear();
+            } else if (n == QLatin1String("tskSet") || n == QLatin1String("mlSet")) {
+                const QString tag = n == QLatin1String("tskSet") ? QStringLiteral("t")
+                                                                : QStringLiteral("m");
+                for (const schedule::TimelineItem &it : tv.items)
+                    if (!emittedItems.contains(it.taskUid))
+                        writeItem(w, tag, it);
+                emittedItems.clear();
+            } else if (n == QLatin1String("tlbarSet")) {
+                for (const schedule::TimelineBar &b : tv.bars)
+                    if (b.id >= 1 && !emittedBars.contains(b.id))
+                        writeBar(w, b);
+                emittedBars.clear();
+            }
+            w.writeEndElement();
+            break;
+        }
+        case QXmlStreamReader::Characters:
+            if (!r.isWhitespace())
+                w.writeCharacters(r.text().toString());
+            break;
+        default:
+            break;
+        }
+    }
+    if (r.hasError())
+        return {};
+    outStr += trailer;
+
+    QByteArray out;
+    out.reserve(outStr.size() * 2);
+    for (QChar c : outStr) {
+        const ushort u = c.unicode();
+        out.append(char(u & 0xFF));
+        out.append(char((u >> 8) & 0xFF));
+    }
+    return out;
+}
+
+void readTimeline(const QByteArray &fixedMeta, const QByteArray &fixedData,
+                  const BkndVarData &vd, schedule::Project *out)
+{
+    const int uid = findViewUid(fixedMeta, fixedData, kViewTypeTimeline);
+    if (uid < 0)
+        return;
+
+    QByteArray xml = vd.blobFor(quint32(uid), kTimelineXmlVarType);
+    if (xml.isEmpty()) {
+        Props9 props;
+        if (parseProps9(vd.blobFor(quint32(uid), kViewPropsType), &props))
+            if (const PropsItem *item = props.find(kKeyTimelineXml))
+                xml = item->data;
+    }
+    if (xml.isEmpty())
+        return;
+
+    schedule::TimelineViewSettings &tv = out->timelineView;
+    tv = schedule::TimelineViewSettings();
+    tv.present = true;
+    tv.viewUid = uid;
+    tv.viewName = viewRecordName(findViewRecord(fixedMeta, fixedData, kViewTypeTimeline));
+    tv.rawXml = xml;
+    parseTimelineXml(xml, &tv);
+
+    // The XML mirrors membership between <mlSet> and <tskSet> regardless of task
+    // kind, so derive the milestone flag from the actual task.
+    QHash<int, const schedule::Task *> byUid;
+    for (const schedule::Task &t : out->tasks)
+        byUid.insert(t.uniqueId, &t);
+    for (schedule::TimelineItem &it : tv.items)
+        if (const schedule::Task *t = byUid.value(it.taskUid))
+            it.milestone = t->milestone || t->durationMillis == 0;
+}
 
 bool parseVarMeta(const QByteArray &meta, QVector<VarRecord> *out)
 {
@@ -942,6 +1529,10 @@ void read(const CompoundFile &cf, schedule::Project *out)
     out->taskUsageView.detailSelection = readSelection(kTaskUsageSelection);
     out->resourceUsageView.detailSelection = readSelection(kResourceUsageSelection);
 
+    // The Timeline view: a "<TLViewData>" XML document (CV_iew var type 47 ==
+    // Props9 item 574619695). Independent of the Gantt view below.
+    readTimeline(fixedMeta, fixedData, vd, out);
+
     // The Gantt Chart view: full template (text styles + gridlines + bars) plus
     // the per-task exceptional styles. The other views' styles are not read back
     // into the model: a written file always carries all standard views (from the
@@ -958,6 +1549,12 @@ void read(const CompoundFile &cf, schedule::Project *out)
         readStyleData(style->data, &out->viewStyles);
     if (const PropsItem *cols = props.find(kKeyColumnProperties))
         readColumnProperties(cols->data, out);
+    if (const PropsItem *bars = props.find(kKeyBarExceptions)) {
+        // Kept whole as well as decoded: a save has to hand back the shapes and
+        // bar text alongside the one field (the middle colour) we model.
+        out->mppBarExceptions = bars->data;
+        readBarExceptions(bars->data, out);
+    }
 
     // readStyleData() only decodes each text category's fontBaseIndex; resolve it
     // against the font table so callers (e.g. the Gantt view's bar/task-detail text)
@@ -1007,8 +1604,13 @@ bool wantsPatch(const schedule::Project &in)
     if (in.ganttView.modified || in.resourceUsageView.modified || in.taskUsageView.modified
         || in.teamPlannerView.modified)
         return true;
+    if (in.timelineView.present && in.timelineView.modified)
+        return true;
+    if (!in.mppBarExceptions.isEmpty())
+        return true;
     for (const schedule::Task &t : in.tasks)
-        if (!t.rowFormat.isDefault() || !t.cellFormats.isEmpty())
+        if (!t.rowFormat.isDefault() || !t.cellFormats.isEmpty()
+            || t.barColor != schedule::TextStyle::kAutomatic)
             return true;
     return false;
 }
@@ -1089,6 +1691,27 @@ bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &
                 item.data = colProps;
                 props.items.append(item);
             }
+
+            const QByteArray barExceptions = buildBarExceptions(in);
+            if (PropsItem *bars = props.find(kKeyBarExceptions)) {
+                if (barExceptions.isEmpty()) {
+                    for (int i = 0; i < props.items.size(); ++i)
+                        if (props.items[i].key == kKeyBarExceptions) {
+                            props.items.removeAt(i);
+                            break;
+                        }
+                } else {
+                    bars->data = barExceptions;
+                    if (bars->flags == 0)
+                        bars->flags = 1;
+                }
+            } else if (!barExceptions.isEmpty()) {
+                PropsItem item;
+                item.key = kKeyBarExceptions;
+                item.flags = 1;
+                item.data = barExceptions;
+                props.items.append(item);
+            }
             patched.insert(ganttRec, buildProps9(props));
         }
     }
@@ -1114,6 +1737,43 @@ bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &
         const QByteArray newBlob = patchViewTextStylesInBlob(var2.mid(off + 4, len), *v.styles);
         if (!newBlob.isEmpty())
             patched.insert(rec, newBlob);
+    }
+
+    // Timeline view: re-emit the "<TLViewData>" document into BOTH storage
+    // locations byte-identically -- the CV_iew type-47 var record and the
+    // type-6 Props9 item 574619695 (MS Project keeps the two in lock-step).
+    if (in.timelineView.present && in.timelineView.modified) {
+        const int tlUid = findViewUid(fixedMeta, fixedData, kViewTypeTimeline);
+        const QByteArray newXml = serializeTimelineXml(in.timelineView);
+        if (tlUid < 0 || newXml.isEmpty()) {
+            qWarning("ViewFormat: project carries an edited Timeline but the template "
+                     "has no type-16 view / no re-emittable XML; timeline edits dropped "
+                     "(v1 preserve-existing).");
+        } else if (newXml != in.timelineView.rawXml) {
+            const auto recordForVarType = [&](int uid, quint16 type) -> int {
+                for (int i = 0; i < records.size(); ++i)
+                    if (records[i].uid == quint32(uid) && records[i].typeLow == type)
+                        return i;
+                return -1;
+            };
+            const int memRec = recordForVarType(tlUid, kTimelineXmlVarType);
+            if (memRec >= 0)
+                patched.insert(memRec, newXml);
+
+            const int propsRec = recordForView(tlUid);
+            if (propsRec >= 0) {
+                Props9 props;
+                const bool parsed = patched.contains(propsRec)
+                    ? parseProps9(patched.value(propsRec), &props)
+                    : parseRecordProps(propsRec, &props);
+                if (parsed) {
+                    if (PropsItem *xmlItem = props.find(kKeyTimelineXml)) {
+                        xmlItem->data = newXml;
+                        patched.insert(propsRec, buildProps9(props));
+                    }
+                }
+            }
+        }
     }
 
     // Native Usage-view timescale expansion and ordered detail fields.

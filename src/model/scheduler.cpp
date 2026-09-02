@@ -397,6 +397,12 @@ void Scheduler::reschedule(Project &project)
 
 void Scheduler::computeSlack(Project &project)
 {
+    // "Tasks are critical if slack is less than or equal to N days" (File >
+    // Options > Advanced). N is whole days measured in the project's working
+    // day; the default of 0 keeps the classic "slack <= 0" test.
+    const qint64 criticalSlackThreshold = qint64(qMax(0, project.criticalSlackLimit))
+        * qMax(1, project.minutesPerDay) * 60000LL;
+
     QHash<int, int> idx;
     idx.reserve(project.tasks.size());
     for (int i = 0; i < project.tasks.size(); ++i)
@@ -524,7 +530,7 @@ void Scheduler::computeSlack(Project &project)
             ? cal.workBetween(t.finish, t.lateFinish)
             : -cal.workBetween(t.lateFinish, t.finish);
         t.totalSlackMillis = qMin(t.startSlackMillis, t.finishSlackMillis);
-        t.critical = t.totalSlackMillis <= 0;
+        t.critical = t.totalSlackMillis <= criticalSlackThreshold;
 
         // Free slack: how far the task can slip before the EARLIEST successor
         // (early dates) is disturbed; without successors, the project finish.

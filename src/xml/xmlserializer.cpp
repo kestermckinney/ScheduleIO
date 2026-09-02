@@ -389,6 +389,8 @@ schedule::Task parseTask(QXmlStreamReader &r, QList<schedule::Relation> &relatio
             t.constraintDate = parseDateTime(r.readElementText());
         else if (n == u"FixedCost")
             t.fixedCost = parseCurrency(r.readElementText());
+        else if (n == u"FixedCostAccrual")
+            t.fixedCostAccrual = r.readElementText().toInt();
         else if (n == u"Cost")
             t.cost = parseCurrency(r.readElementText());
         else if (n == u"ActualCost")
@@ -994,6 +996,7 @@ void writeTask(QXmlStreamWriter &w, const schedule::Project &in, const schedule:
     if (t.constraintDate.isValid())
         writeText(w, "ConstraintDate", formatDateTime(t.constraintDate));
     writeText(w, "FixedCost", formatCurrency(t.fixedCost));
+    writeText(w, "FixedCostAccrual", QString::number(t.fixedCostAccrual));
     writeText(w, "Cost", formatCurrency(t.cost));
     writeText(w, "ActualCost", formatCurrency(t.actualCost));
     writeText(w, "RemainingCost", formatCurrency(t.remainingCost));
@@ -1305,6 +1308,74 @@ bool read(const QByteArray &xml, schedule::Project &out, QString *error)
             out.statusDate = parseDateTime(r.readElementText());
         else if (n == u"CalendarUID")
             out.calendarUniqueId = r.readElementText().toInt();
+        // ---- Project options (File > Options). Kept symmetric with the writer
+        // block further down so real MS Project exports round-trip losslessly.
+        else if (n == u"NewTasksAreManual")
+            out.newTasksManual = r.readElementText().toInt() != 0;
+        else if (n == u"NewTaskStartDate")
+            out.newTaskStartIsProjectStart = r.readElementText().toInt() == 0;
+        else if (n == u"DefaultTaskType")
+            out.defaultTaskType = r.readElementText().toInt();
+        else if (n == u"DurationFormat")
+            out.defaultDurationUnits = r.readElementText().toInt();
+        else if (n == u"WorkFormat")
+            out.defaultWorkUnits = r.readElementText().toInt();
+        else if (n == u"NewTasksEffortDriven")
+            out.newTasksEffortDriven = r.readElementText().toInt() != 0;
+        else if (n == u"Autolink")
+            out.autoLinkTasks = r.readElementText().toInt() != 0;
+        else if (n == u"SplitsInProgressTasks")
+            out.splitInProgressTasks = r.readElementText().toInt() != 0;
+        else if (n == u"HonorConstraints")
+            out.honorConstraints = r.readElementText().toInt() != 0;
+        else if (n == u"CriticalSlackLimit")
+            out.criticalSlackLimit = r.readElementText().toInt();
+        else if (n == u"WeekStartDay")
+            out.weekStartDay = r.readElementText().toInt();
+        else if (n == u"FYStartDate")
+            out.fiscalYearStartMonth = r.readElementText().toInt();
+        else if (n == u"FiscalYearStart")
+            out.fiscalYearUsesStartYear = r.readElementText().toInt() != 0;
+        else if (n == u"DefaultStartTime")
+            out.defaultStartTime = parseTime(r.readElementText());
+        else if (n == u"DefaultFinishTime")
+            out.defaultEndTime = parseTime(r.readElementText());
+        else if (n == u"MinutesPerDay")
+            out.minutesPerDay = r.readElementText().toInt();
+        else if (n == u"MinutesPerWeek")
+            out.minutesPerWeek = r.readElementText().toInt();
+        else if (n == u"DaysPerMonth")
+            out.daysPerMonth = r.readElementText().toInt();
+        else if (n == u"MoveCompletedEndsBack")
+            out.moveCompletedEndsBack = r.readElementText().toInt() != 0;
+        else if (n == u"MoveRemainingStartsBack")
+            out.moveRemainingStartsBack = r.readElementText().toInt() != 0;
+        else if (n == u"MoveRemainingStartsForward")
+            out.moveRemainingStartsForward = r.readElementText().toInt() != 0;
+        else if (n == u"MoveCompletedEndsForward")
+            out.moveCompletedEndsForward = r.readElementText().toInt() != 0;
+        else if (n == u"TaskUpdatesResource")
+            out.statusUpdatesResource = r.readElementText().toInt() != 0;
+        else if (n == u"CurrencySymbol")
+            out.currencySymbol = r.readElementText();
+        else if (n == u"CurrencySymbolPosition")
+            out.currencySymbolPosition = r.readElementText().toInt();
+        else if (n == u"CurrencyDigits")
+            out.currencyDigits = r.readElementText().toInt();
+        else if (n == u"CurrencyCode")
+            out.currencyCode = r.readElementText();
+        else if (n == u"DefaultStandardRate")
+            out.defaultStandardRate = parseCurrency(r.readElementText());
+        else if (n == u"DefaultOvertimeRate")
+            out.defaultOvertimeRate = parseCurrency(r.readElementText());
+        else if (n == u"DefaultFixedCostAccrual")
+            out.defaultFixedCostAccrual = r.readElementText().toInt();
+        else if (n == u"EarnedValueMethod")
+            out.defaultEarnedValueMethod = r.readElementText().toInt();
+        else if (n == u"BaselineForEarnedValueCalculation")
+            out.baselineForEarnedValue = r.readElementText().toInt();
+        else if (n == u"ShowProjectSummaryTask")
+            out.showProjectSummaryTask = r.readElementText().toInt() != 0;
         else if (n == u"ExtendedAttributes") {
             while (r.readNextStartElement()) {
                 if (r.name() == u"ExtendedAttribute")
@@ -1424,38 +1495,53 @@ QByteArray write(const schedule::Project &original, QString *error)
     if (in.budgetCost != 0.0) writeText(w, "BudgetCost", formatCurrency(in.budgetCost));
     if (in.budgetWorkMillis != 0) writeText(w, "BudgetWork", formatIsoDuration(in.budgetWorkMillis));
 
-    // Time defaults, derived from the project calendar's first working weekday.
-    // Without these MS Project falls back to its own settings and re-derives
-    // durations differently than we scheduled them.
-    QTime defStart(8, 0), defFinish(17, 0);
-    int minutesPerDay = 480, workingDaysPerWeek = 5;
-    for (const schedule::Calendar &c : in.calendars) {
-        if (c.uniqueId != in.calendarUniqueId)
-            continue;
-        int days = 0;
-        for (const QList<schedule::TimeRange> &day : c.workingTimes) {
-            if (day.isEmpty())
-                continue;
-            ++days;
-            if (days == 1) {
-                defStart = day.first().start;
-                defFinish = day.last().end;
-                qint64 mins = 0;
-                for (const schedule::TimeRange &tr : day)
-                    mins += tr.start.secsTo(tr.end) / 60;
-                if (mins > 0)
-                    minutesPerDay = int(mins);
-            }
-        }
-        if (days > 0)
-            workingDaysPerWeek = days;
-        break;
-    }
-    writeText(w, "DefaultStartTime", defStart.toString(QStringLiteral("HH:mm:ss")));
-    writeText(w, "DefaultFinishTime", defFinish.toString(QStringLiteral("HH:mm:ss")));
-    writeText(w, "MinutesPerDay", QString::number(minutesPerDay));
-    writeText(w, "MinutesPerWeek", QString::number(minutesPerDay * workingDaysPerWeek));
-    writeText(w, "DaysPerMonth", QStringLiteral("20"));
+    // ---- Project options (File > Options). Emitted from the model, symmetric
+    // with the reader block above -- MS Project's own exports always carry these
+    // elements, and re-deriving them here would break round-tripping of a file
+    // whose stored values differ from what its calendar implies.
+    const auto boolText = [](bool v) { return v ? QStringLiteral("1") : QStringLiteral("0"); };
+    // Schedule
+    writeText(w, "NewTasksAreManual", boolText(in.newTasksManual));
+    writeText(w, "NewTaskStartDate", in.newTaskStartIsProjectStart ? QStringLiteral("0")
+                                                                   : QStringLiteral("1"));
+    writeText(w, "DefaultTaskType", QString::number(in.defaultTaskType));
+    writeText(w, "DurationFormat", QString::number(in.defaultDurationUnits));
+    writeText(w, "WorkFormat", QString::number(in.defaultWorkUnits));
+    writeText(w, "NewTasksEffortDriven", boolText(in.newTasksEffortDriven));
+    writeText(w, "Autolink", boolText(in.autoLinkTasks));
+    writeText(w, "SplitsInProgressTasks", boolText(in.splitInProgressTasks));
+    writeText(w, "HonorConstraints", boolText(in.honorConstraints));
+    writeText(w, "CriticalSlackLimit", QString::number(in.criticalSlackLimit));
+    // Calendar
+    writeText(w, "WeekStartDay", QString::number(in.weekStartDay));
+    writeText(w, "FYStartDate", QString::number(in.fiscalYearStartMonth));
+    writeText(w, "FiscalYearStart", boolText(in.fiscalYearUsesStartYear));
+    writeText(w, "DefaultStartTime", in.defaultStartTime.toString(QStringLiteral("HH:mm:ss")));
+    writeText(w, "DefaultFinishTime", in.defaultEndTime.toString(QStringLiteral("HH:mm:ss")));
+    writeText(w, "MinutesPerDay", QString::number(in.minutesPerDay));
+    writeText(w, "MinutesPerWeek", QString::number(in.minutesPerWeek));
+    writeText(w, "DaysPerMonth", QString::number(in.daysPerMonth));
+    // Calculation options for this project
+    writeText(w, "MoveCompletedEndsBack", boolText(in.moveCompletedEndsBack));
+    writeText(w, "MoveRemainingStartsBack", boolText(in.moveRemainingStartsBack));
+    writeText(w, "MoveRemainingStartsForward", boolText(in.moveRemainingStartsForward));
+    writeText(w, "MoveCompletedEndsForward", boolText(in.moveCompletedEndsForward));
+    writeText(w, "TaskUpdatesResource", boolText(in.statusUpdatesResource));
+    // Financial
+    if (!in.currencySymbol.isEmpty())
+        writeText(w, "CurrencySymbol", in.currencySymbol);
+    writeText(w, "CurrencySymbolPosition", QString::number(in.currencySymbolPosition));
+    writeText(w, "CurrencyDigits", QString::number(in.currencyDigits));
+    if (!in.currencyCode.isEmpty())
+        writeText(w, "CurrencyCode", in.currencyCode);
+    if (in.defaultStandardRate != 0.0)
+        writeText(w, "DefaultStandardRate", formatCurrency(in.defaultStandardRate));
+    if (in.defaultOvertimeRate != 0.0)
+        writeText(w, "DefaultOvertimeRate", formatCurrency(in.defaultOvertimeRate));
+    writeText(w, "DefaultFixedCostAccrual", QString::number(in.defaultFixedCostAccrual));
+    writeText(w, "EarnedValueMethod", QString::number(in.defaultEarnedValueMethod));
+    writeText(w, "BaselineForEarnedValueCalculation", QString::number(in.baselineForEarnedValue));
+    writeText(w, "ShowProjectSummaryTask", boolText(in.showProjectSummaryTask));
 
     writeExtendedAttributeDefs(w, in);
 

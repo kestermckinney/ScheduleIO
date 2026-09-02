@@ -6,6 +6,7 @@
 
 #include "scheduleio_export.h"
 #include "model/project.h"
+#include "model/workcalendar.h"   // WorkProfile carries a resolved calendar
 
 #include <QDateTime>
 #include <QList>
@@ -59,6 +60,46 @@ public:
     // total work spread over its span in proportion to working time. Used by the
     // time-phased Resource Usage grid.
     static qint64 workInPeriod(const Project &project, const Assignment &assignment,
+                               const QDateTime &from, const QDateTime &to);
+
+    // Everything the calculation above needs that does not depend on which period
+    // is being asked about: whether the file carries authoritative time-phased
+    // buckets, and otherwise the assignment's span, the calendar it is worked
+    // against and the working time that span contains.
+    //
+    // Resolving those means building a WorkCalendar and walking the span, which
+    // costs the same for the first cell of a row as for the thousandth. A caller
+    // filling a grid -- the Resource Usage and Task Usage views run one column per
+    // day across the whole schedule -- should build this once per assignment and
+    // sample it per column; the per-period overload below then only measures the
+    // overlap. The single-shot overload above is this pair, called back to back.
+    struct WorkProfile
+    {
+        const Assignment *assignment = nullptr;
+        bool timephased = false;   // authoritative buckets exist; the rest is unused
+        QDateTime start;
+        QDateTime finish;
+        WorkCalendar calendar;
+        qint64 spanWork = 0;       // working ms between start and finish
+
+        // Names the calendar above without comparing it: the task calendar it is
+        // built on, and the resource calendar intersected into it (-1 when none
+        // is -- a material or cost resource, IgnoreResourceCalendar, a manually
+        // scheduled task). Two assignments whose keys match are worked against
+        // identical calendars, which lets a caller filling a grid measure each
+        // period column once per key instead of once per assignment. See
+        // SchedulingCalendar::assignment(), whose inputs these are.
+        int taskCalendarUid = -1;
+        int resourceCalendarUid = -1;
+        bool sameCalendarAs(const WorkProfile &other) const
+        {
+            return taskCalendarUid == other.taskCalendarUid
+                && resourceCalendarUid == other.resourceCalendarUid;
+        }
+    };
+
+    static WorkProfile workProfile(const Project &project, const Assignment &assignment);
+    static qint64 workInPeriod(const WorkProfile &profile,
                                const QDateTime &from, const QDateTime &to);
 
     // The resource's total assigned work (milliseconds) over all its assignments.

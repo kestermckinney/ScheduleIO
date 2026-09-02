@@ -46,8 +46,15 @@ void TstFormatOracle::formatsMatchManifest_data()
     QTest::addColumn<QString>("manifest");
     for (const QString &mpp : fixtures::mppFiles()) {
         const QString manifest = QFileInfo(mpp).dir().filePath(QStringLiteral("manifest.json"));
-        if (QFile::exists(manifest))
-            QTest::newRow(qPrintable(fixtures::label(mpp))) << mpp << manifest;
+        QFile mf(manifest);
+        if (!mf.open(QIODevice::ReadOnly))
+            continue;
+        // Only the cell/row font-formatting samples carry a "rows" array; other
+        // sample manifests (e.g. the Timeline fixtures) describe unrelated state.
+        if (QJsonDocument::fromJson(mf.readAll()).object()
+                .value(QStringLiteral("rows")).toArray().isEmpty())
+            continue;
+        QTest::newRow(qPrintable(fixtures::label(mpp))) << mpp << manifest;
     }
 }
 

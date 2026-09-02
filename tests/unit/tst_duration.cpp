@@ -11,6 +11,7 @@ class tst_duration : public QObject
 {
     Q_OBJECT
 private slots:
+    void cleanup() { Duration::resetWorkingTimeProfile(); }
     void unitConversions();
     void formatting_data();
     void formatting();
@@ -18,7 +19,29 @@ private slots:
     void parsing();
     void parseRejects();
     void normalization();
+    void workingTimeProfileScalesDayWeekMonth();
 };
+
+void tst_duration::workingTimeProfileScalesDayWeekMonth()
+{
+    // File > Options > Calendar: hours per day / week, days per month.
+    Duration::setWorkingTimeProfile(450 /*7.5h*/, 2250 /*37.5h*/, 22);
+    const qint64 hour = 3600LL * 1000LL;
+    QCOMPARE(Duration::toMillis(1, Duration::Days), qint64(7.5 * hour));
+    QCOMPARE(Duration::toMillis(1, Duration::Weeks), qint64(37.5 * hour));
+    QCOMPARE(Duration::toMillis(1, Duration::Months), qint64(22 * 7.5 * hour));
+    QCOMPARE(Duration::format(qint64(15 * hour), Duration::Days), QStringLiteral("2 days"));
+    // Elapsed units and hours/minutes are never touched by the profile.
+    QCOMPARE(Duration::toMillis(1, Duration::ElapsedDays), 24LL * hour);
+    QCOMPARE(Duration::toMillis(1, Duration::Hours), hour);
+
+    // Zero / negative figures fall back to MS Project's defaults.
+    Duration::setWorkingTimeProfile(0, 0, 0);
+    QCOMPARE(Duration::toMillis(1, Duration::Days), 8LL * hour);
+
+    Duration::resetWorkingTimeProfile();
+    QCOMPARE(Duration::toMillis(1, Duration::Days), 8LL * hour);
+}
 
 void tst_duration::unitConversions()
 {

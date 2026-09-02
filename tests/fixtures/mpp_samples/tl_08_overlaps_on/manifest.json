@@ -1,0 +1,20 @@
+{
+  "fixture": "tl_08_overlaps_on",
+  "description": "Overlapped tasks on",
+  "note": "Timeline state lives in the .mpp <TLViewData> XML only; MSPDI .xml carries none of it. This manifest records intent; comLog records which COM calls actually succeeded.",
+  "comLog": [
+    "TaskOnTimelineEx(id=2,bar=0): ok",
+    "TaskOnTimelineEx(id=3,bar=0): ok",
+    "TaskOnTimelineEx(id=5,bar=0): ok",
+    "TimelineShowHide(item=0,show=True): ok"
+  ],
+  "intent": "Overlapped tasks on",
+  "onTimeline": [
+    2,
+    3,
+    5
+  ],
+  "option": {
+    "showOverlaps": true
+  }
+}

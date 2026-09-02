@@ -57,6 +57,7 @@ bool Task::operator==(const Task &o) const
         && critical == o.critical
         && cost == o.cost
         && fixedCost == o.fixedCost
+        && fixedCostAccrual == o.fixedCostAccrual
         && actualCost == o.actualCost
         && remainingCost == o.remainingCost
         && costVariance == o.costVariance

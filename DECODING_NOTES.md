@@ -513,6 +513,200 @@ Hard-won behaviours:
 - The reader collapses records to `Task::rowFormat` with priority whole-row >
   Name cell > any other cell, applying only mask-gated properties.
 
+## Per-task bar formatting (BAR_EXCEPTION_STYLES) — DONE
+
+Format > Bar on a single task, as against Format > Bar Styles which edits a whole
+category. The Gantt view's Props9 item **574619661** is a bare array of **71-byte**
+records, one per formatted task, **sorted by task unique id**, and absent entirely
+when nothing is formatted. Established against files MS Project itself wrote,
+sweeping `Application.GanttBarFormat` over the colour, shape, pattern, end and
+bar-text arguments.
+
+| offset | size | field |
+|--------|------|-------|
+| +0  | 4 | task unique id |
+| +4  | 2 | bar style the exception is based on (0 for a plain colour change) |
+| +6  | 1 | middle shape |
+| +7  | 1 | middle pattern |
+| +8  | 4 | middle colour — r, g, b + automatic flag |
+| +20 | 1 | start shape (`v % 21`) and type (`v / 21`) |
+| +21 | 4 | start colour |
+| +33 | 1 | end shape and type |
+| +34 | 4 | end colour |
+| +49 | 5x4 | left/right/top/bottom/inside bar text: a task field id (`0x0B400000 | index`) or `0xFFFFFFFF` for none |
+| +69 | 2 | trailing flag (0 or 2 in the wild) |
+
+The remaining bytes are zero in every sample seen and are carried through
+untouched. Only the middle colour is modelled (`Task::barColor`); the whole array
+is also kept verbatim on `Project::mppBarExceptions`, because the record replaces
+a task's entire bar and dropping the parts we do not model would silently restyle
+bars formatted in Project.
+
+- `GanttBarFormat`'s colour arguments take a **palette index, not an RGB**, and
+  the record stores the resolved RGB: 1 red, 2 yellow, 3 lime, 4 aqua, 5 blue,
+  6 fuchsia, 7 white, 8 maroon, 9 green, 10 olive, 11 navy, 12 teal, 13 purple,
+  14 silver, 15 gray. **0 is automatic**, and there is no black — writing an
+  explicit `#000000` is therefore indistinguishable from "no override".
+- An all-zero colour means **inherit**, not black: a task carrying such a record
+  draws the ordinary bar colour (`#8ABBED` on the stock Gantt), confirmed by
+  screenshotting Project. Project normalises our all-zero back to `00 00 00 FF`
+  on re-save, which is the same statement in its own canonical form.
+- MS Project's automation rejects `GanttBarFormat` with positional
+  `Type::Missing` placeholders ("The argument value is not valid", even for a
+  no-op). Passing the arguments **by name** through
+  `InvokeMember(..., namedParameters)` works.
+- Our writer emits records byte-identical to Project's own for the same task and
+  colour, and Project preserves them through an open + re-save.
+
+## Default bar styles (STYLE_DATA) — DONE 2026-09-02
+
+`Format > Bar Styles` (the whole-category table, as against the per-task
+`BAR_EXCEPTION_STYLES` above). Gantt Chart view's Props9 item key **574619656 =
+STYLE_DATA**, the same 41363-byte blob that already carries the default text
+styles (`26 + 32n`) and gridlines (`667..1057`). Probe: `tests/probe/dump_barstyles.cpp`.
+
+**Blob layout around the bar table** (measured identical across `mpp14template.mpp`
+and every real fixture — `Average Project`, `Example Template`, `Timeline Test`,
+`Has Macros`, `07_baseline_progress`, `02_text_styles`):
+
+| region | bytes | meaning |
+|---|---|---|
+| `2243` | u8 | **barCount** (41 in the stock 2013+ template) |
+| `2255 .. 41255` | `200 * 195` | **bar-style record slot array** — exactly 200 fixed 195-byte slots; `barCount` used, the rest **zero-filled** (this is the "opaque 31 KB tail" in earlier notes — it is padding, not packed data) |
+| `41255 .. 41363` | 108 | small fixed **trailer**: progress-line line/point styles + colours (rgb + `ff`=automatic flag) and a `0x08000023` date-format field. Anchored to blob end (`size - 108`), **not** to the array end. |
+
+So the bar array is a **reserved 200-slot region of constant size**. Growing or
+shrinking `barCount` means writing `barCount` + that many records + zeroing the
+unused slots — **no blob resize, no trailer move**. **Confirmed on dpr2hw3
+2026-09-02:** files ScheduleIO wrote with `barCount` 40, 42 and 49 all open in MS
+Project 2016 with no corruption error, `ViewApply("Gantt Chart")` succeeds, the
+29 tasks load, and MS Project's own re-save **preserves the non-stock count and
+every rewritten record byte-for-byte** (`dump_barstyles` self-check 40/40, 42/42,
+49/49 on the MSP re-saves). A colour edit round-trips through MSP unchanged.
+
+`src/codec/barstylecodec.{h,cpp}` (`readRecord`/`writeRecord`) implements the
+195-byte layout below. Self-check via `dump_barstyles`: all 41 stock records in
+`mpp14template.mpp`, `Average Project`, `Example Template`, `Timeline Test`,
+`07_baseline_progress` and `10_cell_background` re-encode **byte-for-byte
+identical** — the model captures every non-zero byte in a stock record.
+
+**195-byte record layout** (offsets from template + `Average Project` hex; the
+enum vocabularies confirmed 2026-09-02 by having MS Project 2016 author one style
+per value via `GanttBarStyleEdit` on dpr2hw3 and decoding the bytes):
+
+| off | size | field |
+|---|---|---|
+| +0 | u8 | middle shape (see table) |
+| +1 | u8 | middle pattern (see table) |
+| +2 | 4 | middle colour (r,g,b,flag; flag≠0 = Automatic) |
+| +14 | u8 | middle "type"/flag — 3 for bar-bodied stock styles, 0 for marker styles (undecoded; preserved) |
+| +15 | u8 | start shape+type: `shape = v % 25`, `type = v / 25` (0 Solid / 1 Framed / 2 Dashed) |
+| +16 | 4 | start colour |
+| +28 | u8 | end shape+type (as +15) |
+| +29 | 4 | end colour |
+| +41 | u32 | **from** field id, `0x0B40 \| index` (see table) |
+| +45 | u32 | **to** field id |
+| +49 | u64 | **showFor** bitset (see table) |
+| +57 | u64 | **showFor "Not"** bitset — the negated criteria |
+| +65 | u16 | row, 0-based (dialog shows 1..4) |
+| +67 +71 +75 +79 +83 | u32×5 | bar text L/R/T/B/Inside — `0x0B40 \| FIELD_ARRAY index`, or `0xFFFFFFFF` for none |
+| +87 | u16 | undecoded flag (0/1 in the wild; preserved) |
+| +89 | u16 | style id |
+| +91 | UTF-16, NUL-term | style name (the match key). MS Project pads the field tail with `0xFF`; ScheduleIO writes name + NUL and leaves the tail as-is |
+
+**showFor bit positions** (`GanttBarStyleEdit ShowFor="<name>"` → bit):
+`Normal`=0, `Milestone`=1, `Summary`=2, `Critical`=3, `Noncritical`=4,
+`Marked`=5, `Finished`=6, `In Progress`=7, `Not Finished`=8, `Not Started`=9,
+`Started Late`=10, `Rolled Up`=26, `Project Summary`=27, `Split`=28,
+`External Tasks`=29, `Group By Summary`=40, `Deliverable`=41, `Dependency`=42,
+`Active`=43, `Manually Scheduled`=44, `Late`=50. The record stores two u64s
+(`@+49` "for these", `@+57` "but not these"); the stock auto-scheduled styles
+carry `Active` (43) in the positive word and `Manually Scheduled` (44) in the
+negative word.
+
+**middle shape byte** (`GanttBarStyleEdit MiddleShape=N` → byte N, N=0..7).
+Stock cross-reference: 0 none, 1 full bar, 3 top/thin bar (`*Group By Summary`),
+4 (`Manual Summary Rollup`), 5 the summary silhouette (`Summary`), 7 thin bar
+(`Split`, `Duration-only`).
+
+**middle pattern byte** (`MiddlePattern=N` → byte N, N=0..11). 0 hollow,
+1 solid; stock `Split` uses 8, `*… (Warning)` uses 11.
+
+**start/end shape byte** (`StartShape=N` → shape byte N, N=0..24; type = N/25).
+Anchors: 3 = diamond (`Milestone`), 14 = the deadline down-marker (`Deadline`),
+11 = the summary end-bracket.
+
+**from/to field ids** (`From="<name>"` → `0x0B40 | index`): Start=35 (or the
+manual-aware 1283), Finish=36 (or 1284), Early Start=37, Early Finish=38,
+Late Start=39, Late Finish=40, Actual Start=41, Actual Finish=42,
+Baseline Start=43, Baseline Finish=44, Resume=99, Stop=100, Constraint Date=18,
+Deadline=437; `*Deliverable*` stock styles use 1152/1153; stock `Progress` "to"
+uses 119. Bar text at +67.. uses the plain FIELD_ARRAY index (reuse
+`formatKeyForMppField()`/`fieldForFormatKey()`).
+
+Oracle scripts: `tools/barstyle-oracle-remote.ps1` (acceptance: open N files with
+varied `barCount` in MS Project, ViewApply, screenshot, re-save) and the
+`GanttBarStyleEdit` vocab worker pattern.
+
+Stock template's 41 style names, in order: Task, Split, Milestone, Summary,
+Project Summary, *Group By Summary, *Rolled Up Task, *Rolled Up Split, *Rolled Up
+Progress, *Rolled Up Milestone, *Deliverable Start/Finish/Duration, *Dependency
+Start/Finish/Duration, Inactive Task, *Inactive Split, Inactive Milestone,
+Inactive Summary, Manual Task, *Manual Split, *Manual Milestone, Duration-only,
+Manual Summary Rollup, *Manual Task (Warning), *Manual Split (Warning), *Manual
+Milestone (Warning), *Manual Summary Rollup (Warning), Manual Summary, Start-only,
+Finish-only, *Duration-only Milestone, *Start-only Milestone, *Finish-only
+Milestone, *Rolled Up Manual Task, External Tasks, External Milestone, Deadline,
+Progress, Manual Progress. (Names beginning `*` are MS Project's internal
+"hidden helper" styles.)
+
+## Timeline view (DONE for the modelled subset — `src/codec/viewformat.cpp`)
+
+The Microsoft Project Timeline is **not** a binary blob: it is a self-describing
+UTF-16LE XML document, `<TLViewData>`, held **byte-identically in two places**:
+- the `   214/CV_iew` Var2Data record of type **47**, keyed by the timeline
+  view's uid (the view = FixedData record with `viewType u16@112 == 16`);
+- Props9 item key **574619695** (`0x2240000F`) of that view's type-6 PROPERTIES.
+
+MS Project keeps the two copies in lock-step; the writer re-emits both from the
+same `serializeTimelineXml()` output. Reverse-engineered 2026-08-27 from
+`tests/fixtures/mpp_samples/tl_*` (15 fixtures generated on the dpr2hw3 COM
+oracle by `generate_timeline_samples.py` — the Timeline object model has **no**
+`AddToTimeline`; the real members are `TaskOnTimelineEx` / `InsertTimelineBar` /
+`TimelineBarSetLabel` / `TimelineBarDateRange` / `TimelineShowHide` /
+`TimelineFormat` on the `_Global`/`_MSProject` typelib interfaces).
+
+`<TLViewData dfltTLView>` children:
+- `<tlbarSet>` — `<tl id>` bars. `id 0` is Project's hidden internal bar (always
+  spelled out in full, `label` last). `id 1..` are the visible bars; terse
+  `<tl id="N"/>` unless customised: `label`, `useCustomDates="1"` +
+  `startDate="YYYY/MM/DD"` + `finishDate` (label first, then the date trio).
+- `<tskSet>` `<t>` + `<mlSet>` `<m>` — **every member appears in BOTH sets**,
+  same GUID `id`, `uid`, `onTL="1"`, `barid` (= the owning `<tl id>`). A default
+  (unformatted) member carries only those four attrs; `fmt` (→ `<fmtSet>`),
+  `ch`, `x/y/h/top` appear only on the sentinel `uid="4294967295"` template row
+  and on members the user has custom-formatted. New members can use any UUID —
+  Project re-homes them into its own `...-F111-813A-<machine>` GUID family on the
+  next native save, no repair.
+- `<options>` — `dateFormat`, `numTextLines`, `showPanZoom`; and (names look
+  transposed vs Project's `PjTimelineShowHide` enum, verified against fixtures)
+  `showTS` = the **Today line** toggle, `showToday` = the **Timescale** toggle.
+  `panZoomT`/`timescaleT`/`todayT`/`labelTextStyle` are `<style>` id references.
+- `<txtSet>` `<style id type thm clr sz font bold ital und strk>` — one per
+  category `type` 0..11, overrides at id 12+. `thm="0001"` = theme colour,
+  `thm="0000"` + `clr="FFRRGGBB"` = explicit.
+- `<fltSet>`/`<fmtSet>` and any unknown `<options>` attrs are not modelled; the
+  writer transforms `rawXml` element-by-element (`QXmlStreamReader` → `Writer`)
+  and copies them through unchanged. Output is byte-identical for an unmodified
+  model, so an unedited resave routes through the verbatim CV_iew copy.
+
+Not decoded: the callout / text-only per-item display style (needs UI
+Automation — `TimelineInsertTask` pops a picker), and the "shown in the Gantt
+split" flag (in the CV_iew FixedData record bytes ~100-138, not the XML).
+Model: `src/model/timelineviewsettings.h` (not part of `Project::operator==`,
+like the Usage views — `modified` + `ViewFormat::wantsPatch()` drive the write).
+Probe: `tests/probe/dump_timeline.cpp`.
+
 ## Diagnostics
 
 - `dump_task <file.mpp>` — hex-dumps `TBkndTask` streams and tallies string-bearing field codes.
@@ -523,3 +717,37 @@ Hard-won behaviours:
 - `tst_fixture_cfb` — prints any fixture's full storage tree.
 - `SCHEDULEIO_MPP14_TEMPLATE=<file.mpp>` (env) — makes the MPP14 writer use any real file as
   its container template; isolates regenerated-stream bugs from template bugs.
+
+## Project options ("   114/Props" scalars) — RE 2026-08-30
+
+MS Project's File > Options "for this project" settings live as scalar items in
+`   114/Props`, in a dense block around `0x02400010`-`0x02400047` plus a second
+cluster near `0x0240138F`-`0x024013BB`. Ids below found by diffing single-option
+`.mpp` files saved from real MS Project 2016 (dpr2hw3, `MSProject.Application`
+`OptionsCalendar`/`OptionsCalculation`/`OptionsSchedule`/`OptionsViewEx`/
+`OptionsGeneralEx` + `FileSaveAs`) against a baseline, then re-reading each with
+`dump_model` and resaving byte-clean through `MppIO`. Table: `src/codec/propskeys.h`.
+
+- Times (`DefaultStartTime` 0x0240001C, `DefaultEndTime` 0x02400021): **u16
+  tenths-of-a-minute since midnight** (08:00 -> 480 min -> 4800). Not a timestamp.
+- `MinutesPerDay` 0x0240001D / `MinutesPerWeek` 0x0240001E: u32 minutes.
+  `DaysPerMonth` 0x0240138F: **u16** (not u32).
+- `WeekStartDay` 0x02400025: 0=Sunday..6=Saturday — identical to MSPDI.
+- `BaselineForEarnedValue` 0x024013AE: **binary value = MSPDI value + 1**
+  (binary 1 == "Baseline", 2 == "Baseline1", ...). Model + MSPDI keep 0 == "Baseline".
+- `NewTaskStartIsProjectStart` 0x02400017: stored 0 = project start, 1 = current date.
+- `DefaultStandardRate` 0x0240001F / `DefaultOvertimeRate` 0x02400020: 8-byte IEEE
+  double, item flags 0x00000009.
+- `DefaultDurationUnits` 0x02400015 = PjUnit (7=days); `DefaultWorkUnits`
+  0x02400016 = MSPDI WorkFormat (2=hours) — both stored identically to MSPDI.
+- Currency strings: `CurrencySymbol` 0x02400010, `CurrencyCode` 0x024013BB (UTF-16LE).
+- NOT in `   114/Props` (stay MSPDI-only): new-tasks-manual default, `Autolink`,
+  `HonorConstraints`, "show project summary task" (per-view). Changing any of
+  these in MS Project left the Props stream unchanged.
+
+Confirmed NOT in "   114/Props" (2026-08-30, `cfb_streams` full-tree diff of
+single-option MS Project saves): "Autolink inserted or moved tasks",
+"Tasks will always honor their constraint dates" (toggling either changed only
+save-counter / GUID / title items), and "Show project summary task" (a per-view
+flag in "   214/CV_iew"). "New tasks created Manual/Auto" has no
+`MSProject.Application` COM member and could not be probed automatically.

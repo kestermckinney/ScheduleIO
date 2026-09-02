@@ -74,7 +74,7 @@ int main(int argc, char **argv)
             o += 12;
             if (len > quint32(props.size() - o)) break;
             std::printf("key=%u (0x%08x) len=%u flags=0x%08x", key, key, len, flags);
-            for (quint32 i = 0; i < len && i < 8; ++i)
+            for (quint32 i = 0; i < len && i < 32; ++i)
                 std::printf(" %02x", uchar(props.at(o + int(i))));
             std::printf("\n");
             o += int(len);

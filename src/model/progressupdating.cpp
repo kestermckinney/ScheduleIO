@@ -130,25 +130,53 @@ void updateAssignmentProgress(Project &project, const Task &task,
         project, task, assignment);
     const QDateTime start = assignment.start.isValid() ? assignment.start : task.start;
     const QDateTime finish = assignment.finish.isValid() ? assignment.finish : task.finish;
-    QDateTime boundary = start;
-    if (percent >= 1.0) {
-        boundary = finish;
-    } else if (percent > 0.0 && boundaryHint.isValid()
-               && start < boundaryHint && boundaryHint < finish) {
-        boundary = boundaryHint;
-    } else if (percent > 0.0) {
+    // Where the actual/remaining split falls purely by scheduled work.
+    auto proportionalSplit = [&]() -> QDateTime {
         const qint64 span = calendar.workBetween(start, finish);
-        boundary = span > 0
+        return span > 0
             ? calendar.addWork(start, qint64(std::llround(double(span) * percent)))
             : start.addMSecs(qint64(std::llround(double(start.msecsTo(finish))
                                                  * percent)));
+    };
+
+    // File > Options > "Calculation options for this project": when the recorded
+    // progress and the status date disagree, optionally pull the end of the
+    // completed part and/or the start of the remaining part onto the status date.
+    const QDateTime &statusDate = boundaryHint;
+    const bool straddlesStatus = statusDate.isValid()
+        && start < statusDate && statusDate < finish;
+
+    QDateTime boundary = start;
+    QDateTime remainingStart = start;
+    if (percent >= 1.0) {
+        boundary = finish;
+        remainingStart = finish;
+    } else if (percent > 0.0) {
+        const QDateTime proportional = proportionalSplit();
+        boundary = proportional;
+        remainingStart = calendar.nextWorkStart(proportional);
+        if (straddlesStatus && proportional > statusDate) {
+            // Completed work reaches past the status date.
+            if (project.moveCompletedEndsBack) {
+                boundary = statusDate;
+                remainingStart = project.moveRemainingStartsBack
+                    ? statusDate                       // close the gap
+                    : calendar.nextWorkStart(proportional);   // leave remaining put
+            }
+        } else if (straddlesStatus && proportional < statusDate) {
+            // Remaining work is scheduled before the status date.
+            if (project.moveRemainingStartsForward)
+                remainingStart = statusDate;
+            if (project.moveCompletedEndsForward)
+                boundary = statusDate;
+        }
     }
     appendProgressBucket(assignment, TimephasedValue::ActualWork,
                          start, boundary, actual);
     appendProgressBucket(assignment, TimephasedValue::ActualOvertimeWork,
                          start, boundary, assignment.actualOvertimeWorkMillis);
-    const QDateTime remainingStart = percent <= 0.0
-        ? start : calendar.nextWorkStart(boundary);
+    if (percent <= 0.0)
+        remainingStart = start;
     appendProgressBucket(assignment, TimephasedValue::RemainingWork,
                          remainingStart, finish, remaining);
 
@@ -533,6 +561,14 @@ int ProgressUpdating::rescheduleIncompleteWork(Project &project,
             hasActual |= assignment.actualWorkMillis > 0;
         }
         if (!assignments.isEmpty() && !hasRemaining)
+            continue;
+
+        // "Split in-progress tasks" off (File > Options > Schedule): leave a task
+        // that already has recorded progress untouched rather than splitting its
+        // remaining work out past the reschedule boundary. Unstarted tasks still
+        // move. (Whole-task-shift semantics for the move* calculation options are
+        // not yet modelled -- see Project::moveCompletedEndsBack et al.)
+        if (!project.splitInProgressTasks && hasActual)
             continue;
 
         const QDateTime oldStart = task.start;

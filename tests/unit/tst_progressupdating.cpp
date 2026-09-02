@@ -78,6 +78,8 @@ class TstProgressUpdating : public QObject
 private slots:
     void unstartedWorkMovesAfterStatusDate();
     void actualHistoryStaysAndRemainingBucketsMove();
+    void inProgressTaskIsLeftAloneWhenSplitsDisabled();
+    void moveOptionsPullSplitOntoStatusDate();
     void successorsFollowMovedFinish();
     void selectedScopeAndProtectedTasksAreHonored();
     void futureRemainingWorkIsNotPulledBackward();
@@ -213,6 +215,98 @@ void TstProgressUpdating::actualHistoryStaysAndRemainingBucketsMove()
     QCOMPARE(project.tasks[0].finish, a.finish);
     QCOMPARE(a.actualWorkMillis, 4 * kHour);
     QCOMPARE(a.remainingWorkMillis, 12 * kHour);
+}
+
+void TstProgressUpdating::inProgressTaskIsLeftAloneWhenSplitsDisabled()
+{
+    schedule::Project project = projectWithWorkResource();
+    project.splitInProgressTasks = false;   // File > Options > Schedule
+    const QDateTime monday(QDate(2026, 8, 3), QTime(8, 0));
+    project.tasks = { task(1, monday, 16 * kHour), task(2, monday, 8 * kHour) };
+    project.tasks[0].actualStart = monday;
+    project.tasks[0].actualDurationMillis = 4 * kHour;
+    project.tasks[0].actualWorkMillis = 4 * kHour;
+    project.tasks[0].percentComplete = 0.25;
+    project.assignments = { assignment(1, 1, 4 * kHour, 12 * kHour),
+                            assignment(2, 2, 0, 8 * kHour) };
+    schedule::Assignment &a = project.assignments[0];
+    a.start = monday;
+    a.finish = QDateTime(QDate(2026, 8, 4), QTime(17, 0));
+    project.assignments[1].start = monday;
+    project.assignments[1].finish = QDateTime(QDate(2026, 8, 3), QTime(17, 0));
+
+    // Only the unstarted task (2) is rescheduled; the in-progress task keeps its
+    // plan and is never split.
+    QCOMPARE(schedule::ProgressUpdating::rescheduleIncompleteWork(
+                 project, QDateTime(QDate(2026, 8, 5), QTime(17, 0))), 1);
+    QCOMPARE(project.tasks[0].start, monday);
+    // Not pushed past the reschedule boundary, and never split.
+    QVERIFY(project.tasks[0].finish.date() <= QDate(2026, 8, 4));
+    QVERIFY(!a.stop.isValid());
+    QVERIFY(!a.resume.isValid());
+    QVERIFY(project.tasks[1].start >= QDateTime(QDate(2026, 8, 6), QTime(0, 0)));
+}
+
+void TstProgressUpdating::moveOptionsPullSplitOntoStatusDate()
+{
+    const QDateTime monday(QDate(2026, 8, 3), QTime(8, 0));
+    const QDateTime status(QDate(2026, 8, 5), QTime(17, 0));   // Wed
+    auto freshProject = [&] {
+        schedule::Project project = projectWithWorkResource();
+        project.tasks = { task(1, monday, 40 * kHour) };
+        project.tasks[0].finish = QDateTime(QDate(2026, 8, 7), QTime(17, 0));
+        project.assignments = { assignment(1, 1, 0, 40 * kHour) };
+        project.assignments[0].start = monday;
+        project.assignments[0].finish = project.tasks[0].finish;
+        project.statusDate = status;
+        return project;
+    };
+
+    // --- Case B: remaining work would be scheduled before the status date. ---
+    {
+        schedule::Project p = freshProject();   // all move* options off (default)
+        QVERIFY(schedule::ProgressUpdating::setPercentWorkComplete(p, 1, 0.25));
+        // Split falls ~Tue, i.e. before the Wed status date, and stays there.
+        QVERIFY(p.assignments[0].resume.isValid());
+        QVERIFY(p.assignments[0].resume < status);
+    }
+    {
+        schedule::Project p = freshProject();
+        p.moveRemainingStartsForward = true;
+        QVERIFY(schedule::ProgressUpdating::setPercentWorkComplete(p, 1, 0.25));
+        QCOMPARE(p.assignments[0].resume, status);          // remaining pushed forward
+        QVERIFY(p.assignments[0].stop < status);            // completed part left put
+    }
+    {
+        schedule::Project p = freshProject();
+        p.moveRemainingStartsForward = true;
+        p.moveCompletedEndsForward = true;
+        QVERIFY(schedule::ProgressUpdating::setPercentWorkComplete(p, 1, 0.25));
+        QCOMPARE(p.assignments[0].resume, status);
+        QCOMPARE(p.assignments[0].stop, status);            // completed part follows
+    }
+
+    // --- Case A: completed work would reach past the status date. ---
+    {
+        schedule::Project p = freshProject();
+        QVERIFY(schedule::ProgressUpdating::setPercentWorkComplete(p, 1, 0.75));
+        QVERIFY(p.assignments[0].stop > status);            // default: left past status
+    }
+    {
+        schedule::Project p = freshProject();
+        p.moveCompletedEndsBack = true;
+        QVERIFY(schedule::ProgressUpdating::setPercentWorkComplete(p, 1, 0.75));
+        QCOMPARE(p.assignments[0].stop, status);            // completed end pulled back
+        QVERIFY(p.assignments[0].resume > status);          // gap: remaining left put
+    }
+    {
+        schedule::Project p = freshProject();
+        p.moveCompletedEndsBack = true;
+        p.moveRemainingStartsBack = true;
+        QVERIFY(schedule::ProgressUpdating::setPercentWorkComplete(p, 1, 0.75));
+        QCOMPARE(p.assignments[0].stop, status);
+        QCOMPARE(p.assignments[0].resume, status);          // gap closed
+    }
 }
 
 void TstProgressUpdating::successorsFollowMovedFinish()

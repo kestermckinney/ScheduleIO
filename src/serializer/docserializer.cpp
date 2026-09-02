@@ -11,6 +11,7 @@
 #include "codec/fieldmap.h"
 #include "codec/mppfieldids.h"
 #include "codec/mpp14timephased.h"
+#include "codec/propskeys.h"
 #include "codec/propsreader.h"
 #include "codec/streamquartet.h"
 #include "codec/viewformat.h"
@@ -152,6 +153,7 @@ QByteArray packTaskExtra(const schedule::Task &t)
     putU8(b, t.ignoreResourceCalendar ? 1 : 0);
     putU16(b, encodePercent(t.physicalPercentComplete));
     putU16(b, static_cast<quint16>(t.earnedValueMethod == 1 ? 1 : 0));
+    putU16(b, static_cast<quint16>(t.fixedCostAccrual));
     return b;
 }
 
@@ -201,6 +203,9 @@ void unpackTaskExtra(const QByteArray &b, schedule::Task &t)
     o += 2;
     if (readU16(b, o, &u16v))
         t.earnedValueMethod = u16v == 1 ? 1 : 0;
+    o += 2;
+    if (readU16(b, o, &u16v))
+        t.fixedCostAccrual = static_cast<int>(u16v);
 }
 
 // Value tags for a custom field's QVariant.
@@ -2222,6 +2227,101 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
             if (c.name == defaultCalName) { out.calendarUniqueId = c.uniqueId; break; }
         }
     }
+
+    // ---- Project options (File > Options) --------------------------------------
+    // MSPDI carries these already (xmlserializer); the binary side reads a key
+    // only once its id is confirmed (PropsKey::* != kUnknown -- see propskeys.h).
+    // The stock write template's own Props values must NOT leak in for a key we
+    // cannot yet write back, so an unknown id is skipped entirely.
+    auto propBool = [&props](quint32 key, bool def) -> bool {
+        if (key == PropsKey::kUnknown || !props.contains(key))
+            return def;
+        quint16 v = 0;
+        return FieldDecoders::readU16(props.value(key), 0, &v) ? (v != 0) : def;
+    };
+    auto propU16 = [&props](quint32 key, int def) -> int {
+        if (key == PropsKey::kUnknown || !props.contains(key))
+            return def;
+        quint16 v = 0;
+        return FieldDecoders::readU16(props.value(key), 0, &v) ? int(v) : def;
+    };
+    auto propU32 = [&props](quint32 key, int def) -> int {
+        if (key == PropsKey::kUnknown || !props.contains(key))
+            return def;
+        quint32 v = 0;
+        return FieldDecoders::readU32(props.value(key), 0, &v) ? int(v) : def;
+    };
+    auto propDouble = [&props](quint32 key, double def) -> double {
+        if (key == PropsKey::kUnknown || !props.contains(key))
+            return def;
+        double v = 0.0;
+        return FieldDecoders::readDouble(props.value(key), 0, &v) ? v : def;
+    };
+    auto propTime = [&props](quint32 key, QTime def) -> QTime {
+        if (key == PropsKey::kUnknown || !props.contains(key))
+            return def;
+        quint16 tenths = 0;
+        if (!FieldDecoders::readU16(props.value(key), 0, &tenths))
+            return def;
+        // u16 tenths-of-a-minute since midnight (4800 == 08:00).
+        return QTime(0, 0).addMSecs((int(tenths) % 14400) * 6000);
+    };
+    auto propString = [&props](quint32 key, const QString &def) -> QString {
+        if (key == PropsKey::kUnknown || !props.contains(key))
+            return def;
+        return props.string(key);
+    };
+
+    out.newTasksManual = propBool(PropsKey::NewTasksAreManual, out.newTasksManual);
+    // Stored 0 = new tasks scheduled on project start, 1 = on the current date.
+    if (PropsKey::NewTaskStartIsProjectStart != PropsKey::kUnknown
+        && props.contains(PropsKey::NewTaskStartIsProjectStart))
+        out.newTaskStartIsProjectStart =
+            propU16(PropsKey::NewTaskStartIsProjectStart, 0) == 0;
+    out.defaultTaskType = propU16(PropsKey::DefaultTaskType, out.defaultTaskType);
+    out.defaultDurationUnits = propU16(PropsKey::DefaultDurationUnits, out.defaultDurationUnits);
+    out.defaultWorkUnits = propU16(PropsKey::DefaultWorkUnits, out.defaultWorkUnits);
+    out.newTasksEffortDriven = propBool(PropsKey::NewTasksEffortDriven, out.newTasksEffortDriven);
+    out.autoLinkTasks = propBool(PropsKey::AutoLink, out.autoLinkTasks);
+    out.splitInProgressTasks = propBool(PropsKey::SplitInProgressTasks, out.splitInProgressTasks);
+    out.honorConstraints = propBool(PropsKey::HonorConstraints, out.honorConstraints);
+    out.criticalSlackLimit = propU32(PropsKey::CriticalSlackLimit, out.criticalSlackLimit);
+
+    out.weekStartDay = propU16(PropsKey::WeekStartDay, out.weekStartDay);
+    out.fiscalYearStartMonth = propU16(PropsKey::FiscalYearStartMonth, out.fiscalYearStartMonth);
+    out.fiscalYearUsesStartYear =
+        propBool(PropsKey::FiscalYearUsesStartYear, out.fiscalYearUsesStartYear);
+    out.defaultStartTime = propTime(PropsKey::DefaultStartTime, out.defaultStartTime);
+    out.defaultEndTime = propTime(PropsKey::DefaultEndTime, out.defaultEndTime);
+    out.minutesPerDay = propU32(PropsKey::MinutesPerDay, out.minutesPerDay);
+    out.minutesPerWeek = propU32(PropsKey::MinutesPerWeek, out.minutesPerWeek);
+    out.daysPerMonth = propU16(PropsKey::DaysPerMonth, out.daysPerMonth);
+
+    out.moveCompletedEndsBack = propBool(PropsKey::MoveCompletedEndsBack, out.moveCompletedEndsBack);
+    out.moveRemainingStartsBack =
+        propBool(PropsKey::MoveRemainingStartsBack, out.moveRemainingStartsBack);
+    out.moveRemainingStartsForward =
+        propBool(PropsKey::MoveRemainingStartsForward, out.moveRemainingStartsForward);
+    out.moveCompletedEndsForward =
+        propBool(PropsKey::MoveCompletedEndsForward, out.moveCompletedEndsForward);
+    out.statusUpdatesResource =
+        propBool(PropsKey::UpdatingTaskStatusUpdatesResourceStatus, out.statusUpdatesResource);
+
+    out.currencySymbol = propString(PropsKey::CurrencySymbol, out.currencySymbol);
+    out.currencySymbolPosition = propU16(PropsKey::CurrencySymbolPosition, out.currencySymbolPosition);
+    out.currencyDigits = propU16(PropsKey::CurrencyDigits, out.currencyDigits);
+    out.currencyCode = propString(PropsKey::CurrencyCode, out.currencyCode);
+    out.defaultStandardRate = propDouble(PropsKey::DefaultStandardRate, out.defaultStandardRate);
+    out.defaultOvertimeRate = propDouble(PropsKey::DefaultOvertimeRate, out.defaultOvertimeRate);
+    out.defaultFixedCostAccrual = propU16(PropsKey::DefaultFixedCostAccrual, out.defaultFixedCostAccrual);
+    out.defaultEarnedValueMethod = propU16(PropsKey::EarnedValueMethod, out.defaultEarnedValueMethod);
+    // Binary 1 = "Baseline"; the model / MSPDI use 0 = "Baseline".
+    if (PropsKey::BaselineForEarnedValue != PropsKey::kUnknown
+        && props.contains(PropsKey::BaselineForEarnedValue))
+        out.baselineForEarnedValue =
+            qMax(0, propU16(PropsKey::BaselineForEarnedValue, 1) - 1);
+    out.showProjectSummaryTask =
+        propBool(PropsKey::ShowProjectSummaryTask, out.showProjectSummaryTask);
 
     // Gantt-view formatting: view-wide styles + per-task row formats (CV_iew).
     // Needs the task list loaded, so it runs last.
