@@ -40,6 +40,7 @@ scheduleio_add_test(tst_progressupdating unit/tst_progressupdating.cpp)
 scheduleio_add_test(tst_workcontouring unit/tst_workcontouring.cpp)
 scheduleio_add_test(tst_paritygaps unit/tst_paritygaps.cpp)
 scheduleio_add_test(tst_usageviewsettings unit/tst_usageviewsettings.cpp)
+scheduleio_add_test(tst_barstylecodec   unit/tst_barstylecodec.cpp)
 
 if(WIN32 AND SCHEDULEIO_ORACLE_MSPROJECT)
     scheduleio_add_test(tst_msproject_usage_view interop/tst_msproject_usage_view.cpp)
@@ -132,6 +133,10 @@ target_include_directories(dump_cview PRIVATE ${CMAKE_SOURCE_DIR}/src)
 qt_add_executable(dump_barexc probe/dump_barexc.cpp)
 target_link_libraries(dump_barexc PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_barexc PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(dump_barstyles probe/dump_barstyles.cpp)
+target_link_libraries(dump_barstyles PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_barstyles PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 qt_add_executable(dump_timeline probe/dump_timeline.cpp)
 target_link_libraries(dump_timeline PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)

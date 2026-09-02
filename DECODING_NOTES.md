@@ -558,6 +558,108 @@ bars formatted in Project.
 - Our writer emits records byte-identical to Project's own for the same task and
   colour, and Project preserves them through an open + re-save.
 
+## Default bar styles (STYLE_DATA) — DONE 2026-09-02
+
+`Format > Bar Styles` (the whole-category table, as against the per-task
+`BAR_EXCEPTION_STYLES` above). Gantt Chart view's Props9 item key **574619656 =
+STYLE_DATA**, the same 41363-byte blob that already carries the default text
+styles (`26 + 32n`) and gridlines (`667..1057`). Probe: `tests/probe/dump_barstyles.cpp`.
+
+**Blob layout around the bar table** (measured identical across `mpp14template.mpp`
+and every real fixture — `Average Project`, `Example Template`, `Timeline Test`,
+`Has Macros`, `07_baseline_progress`, `02_text_styles`):
+
+| region | bytes | meaning |
+|---|---|---|
+| `2243` | u8 | **barCount** (41 in the stock 2013+ template) |
+| `2255 .. 41255` | `200 * 195` | **bar-style record slot array** — exactly 200 fixed 195-byte slots; `barCount` used, the rest **zero-filled** (this is the "opaque 31 KB tail" in earlier notes — it is padding, not packed data) |
+| `41255 .. 41363` | 108 | small fixed **trailer**: progress-line line/point styles + colours (rgb + `ff`=automatic flag) and a `0x08000023` date-format field. Anchored to blob end (`size - 108`), **not** to the array end. |
+
+So the bar array is a **reserved 200-slot region of constant size**. Growing or
+shrinking `barCount` means writing `barCount` + that many records + zeroing the
+unused slots — **no blob resize, no trailer move**. **Confirmed on dpr2hw3
+2026-09-02:** files ScheduleIO wrote with `barCount` 40, 42 and 49 all open in MS
+Project 2016 with no corruption error, `ViewApply("Gantt Chart")` succeeds, the
+29 tasks load, and MS Project's own re-save **preserves the non-stock count and
+every rewritten record byte-for-byte** (`dump_barstyles` self-check 40/40, 42/42,
+49/49 on the MSP re-saves). A colour edit round-trips through MSP unchanged.
+
+`src/codec/barstylecodec.{h,cpp}` (`readRecord`/`writeRecord`) implements the
+195-byte layout below. Self-check via `dump_barstyles`: all 41 stock records in
+`mpp14template.mpp`, `Average Project`, `Example Template`, `Timeline Test`,
+`07_baseline_progress` and `10_cell_background` re-encode **byte-for-byte
+identical** — the model captures every non-zero byte in a stock record.
+
+**195-byte record layout** (offsets from template + `Average Project` hex; the
+enum vocabularies confirmed 2026-09-02 by having MS Project 2016 author one style
+per value via `GanttBarStyleEdit` on dpr2hw3 and decoding the bytes):
+
+| off | size | field |
+|---|---|---|
+| +0 | u8 | middle shape (see table) |
+| +1 | u8 | middle pattern (see table) |
+| +2 | 4 | middle colour (r,g,b,flag; flag≠0 = Automatic) |
+| +14 | u8 | middle "type"/flag — 3 for bar-bodied stock styles, 0 for marker styles (undecoded; preserved) |
+| +15 | u8 | start shape+type: `shape = v % 25`, `type = v / 25` (0 Solid / 1 Framed / 2 Dashed) |
+| +16 | 4 | start colour |
+| +28 | u8 | end shape+type (as +15) |
+| +29 | 4 | end colour |
+| +41 | u32 | **from** field id, `0x0B40 \| index` (see table) |
+| +45 | u32 | **to** field id |
+| +49 | u64 | **showFor** bitset (see table) |
+| +57 | u64 | **showFor "Not"** bitset — the negated criteria |
+| +65 | u16 | row, 0-based (dialog shows 1..4) |
+| +67 +71 +75 +79 +83 | u32×5 | bar text L/R/T/B/Inside — `0x0B40 \| FIELD_ARRAY index`, or `0xFFFFFFFF` for none |
+| +87 | u16 | undecoded flag (0/1 in the wild; preserved) |
+| +89 | u16 | style id |
+| +91 | UTF-16, NUL-term | style name (the match key). MS Project pads the field tail with `0xFF`; ScheduleIO writes name + NUL and leaves the tail as-is |
+
+**showFor bit positions** (`GanttBarStyleEdit ShowFor="<name>"` → bit):
+`Normal`=0, `Milestone`=1, `Summary`=2, `Critical`=3, `Noncritical`=4,
+`Marked`=5, `Finished`=6, `In Progress`=7, `Not Finished`=8, `Not Started`=9,
+`Started Late`=10, `Rolled Up`=26, `Project Summary`=27, `Split`=28,
+`External Tasks`=29, `Group By Summary`=40, `Deliverable`=41, `Dependency`=42,
+`Active`=43, `Manually Scheduled`=44, `Late`=50. The record stores two u64s
+(`@+49` "for these", `@+57` "but not these"); the stock auto-scheduled styles
+carry `Active` (43) in the positive word and `Manually Scheduled` (44) in the
+negative word.
+
+**middle shape byte** (`GanttBarStyleEdit MiddleShape=N` → byte N, N=0..7).
+Stock cross-reference: 0 none, 1 full bar, 3 top/thin bar (`*Group By Summary`),
+4 (`Manual Summary Rollup`), 5 the summary silhouette (`Summary`), 7 thin bar
+(`Split`, `Duration-only`).
+
+**middle pattern byte** (`MiddlePattern=N` → byte N, N=0..11). 0 hollow,
+1 solid; stock `Split` uses 8, `*… (Warning)` uses 11.
+
+**start/end shape byte** (`StartShape=N` → shape byte N, N=0..24; type = N/25).
+Anchors: 3 = diamond (`Milestone`), 14 = the deadline down-marker (`Deadline`),
+11 = the summary end-bracket.
+
+**from/to field ids** (`From="<name>"` → `0x0B40 | index`): Start=35 (or the
+manual-aware 1283), Finish=36 (or 1284), Early Start=37, Early Finish=38,
+Late Start=39, Late Finish=40, Actual Start=41, Actual Finish=42,
+Baseline Start=43, Baseline Finish=44, Resume=99, Stop=100, Constraint Date=18,
+Deadline=437; `*Deliverable*` stock styles use 1152/1153; stock `Progress` "to"
+uses 119. Bar text at +67.. uses the plain FIELD_ARRAY index (reuse
+`formatKeyForMppField()`/`fieldForFormatKey()`).
+
+Oracle scripts: `tools/barstyle-oracle-remote.ps1` (acceptance: open N files with
+varied `barCount` in MS Project, ViewApply, screenshot, re-save) and the
+`GanttBarStyleEdit` vocab worker pattern.
+
+Stock template's 41 style names, in order: Task, Split, Milestone, Summary,
+Project Summary, *Group By Summary, *Rolled Up Task, *Rolled Up Split, *Rolled Up
+Progress, *Rolled Up Milestone, *Deliverable Start/Finish/Duration, *Dependency
+Start/Finish/Duration, Inactive Task, *Inactive Split, Inactive Milestone,
+Inactive Summary, Manual Task, *Manual Split, *Manual Milestone, Duration-only,
+Manual Summary Rollup, *Manual Task (Warning), *Manual Split (Warning), *Manual
+Milestone (Warning), *Manual Summary Rollup (Warning), Manual Summary, Start-only,
+Finish-only, *Duration-only Milestone, *Start-only Milestone, *Finish-only
+Milestone, *Rolled Up Manual Task, External Tasks, External Milestone, Deadline,
+Progress, Manual Progress. (Names beginning `*` are MS Project's internal
+"hidden helper" styles.)
+
 ## Timeline view (DONE for the modelled subset — `src/codec/viewformat.cpp`)
 
 The Microsoft Project Timeline is **not** a binary blob: it is a self-describing
