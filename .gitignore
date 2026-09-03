@@ -9,5 +9,5 @@ site/
 .qtcreator/
 .DS_Store
 CMakeLists.txt.user*
-graphify-out/
+.codegraph/
 .opencode/
