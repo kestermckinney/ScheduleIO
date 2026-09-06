@@ -153,6 +153,10 @@ void sync(Project &p, Task &t)
             a.start = t.start;
             a.finish = t.finish;
         }
+        // While the task carries Work but no work resource, that value is the one
+        // staffing will hold (covers a file loaded with a task-level Work too).
+        if (t.enteredWorkMillis < 0 && t.workMillis > 0 && t.actualWorkMillis == 0)
+            t.enteredWorkMillis = t.workMillis;
     }
     ProjectReconciliation::reconcile(p);
 }
@@ -191,6 +195,12 @@ void TaskScheduling::setDuration(Project &p, int taskUid, qint64 durationMillis)
     durationMillis = qMax<qint64>(0, durationMillis);
     const QList<Assignment *> assns = assignmentsOf(p, taskUid);
 
+    // Setting the duration on a staffed task anchors the triangle there: the
+    // entered-Work hold no longer owns it (a later resource follows the task
+    // type's rules instead).
+    if (!assns.isEmpty())
+        t->enteredWorkMillis = -1;
+
     if (t->taskType == 2) {
         // Fixed Work: the new duration re-derives units, work untouched.
         for (Assignment *a : assns)
@@ -214,6 +224,10 @@ void TaskScheduling::setWork(Project &p, int taskUid, qint64 workMillis)
         return;
     workMillis = qMax<qint64>(0, workMillis);
     const QList<Assignment *> assns = assignmentsOf(p, taskUid);
+    // The Work the user just typed is the total staffing should hold as resources
+    // are added (see addAssignment); keep it whether or not the task is staffed
+    // yet, and drop it only if they cleared the Work entirely.
+    t->enteredWorkMillis = workMillis > 0 ? workMillis : -1;
     if (assns.isEmpty()) {
         // No resources yet: the task itself holds the Work, like MS Project's
         // task-level Work. With an implied single 100%-units resource work equals
@@ -276,6 +290,10 @@ void TaskScheduling::setAssignmentUnits(Project &p, int assignmentUid, double un
         return;
     }
 
+    // The work is now assignment-shaped: later resource adds follow the task
+    // type's rules, not the entered-Work hold.
+    t->enteredWorkMillis = -1;
+
     if (t->taskType == 1) {
         // Fixed Duration: work follows the new units over the fixed span.
         a->units = units;
@@ -308,6 +326,10 @@ void TaskScheduling::setAssignmentWork(Project &p, int assignmentUid, qint64 wor
         sync(p, *t);
         return;
     }
+
+    // The work is now assignment-shaped: later resource adds follow the task
+    // type's rules, not the entered-Work hold.
+    t->enteredWorkMillis = -1;
 
     if (t->taskType == 1) {
         // Fixed Duration: units absorb the new work.
@@ -393,8 +415,20 @@ int TaskScheduling::addAssignment(Project &p, int taskUid, int resourceUid, doub
         return added->uniqueId;
     }
 
-    if (effortDriven && hadAssignments && oldTotal > 0) {
-        // Total work stays put; every assignment gets its units' share.
+    // A total to preserve as this resource joins: the Work the user typed on the
+    // task, held through the whole initial staffing regardless of the
+    // effort-driven flag (MS Project holds it when resources are assigned in one
+    // action, and our UI assigns one checkbox at a time); or, once the task is
+    // assignment-shaped, the running total when an effort-driven task gains a
+    // further resource. -1 means the newcomer instead brings its own work.
+    const qint64 holdTotal =
+        (t->enteredWorkMillis >= 0 && t->actualWorkMillis == 0) ? t->enteredWorkMillis
+        : (effortDriven && hadAssignments && oldTotal > 0)      ? oldTotal
+                                                               : qint64(-1);
+
+    if (holdTotal >= 0) {
+        // Every assignment gets its units' share of the held total; the duration
+        // (Fixed Units/Work) or the units (Fixed Duration) re-derive to fit.
         const QList<Assignment *> assns = assignmentsOf(p, taskUid);
         double unitsTotal = 0.0;
         for (const Assignment *x : assns)
@@ -403,13 +437,13 @@ int TaskScheduling::addAssignment(Project &p, int taskUid, int resourceUid, doub
         for (int i = 0; i < assns.size(); ++i) {
             Assignment *x = assns.at(i);
             const qint64 share = (i == assns.size() - 1)
-                ? oldTotal - assigned
-                : qint64(std::llround(double(oldTotal) * qMax(kMinUnits, x->units) / unitsTotal));
+                ? holdTotal - assigned
+                : qint64(std::llround(double(holdTotal) * qMax(kMinUnits, x->units) / unitsTotal));
             x->workMillis = qMax<qint64>(0, share);
             assigned += x->workMillis;
         }
         if (t->taskType == 1) {
-            // Fixed Duration + effort-driven: the span holds, units re-derive.
+            // Fixed Duration: the span holds, units re-derive.
             for (Assignment *x : assns)
                 if (t->durationMillis > 0)
                     x->units = qMax(kMinUnits, double(x->workMillis) / double(t->durationMillis));
@@ -443,12 +477,17 @@ void TaskScheduling::removeAssignment(Project &p, int assignmentUid)
         return;
     }
 
-    const bool effortDriven = t->effortDriven || t->taskType == 2;
+    // Hold the total while the task is still in its entered-Work staffing phase,
+    // as well as for an effort-driven task.
+    const bool holdTotal = (t->enteredWorkMillis >= 0 && t->actualWorkMillis == 0)
+        || t->effortDriven || t->taskType == 2;
     const QList<Assignment *> assns = assignmentsOf(p, t->uniqueId);
-    if (assns.isEmpty())
+    if (assns.isEmpty()) {
         t->workMillis = 0;   // last resource gone: the work went with it (sync,
                              // which holds task-level work when empty, won't clear it)
-    if (effortDriven && !assns.isEmpty() && removed.workMillis > 0) {
+        t->enteredWorkMillis = -1;
+    }
+    if (holdTotal && !assns.isEmpty() && removed.workMillis > 0) {
         // The survivors absorb the departed work, proportionally to units.
         double unitsTotal = 0.0;
         for (const Assignment *x : assns)
