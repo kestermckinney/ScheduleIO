@@ -1,12 +1,26 @@
 # ScheduleIO
 
-**ScheduleIO** is a cross-platform (Windows, macOS, Linux) C++17/Qt 6 library that reads Microsoft
-Project `.mpp` files into Qt value types, edits and schedules the model, and writes native MPP14 or
-MSPDI XML output. It has no dependency on an installed copy of Microsoft Project.
+<p class="badges">
+  <a href="https://github.com/kestermckinney/ScheduleIO/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/kestermckinney/ScheduleIO?style=for-the-badge"></a>
+  <a href="https://github.com/kestermckinney/ScheduleIO/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/kestermckinney/ScheduleIO?style=for-the-badge"></a>
+  <a href="https://github.com/kestermckinney/ScheduleIO/issues"><img alt="Open issues" src="https://img.shields.io/github/issues/kestermckinney/ScheduleIO?style=for-the-badge"></a>
+  <a href="https://github.com/kestermckinney/ScheduleIO/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/kestermckinney/ScheduleIO?style=for-the-badge"></a>
+</p>
 
-The `.mpp` format is undocumented; ScheduleIO decodes it directly — the OLE2 compound-document container,
-the per-entity record streams, and the field maps that tie them together — and exposes the result as
-a plain, copyable object model (`schedule::Project` and its child types).
+**ScheduleIO** is a cross-platform C++17/Qt library for applications that need to read, create,
+edit, schedule, or convert Microsoft Project plans. It decodes `.mpp` files directly, writes native
+MPP14 or Microsoft Project-compatible MSPDI XML, and does not require Microsoft Project to be
+installed.
+
+<div class="home-actions">
+  <a class="primary" href="GettingStarted/Building/">Build the library</a>
+  <a href="GettingStarted/BasicUsage/">Read your first project</a>
+  <a href="DataModel/Overview/">Explore the data model</a>
+</div>
+
+The `.mpp` format is undocumented. ScheduleIO decodes the OLE2 compound-document container,
+per-entity record streams, and field maps, then exposes the result as a plain, copyable object model
+rooted at `schedule::Project`.
 
 [`MppIO`](API/MppIO.md) reads MPP12/MPP14 and writes native MPP14. [`XmlIO`](API/XmlIO.md) reads and
 writes Microsoft Project compatible XML over the same model, so format conversion requires no
@@ -43,6 +57,20 @@ mapping. See [XML Interchange](GettingStarted/XmlInterchange.md).
   compared, snapshotted, and round-tripped.
 * **Dynamically loadable** — ships as a shared library with a C factory entry point, so a host
   application can load it at run time with `QLibrary` / `dlopen` / `LoadLibrary`.
+* **Scheduling-aware** — includes working calendars, dependency passes, critical path, work/units,
+  progress updating, cost reconciliation, contours, and resource leveling.
+
+## Build in two commands
+
+With Qt and CMake available:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSCHEDULEIO_BUILD_TESTS=OFF
+cmake --build build --config Release --parallel
+```
+
+The [complete build guide](GettingStarted/Building.md) covers prerequisites and commands for Linux,
+macOS, Windows, Qt Creator, test builds, CMake consumer integration, and shared-library deployment.
 
 ## Where to go next
 
@@ -67,3 +95,9 @@ limited to ScheduleIO's legacy internal scaffold. The writer regenerates modeled
 supported view formatting from a stock MPP14 template; arbitrary unmodeled source records are not
 preserved. See [Field Coverage](Reference/FieldCoverage.md) before using a read/edit/write cycle on a
 file whose unsupported content must survive.
+
+## Project activity and contributions
+
+ScheduleIO is developed in public. Use the [issue tracker](https://github.com/kestermckinney/ScheduleIO/issues)
+for reproducible bugs and focused feature requests. Compatibility fixtures, tests, documentation,
+and targeted pull requests are welcome; read the [contributing guide](Contributing.md) first.

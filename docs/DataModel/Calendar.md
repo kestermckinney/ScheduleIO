@@ -73,6 +73,17 @@ for (int d = 0; d < cal.workingTimes.size(); ++d)
 | `name` | `QString` | Exception name (e.g. *Company Holiday*). |
 | `working` | `bool` | `true` if the days are working with `workingTimes`; `false` for a day off. |
 | `workingTimes` | `QList<schedule::TimeRange>` | The special working periods when `working` is `true`. |
+| `recurrence` | `CalendarException::Recurrence` | `None`, `Daily`, `Weekly`, `MonthlyByDate`, `MonthlyByPosition`, `YearlyByDate`, or `YearlyByPosition`. |
+| `interval` | `int` | Repeat interval, normally `1`; for example every 2 weeks. |
+| `weekDayMask` | `quint8` | Monday bit 0 through Sunday bit 6 for weekly/positional rules. |
+| `dayOfMonth` | `int` | Calendar day for monthly/yearly date rules. |
+| `month` | `int` | Month `1`–`12` for yearly rules. |
+| `weekPosition` | `int` | `1` first, `2` second, `3` third, `4` fourth, `5` last. |
+| `occurrences` | `int` | Maximum repeats; `0` means the range is bounded only by `toDate`. |
+
+`fromDate` and `toDate` bound recurrence evaluation. For non-recurring exceptions they are simply the
+first and last affected dates. A working exception supplies one or more valid, ordered time ranges;
+a non-working exception normally leaves `workingTimes` empty.
 
 ## Notes
 
@@ -83,3 +94,6 @@ for (int d = 0; d < cal.workingTimes.size(); ++d)
   calendars with UIDs 1, 2, and 3.
 * `WorkCalendar(project, uid)` resolves base-calendar inheritance and exceptions into query methods
   such as `nextWorkStart()`, `addWork()`, and `workBetween()`.
+* `materializeResourceCalendars(project)` gives direct-to-base resources a derived resource calendar
+  before native MPP serialization. `collapseResourceCalendarPassThroughs(project)` removes safe,
+  uncustomized pass-through calendars for callers that prefer direct base references.

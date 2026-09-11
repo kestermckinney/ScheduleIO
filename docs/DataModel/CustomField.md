@@ -21,6 +21,9 @@ Rather than ~150 explicit members, MppIO returns only the slots that are actuall
 | `fieldId` | `int` | The full Microsoft field id (entity high word \| field index). Equals the `<FieldID>` in a Microsoft Project XML export. |
 | `name` | `QString` | Human label, e.g. `"Text1"`, `"Cost2"`, `"Outline Code1"`. |
 | `value` | `QVariant` | The decoded value in its natural Qt type. |
+| `formula` | `QString` | Formula expression, such as `[Cost] / [Duration]`; usually populated on a project-level definition. |
+| `lookupValues` | `QStringList` | Allowed values for a lookup-backed field. |
+| `graphicalIndicators` | `QList<IndicatorRule>` | Ordered comparison/value/icon rules. |
 
 ## Value types
 
@@ -34,6 +37,22 @@ The `value` holds the natural Qt type for each kind of slot:
 | `Date*`, `Start*`, `Finish*` | `QDateTime` | UTC. |
 | `Duration*` | `qint64` | Milliseconds. |
 | `Flag*` | `bool` | |
+
+## schedule::CustomField::IndicatorRule
+
+| Member | Type | Meaning |
+| :--- | :--- | :--- |
+| `comparison` | `QString` | Comparison operator: `eq`, `ne`, `lt`, `le`, `gt`, `ge`, or `contains`. |
+| `value` | `QVariant` | Right-hand value compared with the field value. |
+| `indicator` | `QString` | Symbolic icon name used by the consuming UI/report. |
+
+`Project::customFieldDefinitions` carries definition metadata. A task/resource/assignment
+`customFields` list carries the field's value and may also carry metadata after import. Match by
+`fieldId` when possible; names are useful for display but can be localized or renamed.
+
+`CustomFieldLogic::evaluate()` supports arithmetic, comparisons, field references, `IIf`, and
+`Round` over task values. `recalculate()` evaluates project definitions for tasks,
+`acceptsLookupValue()` validates lookup membership, and `indicatorFor()` selects a graphical rule.
 
 ## Example
 

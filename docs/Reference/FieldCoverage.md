@@ -79,7 +79,7 @@ matching `.mpp`. See [XML Interchange](../GettingStarted/XmlInterchange.md).
 | Start, finish, stop, resume, assignment/leveling delay | read / MPP14 write |
 | Actual and remaining work | read / MPP14 write |
 | Time-phased regular actual, remaining/planned, and actual overtime work, including material quantities | read / MPP14 write |
-| Assignment cost-rate table, material rate units, and work contour 0â€“8 | read / MPP14 write |
+| Assignment cost-rate table, material rate units, and work contour 0–8 | read / MPP14 write |
 | Overtime work/cost aggregates | read / MPP14 write |
 | Time-phased cost and baseline values | not yet |
 | Cost, Actual/Remaining cost, Cost variance | read |

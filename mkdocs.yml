@@ -1,8 +1,16 @@
 site_name: ScheduleIO Documentation
+site_description: Cross-platform Qt/C++ library for reading, editing, scheduling, and writing Microsoft Project files.
+site_url: https://kestermckinney.github.io/ScheduleIO/
+repo_url: https://github.com/kestermckinney/ScheduleIO
+repo_name: kestermckinney/ScheduleIO
+edit_uri: edit/main/docs/
 
 theme:
   name: readthedocs
   highlightjs: true
+
+extra_css:
+  - stylesheets/extra.css
 
 nav:
   - 'Home': index.md
@@ -16,6 +24,7 @@ nav:
     - 'MppIO Class': API/MppIO.md
     - 'XmlIO Class': API/XmlIO.md
     - 'Scheduling Utilities': API/Scheduling.md
+    - 'Project Reconciliation': API/Reconciliation.md
   - 'Data Model':
     - 'Overview': DataModel/Overview.md
     - 'Project': DataModel/Project.md
@@ -25,11 +34,17 @@ nav:
     - 'Relation': DataModel/Relation.md
     - 'Calendar': DataModel/Calendar.md
     - 'Baseline': DataModel/Baseline.md
+    - 'Availability': DataModel/Availability.md
     - 'CustomField': DataModel/CustomField.md
     - 'CostRate': DataModel/CostRate.md
+    - 'Time-phased Values': DataModel/TimephasedValue.md
+    - 'Duration and Units': DataModel/Duration.md
+    - 'View and Timeline Formatting': DataModel/Formatting.md
+    - 'Scheduling Helper Types': DataModel/SchedulingTypes.md
   - 'Reference':
     - 'Field Coverage': Reference/FieldCoverage.md
     - 'MPP File Format and Storage': Reference/FileFormat.md
+  - 'Contributing': Contributing.md
 
 markdown_extensions:
   - tables

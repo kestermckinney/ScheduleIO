@@ -11,9 +11,14 @@ All utilities operate on `schedule::Project` values and do not perform file I/O.
 | Parse/display a duration or lag | `schedule::Duration` |
 | Walk working time and calendar exceptions | `schedule::WorkCalendar` |
 | Recalculate Work = Duration x Units | `schedule::TaskScheduling` |
+| Resolve task/resource calendar intersections | `schedule::SchedulingCalendar` |
 | Move tasks from dependency/constraint changes | `schedule::Scheduler::reschedule()` |
 | Calculate late dates, slack, and critical flags | `schedule::Scheduler::computeSlack()` |
 | Find or remove resource conflicts | `schedule::ResourceLeveling` |
+| Apply a predefined assignment work contour | `schedule::WorkContouring` |
+| Recalculate material assignment costs | `schedule::MaterialCosting` |
+| Normalize time-phased values and rollups | `schedule::ProjectReconciliation` |
+| Record or move progress around a status date | `schedule::ProgressUpdating` |
 
 ## Duration
 
@@ -61,6 +66,18 @@ schedule::TaskScheduling::syncTask(project, taskUid);
 The implementation honors fixed units, fixed duration, fixed work, and effort-driven assignment
 changes. Resource calendars are not yet consulted by this scheduling triangle; it uses the task's
 calendar or the project calendar.
+
+## SchedulingCalendar
+
+Include `src/model/schedulingcalendar.h`. These free functions centralize the calendar-selection rule
+used by scheduling:
+
+* `taskBase(project, task)` resolves the task calendar, falling back to the project calendar.
+* `assignment(project, task, assignment)` intersects task/project time with the assigned work
+  resource's calendar. Material/cost resources do not constrain working time, and
+  `ignoreResourceCalendar` selects only the task base.
+* `nextStart()`, `finish()`, and `startForFinish()` calculate task-level dates across its assignment
+  calendars.
 
 ## Scheduler
 
@@ -110,13 +127,67 @@ schedule::ResourceLeveling::level(project, options);
 schedule::ResourceLeveling::clearLeveling(project);
 ```
 
+The nested `Options`, `Overallocation`, and cached `WorkProfile` structures are documented under
+[Scheduling Helper Types](../DataModel/SchedulingTypes.md).
+
+## WorkContouring
+
+Include `src/model/workcontouring.h`. `apply()` sets an assignment to Flat, Back Loaded, Front
+Loaded, Double Peak, Early Peak, Late Peak, Bell, Turtle, or custom Contoured work. A predefined
+contour is expanded into ten working-time segments while preserving actual work.
+
+```cpp
+schedule::WorkContouring::apply(
+    project, assignmentUid, schedule::WorkContouring::FrontLoaded);
+```
+
+`regenerate()` rebuilds an existing predefined contour after dates or work change.
+`segmentPercentages()` exposes the ten-part preset distribution and `name()` returns its display
+name. Custom (`Contoured`) buckets are retained rather than regenerated.
+
+## MaterialCosting
+
+Include `src/model/materialcosting.h`. `recalculate()` prices material quantities using the selected
+resource cost-rate table, splits actual and remaining cost, and rolls assignment costs into tasks and
+resources. `quantityMillisForDuration()` converts a variable material rate into the duration-hour
+quantity convention used by Microsoft Project's time-phased stream.
+
+```cpp
+schedule::MaterialCosting::recalculate(project);
+```
+
+## ProjectReconciliation
+
+Include `src/model/projectreconciliation.h`. `reconcile()` treats available time-phased actual and
+remaining buckets as authoritative, normalizes assignment aggregates, applies modeled resource
+rates, and writes task/resource rollups. `taskTotals()` and `resourceTotals()` calculate a `Totals`
+value without mutation; `invariantViolations()` reports stale equations and rollups.
+
+```cpp
+schedule::ProjectReconciliation::reconcile(project);
+const QStringList issues =
+    schedule::ProjectReconciliation::invariantViolations(project);
+```
+
+See [Project Reconciliation](Reconciliation.md) for authority rules and
+[Scheduling Helper Types](../DataModel/SchedulingTypes.md) for the result fields.
+
 ## ProgressUpdating
 
-Include `src/model/progressupdating.h`. `rescheduleIncompleteWork()` implements the
-desktop `Update Project` / `pjReschedule` subset. It preserves actual dates and
-time-phased actual work, moves remaining assignment buckets after the supplied
-boundary using the applicable task/resource calendars, and recalculates successors.
-An empty task set updates the whole project; a non-empty set limits the operation.
+Include `src/model/progressupdating.h`.
+
+`updateScheduledProgress()` implements the two Microsoft Project **Update Project** progress modes:
+`ZeroOrOneHundred` marks only tasks finishing by the boundary, while `ScheduledPercent` records the
+scheduled duration/work completed through it.
+
+Direct tracking helpers are `setPercentWorkComplete()`, `setActualStart()`, `setActualFinish()`,
+`setActualDuration()`, `setRemainingDuration()`, `setActualWork()`, and `setRemainingWork()`. They
+keep paired actual/remaining values and percentage fields canonical and distribute work over work
+resources without altering material/cost assignments.
+
+`rescheduleIncompleteWork()` preserves actual dates and time-phased actual work, moves remaining
+assignment buckets after the supplied boundary using applicable calendars, and recalculates
+successors. An empty task set updates the whole project; a non-empty set limits the operation.
 Summary, manual, inactive, and completed tasks are protected.
 
 ```cpp
@@ -129,9 +200,11 @@ const int moved = schedule::ProgressUpdating::rescheduleIncompleteWork(
 
 For a change that affects schedule logic:
 
-1. Modify the model directly or through `TaskScheduling`.
+1. Modify the model directly or through `TaskScheduling`, `ProgressUpdating`, or `WorkContouring`.
 2. Reject a new relation if `Scheduler::reachable()` shows it would form a cycle.
 3. Call `Scheduler::reschedule()`.
 4. Optionally call `ResourceLeveling::level()`.
-5. Call `Scheduler::computeSlack()`.
-6. Put the value into `MppIO` or `XmlIO` and save.
+5. Recalculate material cost and call `ProjectReconciliation::reconcile()` when work/cost inputs
+   changed.
+6. Call `Scheduler::computeSlack()`.
+7. Put the value into `MppIO` or `XmlIO` and save.

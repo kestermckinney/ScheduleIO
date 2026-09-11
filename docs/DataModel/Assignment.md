@@ -13,6 +13,9 @@ Links a resource to a task. Value type; copyable and equality-comparable.
 | `uniqueId` | `int` | The assignment's own unique id. |
 | `taskUniqueId` | `int` | Unique id of the assigned [`schedule::Task`](Task.md). |
 | `resourceUniqueId` | `int` | Unique id of the assigned [`schedule::Resource`](Resource.md). |
+| `budget` | `bool` | Project-summary budget assignment. |
+| `budgetCost` | `double` | Budget cost carried by the assignment. |
+| `budgetWorkMillis` | `qint64` | Budget work carried by the assignment, in milliseconds. |
 | `units` | `double` | Assigned units, as a ratio. `1.0` == 100%. |
 | `workMillis` | `qint64` | Assigned work, in milliseconds. |
 | `start`, `finish` | `QDateTime` | Scheduled assignment span; invalid means use the task span. |
@@ -34,6 +37,19 @@ Links a resource to a task. Value type; copyable and equality-comparable.
 | `costVariance` | `double` | Cost minus baseline cost. |
 | `baselines` | `QList<schedule::Baseline>` | Saved baselines (cost, work, start, finish; see [`schedule::Baseline`](Baseline.md)). |
 | `customFields` | `QList<schedule::CustomField>` | Populated custom/extended fields (see [`schedule::CustomField`](CustomField.md)). |
+
+## Time-phased helper methods
+
+The interval helpers use half-open ranges `[from, to)`. Setters replace the selected interval while
+preserving bucket portions outside it; getters return the prorated overlap:
+
+| Method family | Value |
+| :--- | :--- |
+| `setTimephasedWorkInPeriod()` / `timephasedWorkInPeriod()` | Work milliseconds for a bucket type. |
+| `setTimephasedCostInPeriod()` / `timephasedCostInPeriod()` | Currency amount for a type and baseline number. |
+| `setTimephasedMaterialInPeriod()` / `timephasedMaterialInPeriod()` | Material quantity, hiding MPP's duration-hour storage convention. |
+
+See [TimephasedValue](TimephasedValue.md) for bucket fields and type codes.
 
 ## Resolving the links
 
@@ -75,3 +91,6 @@ for (const schedule::Assignment &a : project.assignments) {
   authoritative remaining-work buckets. Custom contour buckets are retained exactly. Native MPP14
   stores predefined identity in the remaining-work stream header and the custom state in assignment
   metadata.
+* Assignment `start` and `finish` are normally inside the linked task span. Invalid values mean use
+  the task dates. The scheduling invariant is assignment start = task start + assignment delay +
+  leveling delay, measured on the applicable working calendar.

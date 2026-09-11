@@ -1,0 +1,82 @@
+:root {
+  --scheduleio-navy: #11263d;
+  --scheduleio-blue: #1769aa;
+  --scheduleio-green: #2f9e73;
+  --scheduleio-line: #d8e2eb;
+}
+
+.wy-side-nav-search,
+.wy-nav-top {
+  background: var(--scheduleio-navy);
+}
+
+.wy-menu-vertical a:active {
+  background: var(--scheduleio-blue);
+}
+
+.rst-content h1,
+.rst-content h2,
+.rst-content h3 {
+  color: var(--scheduleio-navy);
+}
+
+.rst-content a {
+  color: var(--scheduleio-blue);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem;
+  margin: .7rem 0 1.4rem;
+}
+
+.badges img {
+  height: 28px;
+}
+
+.home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .7rem;
+  margin: 1.4rem 0 2rem;
+}
+
+.home-actions a {
+  display: inline-block;
+  padding: .65rem .9rem;
+  border: 1px solid var(--scheduleio-line);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--scheduleio-navy);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.home-actions a.primary {
+  border-color: var(--scheduleio-blue);
+  background: var(--scheduleio-blue);
+  color: #fff;
+}
+
+.home-actions a:hover,
+.home-actions a:focus-visible {
+  border-color: var(--scheduleio-green);
+  box-shadow: 0 0 0 2px rgba(47, 158, 115, .18);
+}
+
+.rst-content table.docutils td,
+.rst-content table.docutils th {
+  white-space: normal;
+  vertical-align: top;
+}
+
+@media (max-width: 520px) {
+  .home-actions {
+    display: grid;
+  }
+
+  .home-actions a {
+    text-align: center;
+  }
+}

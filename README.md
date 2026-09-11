@@ -3,11 +3,35 @@
 
 # ScheduleIO
 
-A cross-platform (Windows / macOS / Linux) Qt 6/C++17 library for Microsoft Project schedules.
-`MppIO` reads MPP12/MPP14 files and writes native template-based MPP14 files. `XmlIO` reads and
-writes Microsoft Project compatible MSPDI XML over the same `schedule::Project` value model. The
-library also provides working-calendar, dependency scheduling, critical-path, work/units, and
-resource-leveling utilities. Microsoft Project does not need to be installed.
+[![Documentation](https://img.shields.io/badge/Documentation-GitHub%20Pages-2ea44f?style=for-the-badge)](https://kestermckinney.github.io/ScheduleIO/)
+[![Latest release](https://img.shields.io/github/v/release/kestermckinney/ScheduleIO?style=for-the-badge)](https://github.com/kestermckinney/ScheduleIO/releases)
+[![Stars](https://img.shields.io/github/stars/kestermckinney/ScheduleIO?style=for-the-badge)](https://github.com/kestermckinney/ScheduleIO/stargazers)
+[![Open issues](https://img.shields.io/github/issues/kestermckinney/ScheduleIO?style=for-the-badge)](https://github.com/kestermckinney/ScheduleIO/issues)
+[![Last commit](https://img.shields.io/github/last-commit/kestermckinney/ScheduleIO?style=for-the-badge)](https://github.com/kestermckinney/ScheduleIO/commits/main)
+
+ScheduleIO is a cross-platform Qt/C++ library for applications that need to read, create, edit,
+schedule, or convert Microsoft Project plans without automating an installed copy of Microsoft
+Project. `MppIO` handles MPP12/MPP14 binary files, `XmlIO` handles Microsoft Project-compatible
+MSPDI XML, and both use the same copyable `schedule::Project` value model.
+
+## Explore
+
+- [Documentation and build guide](https://kestermckinney.github.io/ScheduleIO/)
+- [Data model reference](https://kestermckinney.github.io/ScheduleIO/DataModel/Overview/)
+- [Field coverage and preservation limits](https://kestermckinney.github.io/ScheduleIO/Reference/FieldCoverage/)
+- [Report a bug or request a feature](https://github.com/kestermckinney/ScheduleIO/issues/new)
+- [Contributing guide](CONTRIBUTING.md)
+
+## What ScheduleIO Does
+
+- Reads MPP12 and MPP14 compound documents directly on Windows, macOS, and Linux.
+- Writes native, template-based MPP14 files and reads/writes MSPDI XML.
+- Exposes tasks, resources, assignments, dependencies, calendars, baselines, costs, custom fields,
+  time-phased data, project options, and view formatting as plain Qt value types.
+- Provides working-calendar arithmetic, dependency scheduling, critical-path analysis,
+  work/duration/units recalculation, progress updates, cost reconciliation, and resource leveling.
+- Supports normal CMake linking and optional run-time loading through stable C factory functions.
+- Requires no Microsoft Project installation for normal library use.
 
 ## Status
 
@@ -28,22 +52,45 @@ MPP12 is readable; MPP12 output remains a ScheduleIO-only legacy scaffold. A bin
 the embedded MPP14 template rather than patching the source file in place, so unsupported source-only
 content is not guaranteed to survive. See the field-coverage and format/storage references below.
 
-## Build
+## Quick Build
 
 ```sh
-cmake -S . -B build -DSCHEDULEIO_BUILD_TESTS=ON
-cmake --build build
-ctest --test-dir build --output-on-failure
+git clone https://github.com/kestermckinney/ScheduleIO.git
+cd ScheduleIO
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSCHEDULEIO_BUILD_TESTS=OFF
+cmake --build build --config Release --parallel
 ```
 
-Requires Qt 6 (Core + Test). On Windows, configure with the Qt/MSVC kit (e.g. via
-Qt Creator) or pass `-DCMAKE_PREFIX_PATH=<Qt>/<ver>/msvc2022_64`.
+The library requires CMake 3.16+, a C++17 compiler, and Qt 6 Core. Qt 5 is accepted as a fallback.
+Tests additionally require Qt Test. Windows users normally provide the Qt kit with
+`-DCMAKE_PREFIX_PATH=C:/Qt/<version>/msvc2022_64` or configure the project in Qt Creator.
+
+See the [complete build guide](https://kestermckinney.github.io/ScheduleIO/GettingStarted/Building/)
+for Linux, macOS, Windows, tests, consumer integration, output locations, and run-time deployment.
 
 ## Testing strategy
 
 Run the complete suite with `ctest --test-dir build --output-on-failure`. Real `.mpp` + `.xml`
 fixture pairs under `tests/fixtures/` support cross-format oracle tests; generated fixtures cover
 focused formatting and scheduling cases.
+
+## Data Model
+
+One `schedule::Project` owns flat lists of tasks, resources, assignments, calendars, and relations.
+Integer unique IDs connect those lists; nested value types hold baselines, rates, availability,
+time-phased buckets, custom fields, and presentation settings. Dates use Qt date/time types,
+duration and work values use milliseconds, percentages and units use ratios (`1.0 == 100%`), and
+currency values are stored as ordinary amounts in the project's currency.
+
+The [data model overview](https://kestermckinney.github.io/ScheduleIO/DataModel/Overview/) explains
+ownership, links, units, sentinels, equality, persistence, and every public model structure.
+
+## Activity And Request Snapshot
+
+[![Open bugs](https://img.shields.io/github/issues-search?query=repo%3Akestermckinney%2FScheduleIO+is%3Aissue+is%3Aopen+label%3Abug&label=open%20bugs&style=flat-square)](https://github.com/kestermckinney/ScheduleIO/issues?q=is%3Aissue%20is%3Aopen%20label%3Abug)
+[![Open enhancements](https://img.shields.io/github/issues-search?query=repo%3Akestermckinney%2FScheduleIO+is%3Aissue+is%3Aopen+label%3Aenhancement&label=open%20enhancements&style=flat-square)](https://github.com/kestermckinney/ScheduleIO/issues?q=is%3Aissue%20is%3Aopen%20label%3Aenhancement)
+
+These badges update from GitHub and give visitors a quick view of project activity and open work.
 
 ## Documentation
 
@@ -58,8 +105,12 @@ pip install mkdocs
 mkdocs serve          # then open http://127.0.0.1:8000/
 ```
 
-Or build the static site with `mkdocs build` (output in `site/`). Start at `docs/index.md`; the data
-structures are under **Data Model**, the I/O and scheduling APIs under **API Reference**, and complete
-examples under **Getting Started**. The detailed binary layout, compound storage behavior, ownership,
-and writer pipeline are under **Reference → MPP File Format and Storage**; preservation details are
-under **Reference → Field Coverage**.
+Or build the static site with `mkdocs build --strict` (output in `site/`). GitHub Actions publishes
+that same site to GitHub Pages after changes land on `main`.
+
+## Contributing
+
+Bug reports, compatibility fixtures, focused code changes, tests, and documentation improvements are
+welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. When reporting a
+format problem, include the ScheduleIO revision, platform, file format/version, exact operation, and
+a minimized non-sensitive fixture when possible.

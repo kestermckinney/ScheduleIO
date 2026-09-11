@@ -1,69 +1,132 @@
 # Data Model Overview
 
-When you read a file, MppIO fills in a single [`schedule::Project`](Project.md) object. Everything else
-hangs off it as `QList`s of value types.
+Every successful `MppIO::open()` or `XmlIO::open()` produces one `schedule::Project`. The project
+owns all model data by value; there are no `QObject` parents, owning pointers, or hidden live file
+handles behind its child collections.
 
-```
+```text
 schedule::Project
-├── metadata, dates, default calendar, format version
-├── tasks        : QList<schedule::Task>
-├── resources    : QList<schedule::Resource>
-├── assignments  : QList<schedule::Assignment>
-├── relations    : QList<schedule::Relation>
-├── calendars    : QList<schedule::Calendar>
-└── view styles  : Gantt, Resource Usage, Team Planner, Calendar
+├── tasks : QList<Task>
+│   ├── TaskSegment, EarnedValue, Baseline, CustomField
+│   └── TextStyle row/cell formatting
+├── resources : QList<Resource>
+│   └── AvailabilityPeriod, Baseline, CostRate, CustomField
+├── assignments : QList<Assignment>
+│   └── Baseline, CustomField, TimephasedValue
+├── relations : QList<Relation>
+├── calendars : QList<Calendar>
+│   └── TimeRange, CalendarException
+├── customFieldDefinitions : QList<CustomField>
+└── ViewStyles, UsageViewSettings, TimelineViewSettings
 ```
 
-## Design principles
+## Value semantics and ownership
 
-**Plain value types.** Every model class — `schedule::Project`, `schedule::Task`, `schedule::Resource`,
-`schedule::Assignment`, `schedule::Relation`, `schedule::Calendar` — is a copyable struct-like type with public data
-members and an `operator==`. There are no getters/setters, no ownership semantics, and no Qt object
-parent/child relationships. You can copy them freely, store them in containers, and compare whole
-models for equality.
+The model classes are struct-like, copyable Qt value types with public members. Most define
+`operator==`, making snapshots and semantic round-trip tests straightforward:
 
-**Linked by unique id.** The collections are flat lists, not a nested tree. Cross-references use
-integer **unique ids**:
+```cpp
+schedule::Project before = io.project();
+schedule::Project edited = before;
+edited.title = QStringLiteral("Revised plan");
+io.setProject(edited);
+```
 
-| From | Field | Refers to |
+`MppIO::project()` and `XmlIO::project()` return a reference owned by the I/O object. That reference
+remains valid only until the object is destroyed, opens another document, or receives
+`setProject()`. Copy the project when it must outlive or be edited independently of the facade.
+
+## Identity and links
+
+Entity collections are flat. Stable integer unique IDs form the links:
+
+| Source | Member | Target |
 | :--- | :--- | :--- |
-| `schedule::Assignment` | `taskUniqueId` | a `schedule::Task.uniqueId` |
-| `schedule::Assignment` | `resourceUniqueId` | a `schedule::Resource.uniqueId` |
-| `schedule::Relation` | `predecessorTaskUid`, `successorTaskUid` | `schedule::Task.uniqueId` |
-| `schedule::Calendar` | `baseCalendarUniqueId` | another `schedule::Calendar.uniqueId` |
-| `schedule::Project` | `calendarUniqueId` | the project calendar |
-| `schedule::Task` | `calendarUniqueId` | an optional task calendar |
-| `schedule::Resource` | `calendarUniqueId` | an optional resource calendar |
+| `Project` | `calendarUniqueId` | `Calendar::uniqueId` |
+| `Task` | `calendarUniqueId` | `Calendar::uniqueId` |
+| `Resource` | `calendarUniqueId` | usually a derived `Calendar::uniqueId` |
+| `Assignment` | `taskUniqueId` | `Task::uniqueId` |
+| `Assignment` | `resourceUniqueId` | `Resource::uniqueId` |
+| `Relation` | `predecessorTaskUid` | predecessor `Task::uniqueId` |
+| `Relation` | `successorTaskUid` | successor `Task::uniqueId` |
+| `Calendar` | `baseCalendarUniqueId` | base `Calendar::uniqueId` |
+| `TimelineItem` | `taskUid` | `Task::uniqueId` |
+| `TimelineItem` | `barId` | `TimelineBar::id` |
 
-Build a `QHash<int, …>` keyed on `uniqueId` when you need fast lookups (see
-[Basic Usage](../GettingStarted/BasicUsage.md)).
+An entity's `id` is its current sheet/display position; its `uniqueId` is the stable key. Do not use
+display IDs to join collections. A `QHash<int, const T *>` is convenient for repeated lookups, but
+remember that pointers into a Qt container may be invalidated when that container is modified.
 
-**The outline hierarchy** is expressed through each task's `outlineLevel` and `wbs`, in task `id`
-order — there is no parent pointer. A task is a `summary` when the following task (by `id`) is one
-outline level deeper.
+Task hierarchy is also flat. `outlineLevel`, `wbs`, and task `id` order describe the outline; there
+is no parent pointer. Summary rows roll up their following descendants.
 
-## Common Qt types used
+## Units and conventions
 
-| Type | Meaning |
+| Representation | Meaning |
 | :--- | :--- |
-| `QString` | text fields (names, WBS, title, author) |
-| `QDateTime` | dates and times, in **UTC**; invalid means "no date" |
-| `qint64` | durations and work, in **milliseconds** |
-| `double` | ratios such as assignment units and resource max units (`1.0` == 100%) |
-| `int` | unique ids, display ids, outline levels, enum-like codes |
+| `QDateTime` | Date and time. File codecs normalize schedule timestamps to UTC; an invalid value means not set. |
+| `QDate` / `QTime` | Calendar-only date or time-of-day values. |
+| `qint64` ending in `Millis` | Duration or work in milliseconds. Whether time is working or elapsed depends on its field/unit. |
+| `double` units/percent fields | Ratio: `1.0` means 100%, `0.5` means 50%. |
+| `double` cost/rate fields | Ordinary currency amount, not integer cents. Currency metadata lives on `Project`. |
+| `qint32` colors | `0xRRGGBB`; `TextStyle::kAutomatic` (`-1`) means inherit/theme automatic. |
+| `int` unit/type fields | Microsoft Project-compatible numeric codes documented on the owning type. |
+| raw notes | RTF source, not plain text. Empty means no notes. |
 
-## Editing the model
+Common sentinels are `-1` for an absent UID/reference, an invalid Qt date/time for no date, `0` for
+an unset numeric value, and an empty collection when the source carries no rows. Read each member's
+reference because zero can also be a valid Microsoft Project enum value.
 
-The I/O classes do not retain pointers into these lists. Copy a project, edit its public fields, and
-pass the value back with `setProject()`. Use `TaskScheduling`, `Scheduler`, `ResourceLeveling`, and
-`WorkCalendar` when an edit needs Microsoft Project-like recalculation. See
-[Editing and Scheduling](../GettingStarted/EditingAndScheduling.md).
+## Persisted, derived, transient, and opaque values
 
-## Per-type reference
+The model contains four kinds of state:
 
-* [schedule::Project](Project.md)
-* [schedule::Task](Task.md)
-* [schedule::Resource](Resource.md)
-* [schedule::Assignment](Assignment.md)
-* [schedule::Relation](Relation.md)
-* [schedule::Calendar](Calendar.md)
+* **Persisted semantic fields** are decoded to named members and written when supported by the chosen
+  output format.
+* **Derived fields** include WBS/summary information, rollups, slack, and some costs. Scheduling or
+  reconciliation utilities refresh them after related edits.
+* **Transient bookkeeping** such as `Task::levelingAnchor` and `modified` flags controls an edit or
+  writer pass and is not a document field.
+* **Opaque preservation payloads** such as `Project::mppSourceTemplate`, `mppFontBases`,
+  `mppBarExceptions`, and `TimelineViewSettings::rawXml` preserve native data that is only partly
+  modeled. Do not clear them during an edit unless discarding source presentation state is intended.
+
+The same structure does not imply identical MPP and MSPDI coverage. Consult
+[Field Coverage](../Reference/FieldCoverage.md) before relying on a read/edit/write cycle.
+
+## Equality
+
+Equality is semantic rather than a byte-for-byte comparison of an input file. Opaque preservation
+buffers, writer bookkeeping, and selected native font-table details are intentionally excluded where
+they do not represent a modeled schedule value. `Project::operator==` is useful for model round trips;
+it does not prove binary identity.
+
+## Editing and recalculation
+
+Changing a public member changes only that member. Use the matching utility when dependent state must
+be updated:
+
+| Edit | Follow-up |
+| :--- | :--- |
+| Work, duration, assignment units/resources | `TaskScheduling` |
+| Dependencies, constraints, start/finish anchors | `Scheduler::reschedule()` |
+| Late dates, slack, critical flags | `Scheduler::computeSlack()` |
+| Time-phased work/cost, aggregate rollups | `ProjectReconciliation::reconcile()` |
+| Resource conflicts | `ResourceLeveling::level()` |
+| Status-date progress | `ProgressUpdating` |
+| Material quantities/rates | `MaterialCosting::recalculate()` |
+| Predefined work contour | `WorkContouring::apply()` |
+
+See [Editing and Scheduling](../GettingStarted/EditingAndScheduling.md) and the
+[Scheduling API](../API/Scheduling.md) for the intended operation order.
+
+## Complete type reference
+
+* Core entities: [Project](Project.md), [Task](Task.md), [Resource](Resource.md),
+  [Assignment](Assignment.md), [Relation](Relation.md), [Calendar](Calendar.md)
+* Supporting values: [Baseline](Baseline.md), [AvailabilityPeriod](Availability.md),
+  [CostRate](CostRate.md), [CustomField](CustomField.md),
+  [TimephasedValue](TimephasedValue.md)
+* Shared conventions: [Duration and Units](Duration.md)
+* Presentation state: [View and Timeline Formatting](Formatting.md)
+* Calculation return/configuration types: [Scheduling Helper Types](SchedulingTypes.md)

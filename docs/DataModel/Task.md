@@ -34,13 +34,16 @@ A single task (a row in the Gantt chart). Value type; copyable and equality-comp
 | `active` | `bool` | `false` for an inactive task excluded from scheduling and rollups. |
 | `manual` | `bool` | Whether the task is manually scheduled. |
 | `levelingDelayMillis` | `qint64` | Working-time delay added by resource leveling. |
+| `levelingAnchor` | `QDateTime` | Transient un-leveled anchor used to avoid compounding delays; not serialized. |
 | `effortDriven` | `bool` | Keep total work stable when resources are added or removed. |
 | `taskType` | `int` | `0` fixed units, `1` fixed duration, `2` fixed work. |
 | `priority` | `int` | Leveling priority from 0 to 1000. |
 | `deadline` | `QDateTime` | Deadline, or invalid when unset. |
 | `calendarUniqueId` | `int` | Task calendar UID, or `-1` to use the project calendar. |
 | `ignoreResourceCalendar` | `bool` | When a task calendar is set, schedule without intersecting assigned work-resource calendars. |
-| `lateStart`, `lateFinish` | `QDateTime` | Backward-pass dates computed by `Scheduler::computeSlack()`. |
+| `earlyStart`, `earlyFinish` | `QDateTime` | Forward-pass dates for critical-path analysis. |
+| `lateStart`, `lateFinish` | `QDateTime` | Latest dates computed by `Scheduler::computeSlack()`. |
+| `startSlackMillis`, `finishSlackMillis` | `qint64` | Start- and finish-side working-time margins. |
 | `totalSlackMillis`, `freeSlackMillis` | `qint64` | Computed slack in working milliseconds. |
 | `critical` | `bool` | Whether total slack is zero or negative. |
 | `actualStart`, `actualFinish` | `QDateTime` | Recorded actual dates. |
@@ -48,6 +51,7 @@ A single task (a row in the Gantt chart). Value type; copyable and equality-comp
 | `evm` | `schedule::EarnedValue` | Stored PV, EV, AC, CV, SV, CPI, SPI, EAC, and TCPI values. |
 | `cost` | `double` | Total cost, in the project's currency unit. |
 | `fixedCost` | `double` | Fixed cost (cost not derived from resource work). |
+| `fixedCostAccrual` | `int` | Booking mode: `1` Start, `2` End, `3` Prorated. |
 | `actualCost` | `double` | Cost incurred so far. |
 | `remainingCost` | `double` | Cost still to be incurred. |
 | `costVariance` | `double` | Cost minus baseline cost. |
@@ -58,6 +62,37 @@ A single task (a row in the Gantt chart). Value type; copyable and equality-comp
 | `rowFormat` | `schedule::TextStyle` | Per-row font, emphasis, foreground/background, and pattern. |
 | `barColor` | `qint32` | Per-task bar color or `TextStyle::kAutomatic` (binary MPP persistence is limited). |
 | `cellFormats` | `QHash<QString, schedule::TextStyle>` | Per-column text/background overrides. |
+
+## schedule::TaskSegment
+
+Each entry in `segments` is one contiguous portion of a split task:
+
+| Member | Type | Meaning |
+| :--- | :--- | :--- |
+| `start` | `QDateTime` | Inclusive start of the working portion. |
+| `finish` | `QDateTime` | End of the working portion. |
+
+An unsplit task uses an empty list. A split task normally has two or more ordered, non-overlapping
+segments. The task's own `start`/`finish` span the complete set, including gaps.
+
+## schedule::EarnedValue
+
+`evm` holds Microsoft Project's stored earned-value metrics. All values are `double`; cost-like
+values use the project's currency and indices are ratios.
+
+| Member | Meaning | Formula/alias |
+| :--- | :--- | :--- |
+| `pv` | Planned Value | BCWS |
+| `ev` | Earned Value | BCWP |
+| `ac` | Actual Cost | ACWP |
+| `cv` | Cost Variance | EV - AC |
+| `sv` | Schedule Variance | EV - PV |
+| `cpi` | Cost Performance Index | EV / AC |
+| `spi` | Schedule Performance Index | EV / PV |
+| `eac` | Estimate at Completion | stored value |
+| `tcpi` | To-Complete Performance Index | stored value |
+
+BAC is Baseline 0 cost and VAC is BAC - EAC; they are derived rather than stored in `EarnedValue`.
 
 ## Notes
 
@@ -82,6 +117,7 @@ A single task (a row in the Gantt chart). Value type; copyable and equality-comp
   `{\rtf1\ansi ...}`). MppIO does not strip it to plain text; use an RTF parser if you need that.
 * **Scheduling results are explicit fields.** Call `Scheduler::reschedule()` after dependency/date
   edits and `Scheduler::computeSlack()` when late dates and critical-path values must be refreshed.
+  `levelingAnchor` is temporary resource-leveling state and should not be treated as file data.
 * **Calendar selection.** Automatic assigned work uses the task calendar (or project calendar)
   intersected with each work resource's calendar. `ignoreResourceCalendar` disables only the
   resource-calendar part.
