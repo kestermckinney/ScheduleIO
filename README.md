@@ -16,9 +16,9 @@ MSPDI XML, and both use the same copyable `schedule::Project` value model.
 
 ## Explore
 
-- [Documentation and build guide](https://kestermckinney.github.io/ScheduleIO/)
-- [Data model reference](https://kestermckinney.github.io/ScheduleIO/DataModel/Overview/)
-- [Field coverage and preservation limits](https://kestermckinney.github.io/ScheduleIO/Reference/FieldCoverage/)
+- [Documentation and build guide](docs/index.md)
+- [Data model reference](docs/DataModel/Overview.md)
+- [Field coverage and preservation limits](docs/Reference/FieldCoverage.md)
 - [Report a bug or request a feature](https://github.com/kestermckinney/ScheduleIO/issues/new)
 - [Contributing guide](CONTRIBUTING.md)
 
@@ -65,7 +65,7 @@ The library requires CMake 3.16+, a C++17 compiler, and Qt 6 Core. Qt 5 is accep
 Tests additionally require Qt Test. Windows users normally provide the Qt kit with
 `-DCMAKE_PREFIX_PATH=C:/Qt/<version>/msvc2022_64` or configure the project in Qt Creator.
 
-See the [complete build guide](https://kestermckinney.github.io/ScheduleIO/GettingStarted/Building/)
+See the [complete build guide](docs/GettingStarted/Building.md)
 for Linux, macOS, Windows, tests, consumer integration, output locations, and run-time deployment.
 
 ## Testing strategy
@@ -82,7 +82,7 @@ time-phased buckets, custom fields, and presentation settings. Dates use Qt date
 duration and work values use milliseconds, percentages and units use ratios (`1.0 == 100%`), and
 currency values are stored as ordinary amounts in the project's currency.
 
-The [data model overview](https://kestermckinney.github.io/ScheduleIO/DataModel/Overview/) explains
+The [data model overview](docs/DataModel/Overview.md) explains
 ownership, links, units, sentinels, equality, persistence, and every public model structure.
 
 ## Activity And Request Snapshot
