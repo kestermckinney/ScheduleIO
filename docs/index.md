@@ -13,9 +13,11 @@ MPP14 or Microsoft Project-compatible MSPDI XML, and does not require Microsoft 
 installed.
 
 <div class="home-actions">
-  <a class="primary" href="GettingStarted/Building/">Build the library</a>
-  <a href="GettingStarted/BasicUsage/">Read your first project</a>
-  <a href="DataModel/Overview/">Explore the data model</a>
+
+[Build the library](GettingStarted/Building.md){ .primary }
+[Read your first project](GettingStarted/BasicUsage.md)
+[Explore the data model](DataModel/Overview.md)
+
 </div>
 
 The `.mpp` format is undocumented. ScheduleIO decodes the OLE2 compound-document container,
