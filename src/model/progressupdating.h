@@ -31,6 +31,11 @@ public:
                                        UpdateAction action,
                                        const QSet<int> &taskUids = {});
 
+    // Set a leaf task's duration-based progress (the % Complete field): actual
+    // duration, Actual Start/Finish and Work-assignment actual work follow.
+    static bool setPercentComplete(Project &project, int taskUid,
+                                   double percent);
+
     // Set a leaf task's work-based progress. Actual/remaining work is
     // redistributed proportionally across Work-resource assignments while
     // Material and Cost assignments remain untouched.

@@ -435,6 +435,46 @@ bool ProgressUpdating::setRemainingWork(Project &project, int taskUid,
     return setWorkProgress(project, *task, task->actualWorkMillis, millis);
 }
 
+bool ProgressUpdating::setPercentComplete(Project &project, int taskUid,
+                                          double percent)
+{
+    if (!std::isfinite(percent) || percent < 0.0 || percent > 1.0)
+        return false;
+    Task *task = taskByUid(project, taskUid);
+    if (!task || task->summary)
+        return false;
+
+    // Duration progress drives work progress, as in MS Project: the same
+    // fraction of each Work assignment is recorded as actual work.
+    bool hasWorkAssignment = false;
+    for (Assignment &assignment : project.assignments) {
+        if (assignment.taskUniqueId != taskUid
+            || !isWorkAssignment(project, assignment))
+            continue;
+        hasWorkAssignment = true;
+        updateAssignmentProgress(project, *task, assignment, percent, true,
+                                 project.statusDate);
+    }
+    if (!hasWorkAssignment)
+        task->actualWorkMillis = qint64(std::llround(
+            double(qMax<qint64>(0, task->workMillis)) * percent));
+
+    task->percentComplete = percent;
+    task->actualDurationMillis = qint64(std::llround(
+        double(qMax<qint64>(0, task->durationMillis)) * percent));
+    // Any progress stamps Actual Start (the Progress bar is drawn from it);
+    // 100% stamps Actual Finish; 0% clears both.
+    if (percent > 0.0 && !task->actualStart.isValid())
+        task->actualStart = task->start;
+    else if (percent <= 0.0)
+        task->actualStart = {};
+    if (percent >= 1.0)
+        task->actualFinish = task->finish;
+    else
+        task->actualFinish = {};
+    return finishTrackingEdit(project);
+}
+
 bool ProgressUpdating::setPercentWorkComplete(Project &project, int taskUid,
                                               double percent)
 {
