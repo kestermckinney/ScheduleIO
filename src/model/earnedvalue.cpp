@@ -121,6 +121,18 @@ double costAtProgress(const QList<Segment> &spread, double fraction)
     return total;
 }
 
+// Every task's time-phased baseline cost for baseline `number`, by task uid.
+QHash<int, QList<TimephasedValue>> baselineCostByTask(const Project &project, int number)
+{
+    QHash<int, QList<TimephasedValue>> byTask;
+    for (const Assignment &assignment : std::as_const(project.assignments))
+        for (const TimephasedValue &v : assignment.timephasedValues)
+            if (v.type == TimephasedValue::BaselineCost && v.baselineNumber == number
+                && v.start.isValid() && v.finish > v.start)
+                byTask[assignment.taskUniqueId].append(v);
+    return byTask;
+}
+
 void writeDerived(Task &task, const Figures &f, double bac)
 {
     EarnedValue &e = task.evm;
@@ -146,18 +158,34 @@ QDateTime EarnedValueCalculation::statusDate(const Project &project)
         : QDateTime(QDate::currentDate(), project.defaultStartTime);
 }
 
+QList<double> EarnedValueCalculation::plannedValueThrough(const Project &project,
+                                                          const QList<QDateTime> &instants)
+{
+    const int number = qMax(0, project.baselineForEarnedValue);
+    const WorkCalendar calendar = Scheduler::projectCalendar(project);
+    const QHash<int, QList<TimephasedValue>> baselineCost = baselineCostByTask(project, number);
+
+    QList<double> totals(instants.size(), 0.0);
+    for (const Task &task : std::as_const(project.tasks)) {
+        if (task.summary || !task.active)
+            continue;
+        const QList<Segment> spread = costSpread(baselineCost.value(task.uniqueId),
+                                                 baselineNumbered(task, number), task,
+                                                 calendar);
+        if (spread.isEmpty())
+            continue;
+        for (int i = 0; i < instants.size(); ++i)
+            totals[i] += costThrough(spread, instants.at(i), calendar);
+    }
+    return totals;
+}
+
 void EarnedValueCalculation::recalculate(Project &project)
 {
     const int number = qMax(0, project.baselineForEarnedValue);
     const QDateTime status = statusDate(project);
     const WorkCalendar calendar = Scheduler::projectCalendar(project);
-
-    QHash<int, QList<TimephasedValue>> baselineCost;   // task uid -> values
-    for (const Assignment &assignment : std::as_const(project.assignments))
-        for (const TimephasedValue &v : assignment.timephasedValues)
-            if (v.type == TimephasedValue::BaselineCost && v.baselineNumber == number
-                && v.start.isValid() && v.finish > v.start)
-                baselineCost[assignment.taskUniqueId].append(v);
+    const QHash<int, QList<TimephasedValue>> baselineCost = baselineCostByTask(project, number);
 
     QHash<int, Figures> leafFigures;
     for (Task &task : project.tasks) {

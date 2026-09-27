@@ -7,6 +7,7 @@
 #include "scheduleio_export.h"
 
 #include <QDateTime>
+#include <QList>
 
 namespace schedule {
 
@@ -32,6 +33,12 @@ public:
     // The instant earned value is measured at: Project > Status Date, or the
     // current date (at the default start time) when none is set.
     static QDateTime statusDate(const Project &project);
+
+    // Planned value (BCWS) of the whole project accrued by each of `instants`:
+    // the same time-phased baseline cost the status-date BCWS measures, summed
+    // over the active leaf tasks -- the planned curve of an earned-value chart.
+    static QList<double> plannedValueThrough(const Project &project,
+                                             const QList<QDateTime> &instants);
 };
 
 } // namespace schedule
