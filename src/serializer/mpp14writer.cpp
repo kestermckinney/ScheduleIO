@@ -109,6 +109,41 @@ void appDouble(QByteArray &b, double v)
 { quint64 bits; memcpy(&bits, &v, 8); char t[8];
   qToLittleEndian<quint64>(bits, reinterpret_cast<uchar *>(t)); b.append(t, 8); }
 
+// Tenths of a minute since 1983-12-31 00:00 (wall time; the same base as
+// decodeMppTimestamp), the timestamp form inside Project's time-phased blobs.
+quint32 tenthMinutesSinceEpoch(const QDateTime &dt)
+{
+    const qint64 days = QDate(1983, 12, 31).daysTo(dt.date());
+    return quint32(days * 14400 + dt.time().msecsSinceStartOfDay() / 6000);
+}
+
+// Task var key 350, the %-complete curve Project draws the Progress bar from
+// (it is where Complete Through comes from). A 16-byte header, then three
+// 20-byte points {u32 kind, u32 0, f64 percent, u32 date}: the start marker,
+// the Stop date at the task's percent complete, and a closing point whose
+// date is a constant. Byte-for-byte what Project 2016 writes for tasks set to
+// 8%, 50% and 100% (decoded 2026-09-27); 0% tasks carry no curve.
+QByteArray progressCurveBlob(const QDateTime &actualStart, const QDateTime &stop,
+                             int percent)
+{
+    QByteArray b;
+    appU16(b, 3);
+    appU16(b, 4);
+    appU32(b, 0x10);
+    appU32(b, 0);
+    appU32(b, 0);
+    const auto point = [&b](quint32 kind, double value, quint32 date) {
+        appU32(b, kind);
+        appU32(b, 0);
+        appDouble(b, value);
+        appU32(b, date);
+    };
+    point(1, 32768.0, tenthMinutesSinceEpoch(actualStart));
+    point(0, double(percent), tenthMinutesSinceEpoch(stop));
+    point(1, double(percent), 0x340A75F7u);
+    return b;
+}
+
 bool pokeU16(QByteArray &b, int off, quint16 v)
 {
     if (off < 0 || off + 2 > b.size())
@@ -1446,6 +1481,34 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             }
             sink.putDate(MppFieldIds::taskActual.start, actualStart);
             sink.putDate(MppFieldIds::taskActual.finish, actualFinish);
+            // STOP (100, u32@136) / RESUME (99, u32@132): Project's Complete
+            // Through, which the Progress bar style draws to. Project leaves
+            // both NA on unstarted tasks, sets both to Actual Finish on
+            // completed ones, and otherwise stops at Actual Start + Actual
+            // Duration on the task calendar (verified on Project 2016 by
+            // setting a task to 8%). Left at the scaffold's NA, a started
+            // task opens with Stop = Finish and a full-length progress bar.
+            if (!t.summary) {
+                QDateTime stop, resume;
+                if (actualFinish.isValid()) {
+                    stop = resume = actualFinish;
+                } else if (actualStart.isValid()) {
+                    const schedule::WorkCalendar calendar(
+                        in, t.calendarUniqueId >= 0 ? t.calendarUniqueId
+                                                    : in.calendarUniqueId);
+                    stop = actualDuration > 0
+                        ? calendar.addWork(actualStart, actualDuration) : actualStart;
+                    resume = calendar.nextWorkStart(stop);
+                }
+                sink.putDate(99, resume);                            // RESUME
+                sink.putDate(100, stop);                             // STOP
+                // Var key 350: the task's %-complete curve, which is where
+                // Project actually reads Complete Through (a task carrying
+                // Stop but no curve still opens with Stop = Finish).
+                if (stop.isValid() && percentComplete > 0)
+                    sink.putVarBlob(350, progressCurveBlob(actualStart, stop,
+                                                           percentComplete));
+            }
             sink.putDuration(MppFieldIds::taskActual.duration, actualDuration);
             sink.putWork(MppFieldIds::taskActual.work, actualWork);
             sink.putCurrency(MppFieldIds::taskCost.cost, t.cost);
@@ -1850,6 +1913,12 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             const quint8 *tailBytes = unstarted ? assnUnstartedTail : assnProgressTail;
             QByteArray metaTail(kAssnMetaItem - 8, '\0');
             memcpy(metaTail.data(), tailBytes, 8);
+            // An assignment still in progress: Project 2016 writes 0x2B, not
+            // the completed rows' 0x3B. With 0x10 set Project takes the work as
+            // done through the Finish, so an 8% task opens with Stop = Finish
+            // and a full progress bar (bisected on the user's file 2026-09-27).
+            if (!unstarted && a.remainingWorkMillis > 0)
+                metaTail[2] = char(quint8(metaTail.at(2)) & ~0x10);
             if (hasOvertime) {
                 // Project-authored overtime rows mark the var-backed work
                 // fields present in bytes 5/6 and carry the timephased tail bit.

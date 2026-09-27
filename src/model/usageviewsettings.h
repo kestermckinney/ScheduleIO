@@ -36,6 +36,9 @@ struct SCHEDULEIO_EXPORT UsageViewSettings
 {
     bool present = false;
     bool modified = false; // writer patch request; not part of semantic identity
+    // Writer request: `columns` is the table's complete ordered column list
+    // (rebuild the native table), not just width overrides for its columns.
+    bool columnLayout = false;
     QString viewName;
     QString tableName;
     QList<UsageTableColumn> columns;
@@ -68,6 +71,26 @@ struct SCHEDULEIO_EXPORT UsageViewSettings
         columns.append(column);
         present = true;
         modified = true;
+    }
+
+    // Replace the table's visible columns (in order). Entries with fieldId 0
+    // are dropped; widths are Project's character widths (0 keeps the stored
+    // width of a field already in the table).
+    void setColumns(const QList<UsageTableColumn> &list)
+    {
+        QList<UsageTableColumn> next;
+        for (UsageTableColumn column : list) {
+            if (column.fieldId == 0)
+                continue;
+            column.width = qBound(0, column.width, 255);
+            next.append(column);
+        }
+        if (next.isEmpty())
+            return;
+        columns = next;
+        present = true;
+        modified = true;
+        columnLayout = true;
     }
 
     void setTimescaleSize(int percent)

@@ -751,3 +751,38 @@ single-option MS Project saves): "Autolink inserted or moved tasks",
 save-counter / GUID / title items), and "Show project summary task" (a per-view
 flag in "   214/CV_iew"). "New tasks created Manual/Auto" has no
 `MSProject.Application` COM member and could not be probed automatically.
+
+## Task progress: Stop/Resume, the %-complete curve, assignment state (2026-09-27)
+
+Found because an 8%-complete task written by `MppIO` opened in Project 2016 with a
+full-length progress bar (Stop = Resume = Finish). Project draws the Progress bar
+to Complete Through; three things feed it, and all three must match what Project
+writes itself (oracle: `Task.PercentComplete = 8` via COM, then `FileSaveAs`):
+
+- Task fixed fields **RESUME (99, u32@132)** and **STOP (100, u32@136)**: NA when
+  unstarted; both = Actual Finish when complete; otherwise Stop = Actual Start +
+  Actual Duration on the task calendar and Resume = the next working instant
+  (a Stop at 17:00 resumes 08:00 the next working day).
+- Task var key **350**, the %-complete curve: 16-byte header
+  `03 00 04 00 10 00 00 00` + 8 zero bytes, then three 20-byte points
+  `{u32 kind, u32 0, f64 percent, u32 date}`: `(1, 32768.0, Actual Start)`,
+  `(0, pct, Stop)`, `(1, pct, 0x340A75F7)`. Dates are tenths of a minute since
+  1983-12-31 00:00 (same base as `decodeMppTimestamp`). Absent at 0%.
+- Assignment FixedMeta item byte 10: **0x2B while the assignment is in progress**
+  (actual > 0, remaining > 0); completed rows use 0x3B. With bit 0x10 set on a
+  partial assignment Project treats its work as done through the Finish; this bit
+  alone was what forced Stop = Finish (bisected with same-size patches).
+
+## Table column records (`   214/CTable`, 2026-09-27)
+
+A table's columns are one var blob (type 8/7/6) of the CTable row: a 12-byte
+header whose u16 at +4 is the column count - 1, then 115-byte column records:
+`+0 u32 field id`, `+4 u8 width (characters)`, `+5 0x10 | title alignment`,
+`+6 0x08`, `+7 data alignment (0 left, 1 centre, 2 right)`, `+8 0x08` (0x88 when
+a title alignment is stored), `+9 0x01` (| 0x02 with a custom title), `+13` UTF-16
+title (100 bytes, empty = the field's name). Project 2016's stock Entry table:
+ID, Indicators, Task Mode (1280), Name ("Task Name"), Duration **1287**, Start
+**1285**, Finish **1286**, Predecessors, Resource Names. It uses these
+manual-aware ids rather than 29/35/36. The "Add New Column" slot isn't a record.
+Decoded by diffing the stock table against one edited through
+`TaskTables("Entry").TableFields.Add/Delete`.

@@ -1874,6 +1874,41 @@ bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &
     return true;
 }
 
+// One table-column record inside a CTable column blob (115 bytes, after the
+// 12-byte blob header whose u16 at +4 is the column count - 1):
+//   +0  u32  field id (0x0B40xxxx task / 0x0C40xxxx resource)
+//   +4  u8   width (characters)
+//   +5  u8   0x10 | title alignment      +6 u8 0x08
+//   +7  u8   data alignment (0 left, 1 centre, 2 right)
+//   +8  u8   0x08 (0x88 once Project stores an explicit title alignment)
+//   +9  u8   0x01 (| 0x02 when +13 holds a custom title)
+//   +13 UTF-16 title, 100 bytes, empty = the field's own name
+// Decoded 2026-09-27 by diffing Project 2016's stock Entry table against one
+// edited through TaskTables("Entry").TableFields.Add/Delete.
+static QByteArray tableColumnRecord(const QByteArray &base, const schedule::UsageTableColumn &column)
+{
+    QByteArray rec = base;
+    if (rec.size() != kTableColumnSize) {
+        rec = QByteArray(kTableColumnSize, '\0');
+        rec[5] = char(0x10);
+        rec[6] = char(0x08);
+        rec[8] = char(0x08);
+        rec[9] = char(0x01);
+    }
+    wrU32(rec, 0, column.fieldId);
+    if (column.width > 0)
+        rec[4] = char(qBound(1, column.width, 255));
+    if (!column.title.isEmpty()) {
+        for (int i = 13; i < 113; ++i)
+            rec[i] = 0;
+        const QString title = column.title.left(49);
+        for (int i = 0; i < title.size(); ++i)
+            wrU16(rec, 13 + i * 2, title.at(i).unicode());
+        rec[9] = char(quint8(rec.at(9)) | 0x02);
+    }
+    return rec;
+}
+
 bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in)
 {
     if (!wantsTablePatch(in) || !tpl.hasStorage({ kViewStorage, kCTable }))
@@ -1883,7 +1918,7 @@ bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Pro
         { kViewStorage, kCTable, QStringLiteral("FixedData") });
     const QByteArray varMeta = tpl.readStream(
         { kViewStorage, kCTable, QStringLiteral("VarMeta") });
-    QByteArray var2 = tpl.readStream(
+    const QByteArray var2 = tpl.readStream(
         { kViewStorage, kCTable, QStringLiteral("Var2Data") });
     QVector<VarRecord> records;
     if (!parseVarMeta(varMeta, &records))
@@ -1894,7 +1929,7 @@ bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Pro
         { &in.ganttView, false }, { &in.resourceUsageView, true },
         { &in.taskUsageView, false }, { &in.teamPlannerView, true }
     };
-    bool changed = false;
+    QHash<int, QByteArray> patched;   // var record index -> replacement blob
     for (const Target &target : targets) {
         if (!target.settings->modified || target.settings->tableName.isEmpty())
             continue;
@@ -1930,29 +1965,97 @@ bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Pro
         const int length = int(rdU32(var2, blobOffset));
         if (length < kTableColumnHeaderSize || blobOffset + 4 + length > var2.size())
             continue;
-        const int count = int(rdU16(var2, blobOffset + 4 + 4)) + 1;
+        const QByteArray blob = var2.mid(blobOffset + 4, length);
+        const int count = int(rdU16(blob, 4)) + 1;
+        QVector<QByteArray> existing;
         for (int i = 0; i < count; ++i) {
-            const int at = blobOffset + 4 + kTableColumnHeaderSize + i * kTableColumnSize;
-            if (at + kTableColumnSize > blobOffset + 4 + length)
+            const int at = kTableColumnHeaderSize + i * kTableColumnSize;
+            if (at + kTableColumnSize > blob.size())
                 break;
-            const quint32 fieldId = rdU32(var2, at);
-            for (const schedule::UsageTableColumn &column : target.settings->columns) {
-                if (column.fieldId == fieldId) {
-                    const char value = char(qBound(0, column.width, 255));
-                    if (var2.at(at + 4) != value) {
-                        var2[at + 4] = value;
-                        changed = true;
-                    }
+            existing.append(blob.mid(at, kTableColumnSize));
+        }
+        const int columnsEnd = kTableColumnHeaderSize + int(existing.size()) * kTableColumnSize;
+
+        QByteArray next;
+        if (target.settings->columnLayout && !target.settings->columns.isEmpty()) {
+            // Replace the table's column list with the requested one, keeping
+            // each field's existing record (alignment, title) when present; a
+            // newly shown field copies a plain left-aligned untitled record.
+            QByteArray generic;
+            for (const QByteArray &rec : existing) {
+                if (quint8(rec.at(7)) == 0 && rdU16(rec, 13) == 0) {
+                    generic = rec;
                     break;
                 }
             }
+            next = blob.left(kTableColumnHeaderSize);
+            int written = 0;
+            for (const schedule::UsageTableColumn &column : target.settings->columns) {
+                if (column.fieldId == 0 || written >= 0xFFFF)
+                    continue;
+                QByteArray base;
+                for (const QByteArray &rec : existing) {
+                    if (rdU32(rec, 0) == column.fieldId) {
+                        base = rec;
+                        break;
+                    }
+                }
+                if (base.isEmpty())
+                    base = generic;
+                next += tableColumnRecord(base, column);
+                ++written;
+            }
+            if (written == 0)
+                continue;
+            wrU16(next, 4, quint16(written - 1));
+            next += blob.mid(columnsEnd);
+        } else {
+            next = blob;
+            for (int i = 0; i < existing.size(); ++i) {
+                const int at = kTableColumnHeaderSize + i * kTableColumnSize;
+                const quint32 fieldId = rdU32(next, at);
+                for (const schedule::UsageTableColumn &column : target.settings->columns) {
+                    if (column.fieldId == fieldId) {
+                        next[at + 4] = char(qBound(0, column.width, 255));
+                        break;
+                    }
+                }
+            }
         }
+        if (next != blob)
+            patched.insert(recordIndex, next);
     }
 
-    if (!changed)
+    if (patched.isEmpty())
         return false;
-    out.addStream({ kViewStorage, kCTable, QStringLiteral("VarMeta") }, varMeta);
-    out.addStream({ kViewStorage, kCTable, QStringLiteral("Var2Data") }, var2);
+
+    // Rebuild Var2Data with every blob verbatim (in record order) except the
+    // patched column blobs, recomputing offsets; then rebuild VarMeta to match.
+    QByteArray newVar2;
+    QByteArray newMeta = varMeta.left(24);
+    for (int i = 0; i < records.size(); ++i) {
+        const VarRecord &r = records[i];
+        const int oldOff = int(r.offset);
+        const int len = int(rdU32(var2, oldOff));
+        QByteArray blob;
+        if (patched.contains(i))
+            blob = patched.value(i);
+        else if (len >= 0 && oldOff + 4 + len <= var2.size())
+            blob = var2.mid(oldOff + 4, len);
+
+        const quint32 newOff = quint32(newVar2.size());
+        appU32(newVar2, quint32(blob.size()));
+        newVar2 += blob;
+
+        appU32(newMeta, r.uid);
+        appU32(newMeta, newOff);
+        appU16(newMeta, r.typeLow);
+        appU16(newMeta, r.typeHigh);
+    }
+    wrU32(newMeta, 20, quint32(newVar2.size()));   // header dataSize
+
+    out.addStream({ kViewStorage, kCTable, QStringLiteral("VarMeta") }, newMeta);
+    out.addStream({ kViewStorage, kCTable, QStringLiteral("Var2Data") }, newVar2);
     return true;
 }
 
