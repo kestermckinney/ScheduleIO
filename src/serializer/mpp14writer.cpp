@@ -75,6 +75,7 @@ QByteArray guidFor(const char *kind, int uid)
     else if (qstrcmp(kind, "rsc") == 0) kindOrdinal = 2;
     else if (qstrcmp(kind, "assn") == 0) kindOrdinal = 3;
     else if (qstrcmp(kind, "cons") == 0) kindOrdinal = 4;
+    else if (qstrcmp(kind, "cal") == 0) kindOrdinal = 6;
 
     const quint32 entityOrdinal = quint32(qMax(0, uid)) & 0x000FFFFFu;
     const quint32 timeLow = 0xA1000000u | (kindOrdinal << 20) | entityOrdinal;
@@ -1115,7 +1116,8 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     }
 
     if (ViewFormat::wantsTablePatch(viewProject))
-        ViewFormat::patchTables(*viewTemplate, cf, viewProject);
+        ViewFormat::patchTables(*viewTemplate, cf, viewProject,
+                                viewTemplate == &tpl ? nullptr : &tpl);
     ViewFormat::writeExtensions(cf, viewProject);
 
     // ---- project-level Props (dates) + SummaryInformation (title/author) ------
@@ -1576,6 +1578,20 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // for non-summary rows or MS Project treats every row as a summary.
             metaTail[4] = char(t.summary ? (quint8(metaTail[4]) | 0x08)
                                          : (quint8(metaTail[4]) & ~0x08));
+            // Resource-work bit (item byte 16 & 0x10). Without it Project
+            // keeps the assignments' totals but spreads none of their work
+            // over time, so every Usage-view day cell is blank. Project sets
+            // it on every leaf with a resource assignment and on every summary
+            // except the project summary (all fixtures, 174/174 and 53/53);
+            // bisected on 04_resources_assignments with same-size patches.
+            bool hasResourceAssignment = false;
+            for (const schedule::Assignment &assignment : in.assignments)
+                if (assignment.taskUniqueId == t.uniqueId && assignment.resourceUniqueId >= 0) {
+                    hasResourceAssignment = true;
+                    break;
+                }
+            if (t.uniqueId != 0 && (t.summary || hasResourceAssignment))
+                metaTail[8] = char(quint8(metaTail[8]) | 0x10);
             // Notes presence: like the resource rows below, MS Project ignores
             // the notes Var2Data blob unless the row's FixedMeta advertises it
             // -- tail byte 36 bit 0x10 plus header bit 0x00010000 (both taken
@@ -1614,14 +1630,17 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             sink.putU32(27, quint32(r.uniqueId));                    // UNIQUE_ID
             sink.putU32(0, quint32(r.id));                           // ID
             sink.putDouble(4, r.maxUnits * 10000.0, true);           // MAX_UNITS (ten-thousandths)
-            qint64 resourceWork = 0, resourceOvertime = 0,
-                   resourceActualOvertime = 0, resourceRemainingOvertime = 0;
+            qint64 resourceWork = 0, resourceActualWork = 0, resourceRemainingWork = 0,
+                   resourceOvertime = 0, resourceActualOvertime = 0,
+                   resourceRemainingOvertime = 0;
             double resourceOvertimeCost = 0.0,
                    resourceActualOvertimeCost = 0.0,
                    resourceRemainingOvertimeCost = 0.0;
             for (const schedule::Assignment &assignment : in.assignments)
                 if (assignment.resourceUniqueId == r.uniqueId) {
                     resourceWork += assignment.workMillis;
+                    resourceActualWork += assignment.actualWorkMillis;
+                    resourceRemainingWork += assignment.remainingWorkMillis;
                     resourceOvertime += assignment.overtimeWorkMillis;
                     resourceActualOvertime += assignment.actualOvertimeWorkMillis;
                     resourceRemainingOvertime += assignment.remainingOvertimeWorkMillis;
@@ -1629,6 +1648,12 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                     resourceActualOvertimeCost += assignment.actualOvertimeCost;
                     resourceRemainingOvertimeCost += assignment.remainingOvertimeCost;
                 }
+            // WORK / ACTUAL_WORK / REMAINING_WORK: Project shows these stored
+            // rollups on the resource rows of Resource Usage and the Resource
+            // Sheet; left unwritten they read as 0 hrs.
+            sink.putWork(13, resourceWork, true);
+            sink.putWork(14, resourceActualWork, true);
+            sink.putWork(22, resourceRemainingWork, true);
             sink.putWork(16, resourceOvertime, true);
             sink.putWork(38, qMax<qint64>(0, resourceWork - resourceOvertime), true);
             sink.putWork(39, resourceActualOvertime, true);
@@ -2060,9 +2085,23 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                                      : (isBase ? 0x00020000u
                                                : (needed ? 0x00010000u : 0u)),
                           rec, metaTail);
+            // Fixed2Data is [calendar GUID][owning resource GUID][base
+            // calendar GUID]. A resource calendar shares its resource's GUID,
+            // which is also what the resource row stores as CALENDAR_GUID.
+            // Leaving these zero makes Project lose every resource-calendar
+            // link: assignments then have no working time, so the Usage views
+            // show no time-phased work at all.
+            const bool isResourceCalendar = !isBase && resId > 0;
+            QByteArray f2(kCalF2Block, '\0');
+            pokeBytes(f2, 0, isResourceCalendar ? guidFor("rsc", int(resId))
+                                                : guidFor("cal", c.uniqueId));
+            if (isResourceCalendar)
+                pokeBytes(f2, 16, guidFor("rsc", int(resId)));
+            if (!isBase)
+                pokeBytes(f2, 32, guidFor("cal", c.baseCalendarUniqueId));
             QByteArray f2Tail;
             appU16(f2Tail, isStandard ? 0x001E : 0x000E);
-            fixed2.addItem(0, QByteArray(kCalF2Block, '\0'), f2Tail);
+            fixed2.addItem(0, f2, f2Tail);
 
             if (isBase && !c.name.isEmpty())
                 vars.add(quint32(c.uniqueId), kCalName, kCalHigh, utf16zBytes(c.name));

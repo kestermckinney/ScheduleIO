@@ -70,9 +70,12 @@ bool wantsTablePatch(const schedule::Project &in);
 bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in);
 
 // Patch the Task/Resource Usage table column widths in `   214/CTable` while
-// retaining every other native table byte. Returns false when no matching
-// source table can be patched.
-bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in);
+// retaining every other native table byte. A table whose column list is being
+// rebuilt but that `tpl` lacks is first copied in from `stockTables` (the
+// embedded template), as Project does from its global template. Returns false
+// when no matching source table can be patched.
+bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in,
+                 const CompoundFile *stockTables = nullptr);
 
 // Writes ScheduleIO extension streams that preserve presentation choices with
 // no native Microsoft Project representation.

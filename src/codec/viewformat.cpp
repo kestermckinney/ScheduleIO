@@ -84,6 +84,7 @@ constexpr int kUsageFieldsOffset = 2237;
 constexpr int kTableRecordSize = 230;
 constexpr int kTableColumnHeaderSize = 12;
 constexpr int kTableColumnSize = 115;
+constexpr int kTableMetaItemSize = 10;
 
 // Per-cell/row exceptional-style records. Field ids are 0x0B400000 | MPXJ
 // MPPTaskField FIELD_ARRAY index for a single cell; 0xFFFFFFFF means "the
@@ -656,6 +657,9 @@ QString normalizedPresentationName(QString name)
     return name.trimmed().toCaseFolded();
 }
 
+void readTableColumns(const CompoundFile &cf, bool resourceTable,
+                      schedule::UsageViewSettings *out);
+
 void readUsageView(const CompoundFile &cf, const QByteArray &viewFixedMeta,
                    const QByteArray &viewFixedData, const BkndVarData &viewVarData,
                    quint16 viewType, schedule::UsageViewSettings *out)
@@ -706,6 +710,14 @@ void readUsageView(const CompoundFile &cf, const QByteArray &viewFixedMeta,
         }
     }
 
+    readTableColumns(cf, viewType == kViewTypeResourceUsage || viewType == kViewTypeTeamPlanner,
+                     out);
+}
+
+// The columns of the table named out->tableName (a resource table when
+// `resourceTable`), from the file's CTable storage.
+void readTableColumns(const CompoundFile &cf, bool resourceTable, schedule::UsageViewSettings *out)
+{
     const QByteArray tableFixed = cf.readStream(
         { kViewStorage, kCTable, QStringLiteral("FixedData") });
     BkndVarData tableVars;
@@ -720,9 +732,7 @@ void readUsageView(const CompoundFile &cf, const QByteArray &viewFixedMeta,
         const quint32 tableUid = rdU32(rec, 0);
         if (normalizedPresentationName(rdUtf16(rec, 4, 104)) != wanted)
             continue;
-        const bool resourceTable = rdU16(rec, 108) == 1;
-        if (resourceTable != (viewType == kViewTypeResourceUsage
-                              || viewType == kViewTypeTeamPlanner))
+        if ((rdU16(rec, 108) == 1) != resourceTable)
             continue;
 
         QByteArray columns;
@@ -1510,6 +1520,23 @@ void read(const CompoundFile &cf, schedule::Project *out)
                   &out->resourceUsageView);
     readUsageView(cf, fixedMeta, fixedData, vd, kViewTypeTaskUsage,
                   &out->taskUsageView);
+    // A file whose usage view was never opened carries no view record, but
+    // Project still shows the file's own "Usage" table there.
+    const auto readStockTable = [&cf](schedule::UsageViewSettings *view, bool resource,
+                                      const QString &viewName, const QString &tableName) {
+        if (view->present || !cf.hasStorage({ kViewStorage, kCTable }))
+            return;
+        view->tableName = tableName;
+        readTableColumns(cf, resource, view);
+        if (view->present)
+            view->viewName = viewName;
+        else
+            view->tableName.clear();
+    };
+    readStockTable(&out->taskUsageView, false, QStringLiteral("Tas&k Usage"),
+                   QStringLiteral("Usa&ge"));
+    readStockTable(&out->resourceUsageView, true, QStringLiteral("Resource &Usage"),
+                   QStringLiteral("&Usage"));
     readUsageView(cf, fixedMeta, fixedData, vd, kViewTypeTeamPlanner,
                   &out->teamPlannerView);
 
@@ -1909,16 +1936,37 @@ static QByteArray tableColumnRecord(const QByteArray &base, const schedule::Usag
     return rec;
 }
 
-bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in)
+// The uid of the table named `wanted` in a CTable FixedData stream, or 0.
+static quint32 findTableUid(const QByteArray &fixedData, const QString &wanted, bool resource,
+                            int *recordOffset = nullptr)
+{
+    for (int offset = 0; offset + kTableRecordSize <= fixedData.size();
+         offset += kTableRecordSize) {
+        const QByteArray rec = fixedData.mid(offset, kTableRecordSize);
+        if ((rdU16(rec, 108) == 1) != resource)
+            continue;
+        if (normalizedPresentationName(rdUtf16(rec, 4, 104)) == wanted) {
+            if (recordOffset)
+                *recordOffset = offset;
+            return rdU32(rec, 0);
+        }
+    }
+    return 0;
+}
+
+bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in,
+                 const CompoundFile *stockTables)
 {
     if (!wantsTablePatch(in) || !tpl.hasStorage({ kViewStorage, kCTable }))
         return false;
 
-    const QByteArray fixedData = tpl.readStream(
+    QByteArray fixedMeta = tpl.readStream(
+        { kViewStorage, kCTable, QStringLiteral("FixedMeta") });
+    QByteArray fixedData = tpl.readStream(
         { kViewStorage, kCTable, QStringLiteral("FixedData") });
     const QByteArray varMeta = tpl.readStream(
         { kViewStorage, kCTable, QStringLiteral("VarMeta") });
-    const QByteArray var2 = tpl.readStream(
+    QByteArray var2 = tpl.readStream(
         { kViewStorage, kCTable, QStringLiteral("Var2Data") });
     QVector<VarRecord> records;
     if (!parseVarMeta(varMeta, &records))
@@ -1929,22 +1977,83 @@ bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Pro
         { &in.ganttView, false }, { &in.resourceUsageView, true },
         { &in.taskUsageView, false }, { &in.teamPlannerView, true }
     };
+
+    // A file only carries the tables its views have used: one whose Task Usage
+    // view was never opened has no "Usage" table. Project copies the table in
+    // from its global template when the view is first shown, as the next table
+    // uid (and the uid is repeated at the head of the column blob). Do the same
+    // from the embedded template, so a rebuilt column list has a home.
+    bool imported = false;
+    if (stockTables && stockTables->hasStorage({ kViewStorage, kCTable })
+        && fixedMeta.size() >= 16) {
+        const QByteArray stockMeta = stockTables->readStream(
+            { kViewStorage, kCTable, QStringLiteral("FixedMeta") });
+        const QByteArray stockData = stockTables->readStream(
+            { kViewStorage, kCTable, QStringLiteral("FixedData") });
+        const QByteArray stockVar2 = stockTables->readStream(
+            { kViewStorage, kCTable, QStringLiteral("Var2Data") });
+        QVector<VarRecord> stockRecords;
+        parseVarMeta(stockTables->readStream(
+                         { kViewStorage, kCTable, QStringLiteral("VarMeta") }),
+                     &stockRecords);
+        for (const Target &target : targets) {
+            if (!target.settings->modified || !target.settings->columnLayout
+                || target.settings->tableName.isEmpty())
+                continue;
+            const QString wanted = normalizedPresentationName(target.settings->tableName);
+            if (findTableUid(fixedData, wanted, target.resource) != 0)
+                continue;
+            int stockOffset = -1;
+            const quint32 stockUid = findTableUid(stockData, wanted, target.resource,
+                                                  &stockOffset);
+            if (stockUid == 0)
+                continue;
+            quint32 newUid = 0;
+            for (int offset = 0; offset + kTableRecordSize <= fixedData.size();
+                 offset += kTableRecordSize)
+                newUid = qMax(newUid, rdU32(fixedData, offset));
+            ++newUid;
+
+            QByteArray rec = stockData.mid(stockOffset, kTableRecordSize);
+            wrU32(rec, 0, newUid);
+            // FixedMeta item: [u32 flags][u32 data offset][u16 tail], taken from
+            // the stock table's own item.
+            const int stockItem = 16 + (stockOffset / kTableRecordSize) * kTableMetaItemSize;
+            QByteArray item = stockMeta.mid(stockItem, kTableMetaItemSize);
+            if (item.size() != kTableMetaItemSize)
+                continue;
+            wrU32(item, 4, quint32(fixedData.size()));
+            fixedData += rec;
+            fixedMeta += item;
+            wrU32(fixedMeta, 8, rdU32(fixedMeta, 8) + 1);
+            wrU32(fixedMeta, 12, quint32(fixedData.size()));
+
+            for (const VarRecord &r : stockRecords) {
+                if (r.uid != stockUid)
+                    continue;
+                const int len = int(rdU32(stockVar2, int(r.offset)));
+                if (len < 0 || int(r.offset) + 4 + len > stockVar2.size())
+                    continue;
+                QByteArray blob = stockVar2.mid(int(r.offset) + 4, len);
+                if (blob.size() >= 4 && rdU32(blob, 0) == stockUid)
+                    wrU32(blob, 0, newUid);
+                VarRecord copy = r;
+                copy.uid = newUid;
+                copy.offset = quint32(var2.size());
+                appU32(var2, quint32(blob.size()));
+                var2 += blob;
+                records.append(copy);
+            }
+            imported = true;
+        }
+    }
+
     QHash<int, QByteArray> patched;   // var record index -> replacement blob
     for (const Target &target : targets) {
         if (!target.settings->modified || target.settings->tableName.isEmpty())
             continue;
         const QString wanted = normalizedPresentationName(target.settings->tableName);
-        quint32 tableUid = 0;
-        for (int offset = 0; offset + kTableRecordSize <= fixedData.size();
-             offset += kTableRecordSize) {
-            const QByteArray rec = fixedData.mid(offset, kTableRecordSize);
-            if ((rdU16(rec, 108) == 1) != target.resource)
-                continue;
-            if (normalizedPresentationName(rdUtf16(rec, 4, 104)) == wanted) {
-                tableUid = rdU32(rec, 0);
-                break;
-            }
-        }
+        const quint32 tableUid = findTableUid(fixedData, wanted, target.resource);
         if (tableUid == 0)
             continue;
 
@@ -2026,8 +2135,12 @@ bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Pro
             patched.insert(recordIndex, next);
     }
 
-    if (patched.isEmpty())
+    if (patched.isEmpty() && !imported)
         return false;
+    if (imported) {
+        out.addStream({ kViewStorage, kCTable, QStringLiteral("FixedMeta") }, fixedMeta);
+        out.addStream({ kViewStorage, kCTable, QStringLiteral("FixedData") }, fixedData);
+    }
 
     // Rebuild Var2Data with every blob verbatim (in record order) except the
     // patched column blobs, recomputing offsets; then rebuild VarMeta to match.

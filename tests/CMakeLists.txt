@@ -110,6 +110,14 @@ qt_add_executable(rename_cal probe/rename_cal.cpp)
 target_link_libraries(rename_cal PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(rename_cal PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
 
+qt_add_executable(dump_views probe/dump_views.cpp)
+target_link_libraries(dump_views PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(dump_views PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
+
+qt_add_executable(swap_streams probe/swap_streams.cpp)
+target_link_libraries(swap_streams PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(swap_streams PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
+
 qt_add_executable(dump_cal probe/dump_cal.cpp)
 target_link_libraries(dump_cal PRIVATE scheduleio_objects Qt${QT_VERSION_MAJOR}::Core)
 target_include_directories(dump_cal PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)

@@ -772,8 +772,33 @@ writes itself (oracle: `Task.PercentComplete = 8` via COM, then `FileSaveAs`):
   (actual > 0, remaining > 0); completed rows use 0x3B. With bit 0x10 set on a
   partial assignment Project treats its work as done through the Finish; this bit
   alone was what forced Stop = Finish (bisected with same-size patches).
+- Task FixedMeta item byte 16 bit **0x10** (tail byte 8): the resource-work
+  bit. Without it Project keeps assignment totals but spreads none of their
+  work over time: every Usage-view day cell and `TimeScaleData` value is blank.
+  Project sets it on every leaf with a real resource assignment and on every
+  summary except UID 0 (all fixtures: 174/174 and 53/53). Bisected 2026-09-27 by
+  swapping whole streams between 04_resources_assignments and our resave
+  (`tests/probe/swap_streams`), then same-size patches.
+- Calendar Fixed2Data (48 bytes) is `[calendar GUID][owning resource GUID][base
+  calendar GUID]`. A resource calendar's GUID *is* its resource's GUID (the
+  resource row's CALENDAR_GUID at Fixed2 +24 points at it); base calendars get
+  their own GUID and zeros after it. All-zero GUIDs make Project's native save
+  rebind resource calendars (one resource loses its calendar, another's name
+  is copied onto it).
 
 ## Table column records (`   214/CTable`, 2026-09-27)
+
+Adding a table (seen when Project first shows Task Usage in a file that never
+had it): FixedData gets another 230-byte record (uid @0, UTF-16 name @4,
+resource flag u16 @108, per-table GUID bytes around @214). FixedMeta gets a
+10-byte item `[u32 0x00010000][u32 data offset][u16 0x00df]`, and its header
+count @8 and data size @12 are bumped. VarMeta/Var2Data get the column blob as
+type 6 / 0x2040. The new uid is max+1 and is repeated in the blob's first u32.
+Project ignores a file's table if the file has no *view* record for it: it
+copies view and table from its global template instead.
+
+Resource rows need WORK(13), ACTUAL_WORK(14) and REMAINING_WORK(22) stored in
+the resource record; Project displays the stored values (0 hrs when absent).
 
 A table's columns are one var blob (type 8/7/6) of the CTable row: a 12-byte
 header whose u16 at +4 is the column count - 1, then 115-byte column records:
