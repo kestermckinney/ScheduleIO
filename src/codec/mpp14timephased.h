@@ -41,9 +41,16 @@ QList<schedule::TimephasedValue> decodeBaselineWork(
 QList<schedule::TimephasedValue> decodeBaselineCost(
     const QByteArray &blob, int assignmentUid, int baselineNumber);
 QByteArray encodeBaselineWork(const QList<schedule::TimephasedValue> &values,
-                              int baselineNumber);
+                              int baselineNumber,
+                              const schedule::WorkCalendar *calendar = nullptr);
 QByteArray encodeBaselineCost(const QList<schedule::TimephasedValue> &values,
                               int baselineNumber);
+// A task's baseline spread: the sum of its assignments' timephased baseline
+// work or cost, cut at every assignment boundary (what Project stores in the
+// task's own baseline blobs).
+QList<schedule::TimephasedValue> sumBaselineValues(
+    const QList<schedule::TimephasedValue> &values, int type, int baselineNumber,
+    int uniqueId);
 
 int decodeWorkContour(const QByteArray &remainingWorkBlob);
 

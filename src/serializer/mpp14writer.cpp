@@ -466,6 +466,40 @@ void flushVars(EntitySink &sink, VarBuilder &vars, quint16 high)
     sink.varBlobs.clear();
 }
 
+// Var keys an EntitySink is about to flush, in first-seen order.
+QList<quint16> varKeys(const EntitySink &sink)
+{
+    QList<quint16> keys;
+    for (const auto &p : sink.varBlobs)
+        if (!keys.contains(p.first))
+            keys.append(p.first);
+    return keys;
+}
+
+// FixedMeta presence bitmap (tail = item bytes 8..): Project reads a var
+// field's Var2Data blob only when the row's bit for it is set (see
+// FieldMap::presenceBitOrdinals). Sets the bit of every var field in `present`;
+// with `clearAbsent`, first clears the bits of var-only fields the row does not
+// carry, since Project-authored rows never set those.
+void applyVarPresence(QByteArray &tail, const QList<quint16> &present,
+                      const QHash<quint16, int> &ordinals,
+                      const QHash<quint16, EntityFieldLoc> &loc, bool clearAbsent)
+{
+    const auto setBit = [&tail](int ordinal, bool on) {
+        if (ordinal < 0 || ordinal / 8 >= tail.size())
+            return;
+        const quint8 mask = quint8(1u << (ordinal % 8));
+        const quint8 old = quint8(tail[ordinal / 8]);
+        tail[ordinal / 8] = char(on ? (old | mask) : (old & ~mask));
+    };
+    if (clearAbsent)
+        for (auto it = loc.constBegin(); it != loc.constEnd(); ++it)
+            if (it->var && it->block < 0 && !present.contains(it.key()))
+                setBit(ordinals.value(it.key(), -1), false);
+    for (quint16 idx : present)
+        setBit(ordinals.value(idx, -1), true);
+}
+
 // ---- notes / cost rates / calendar data blobs ---------------------------------
 
 // Notes are the raw RTF source as an 8-bit NUL-terminated string (the reader's
@@ -1231,6 +1265,12 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
         FieldMap::entityFieldLocations(rscFm, MppFieldIds::kResourceHigh);
     const QHash<quint16, EntityFieldLoc> assnLoc =
         FieldMap::entityFieldLocations(assnFm, MppFieldIds::kAssignmentHigh);
+    const QHash<quint16, int> taskPresence =
+        FieldMap::presenceBitOrdinals(taskFm, MppFieldIds::kTaskHigh);
+    const QHash<quint16, int> rscPresence =
+        FieldMap::presenceBitOrdinals(rscFm, MppFieldIds::kResourceHigh);
+    const QHash<quint16, int> assnPresence =
+        FieldMap::presenceBitOrdinals(assnFm, MppFieldIds::kAssignmentHigh);
 
     // ---- template record/meta byte templates -----------------------------------
     const auto tplStream = [&](const char *ent, const char *st) {
@@ -1324,6 +1364,27 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             }
         }
 
+        // Timephased baseline values under each task: its own assignments'
+        // plus, for a summary (the UID-0 project summary included), those of
+        // every task below it -- Project stores the rolled-up spread on
+        // summary rows too, and sums their BCWS from it.
+        QHash<int, QList<schedule::TimephasedValue>> baselineValuesUnder;
+        for (const schedule::Assignment &assignment : in.assignments) {
+            QList<schedule::TimephasedValue> values;
+            for (const schedule::TimephasedValue &value : assignment.timephasedValues)
+                if (value.type == schedule::TimephasedValue::BaselineWork
+                    || value.type == schedule::TimephasedValue::BaselineCost)
+                    values.append(value);
+            if (values.isEmpty())
+                continue;
+            QSet<int> visited;
+            for (int uid = assignment.taskUniqueId; uid >= 0 && !visited.contains(uid);
+                 uid = int(qint32(parentUidOf.value(uid, quint32(-1))))) {
+                visited.insert(uid);
+                baselineValuesUnder[uid] += values;
+            }
+        }
+
         for (const schedule::Task *taskPtr : tasksByUid) {
             const schedule::Task &t = *taskPtr;
             const quint16 percentComplete = encodePercent(t.percentComplete);
@@ -1341,7 +1402,6 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // slightly from percent * duration), but replace the complete set
             // when it represents a different integer completion percentage.
             const qint64 completedDuration = amountAtPercent(t.durationMillis, percentComplete);
-            const qint64 remainingDuration = qMax<qint64>(0, t.durationMillis - completedDuration);
             const qint64 completedWork = amountAtPercent(t.workMillis, percentComplete);
             bool progressContradictsPercent = false;
             if (t.actualDurationMillis != 0) {
@@ -1384,7 +1444,12 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // every row as a project-summary and render ALL task text in the
             // bold Calibri-12 ProjectSummary text style (proved by
             // byte-bisecting 03_hierarchy_dependencies).
-            sink.putDuration(31, remainingDuration);
+            // Duration - the Actual Duration written below: Project's own
+            // pair always sums to Duration (7 h actual of 10 d: 420 + 4380).
+            // (A task with a % but no Actual Duration keeps the %-derived value.)
+            sink.putDuration(31, qMax<qint64>(0, t.durationMillis
+                                                 - (actualDuration > 0 ? actualDuration
+                                                                       : completedDuration)));
             sink.putDate(35, t.start);                               // (scheduled) START
             sink.putDate(36, t.finish);                              // (scheduled) FINISH
             // Project-authored completed tasks retain their calculated date
@@ -1528,6 +1593,23 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             sink.putCurrency(MppFieldIds::taskEvm.eac, t.evm.eac);
             sink.putDouble(MppFieldIds::taskEvm.tcpi, t.evm.tcpi);
             putBaselines(sink, t.baselines, MppFieldIds::taskBaselines);
+            // Task baseline spread (173 work / 174 cost): Project's BCWS and
+            // BCWP come from these, not from the assignments' own blobs.
+            if (baselineValuesUnder.contains(t.uniqueId)) {
+                const QList<schedule::TimephasedValue> assignmentValues =
+                    baselineValuesUnder.value(t.uniqueId);
+                const schedule::WorkCalendar taskCalendar(
+                    in, t.calendarUniqueId >= 0 ? t.calendarUniqueId : in.calendarUniqueId);
+                const QByteArray baselineWork = Mpp14Timephased::encodeBaselineWork(
+                    Mpp14Timephased::sumBaselineValues(
+                        assignmentValues, schedule::TimephasedValue::BaselineWork, 0, t.uniqueId),
+                    0, &taskCalendar);
+                const QByteArray baselineCost = Mpp14Timephased::encodeBaselineCost(
+                    Mpp14Timephased::sumBaselineValues(
+                        assignmentValues, schedule::TimephasedValue::BaselineCost, 0, t.uniqueId), 0);
+                if (!baselineWork.isEmpty()) sink.putVarBlob(173, baselineWork);
+                if (!baselineCost.isEmpty()) sink.putVarBlob(174, baselineCost);
+            }
             putCustomFields(sink, t.customFields, MppFieldIds::kTaskHigh,
                             MppFieldIds::taskCustomFields());
 
@@ -1539,6 +1621,7 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             if (!t.hyperlink.isEmpty() || !t.hyperlinkAddress.isEmpty()
                 || !t.hyperlinkSubAddress.isEmpty())
                 sink.putVarBlob(kTaskHyperlink, hyperlinkBlob(t));
+            const QList<quint16> taskVarKeys = varKeys(sink);
             flushVars(sink, vars, MppFieldIds::kTaskHigh);
 
             // Task GUID heads the Fixed2Data block.
@@ -1553,6 +1636,10 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // FixedMeta bit flags: MILESTONE int@10 & 0x02, EFFORT_DRIVEN int@13
             // & 0x08 (Project 2013/2016 tables). The tail starts at item byte 8.
             QByteArray metaTail = taskMetaTailTpl;
+            // Advertise exactly the var fields this row carries. Without it
+            // Project skips e.g. the baseline blobs (Baseline Start/Finish/
+            // Cost read NA/$0, so its SV and CPI came out 0).
+            applyVarPresence(metaTail, taskVarKeys, taskPresence, taskLoc, true);
             // The only full task row in the embedded scaffold is its project
             // summary. Three undocumented bits on that row are not harmless
             // defaults: copying them to ordinary rows makes Project classify
@@ -1596,11 +1683,11 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // the notes Var2Data blob unless the row's FixedMeta advertises it
             // -- tail byte 36 bit 0x10 plus header bit 0x00010000 (both taken
             // from a task row MS Project itself wrote in 06_unicode_notes).
-            quint32 metaHeader = 0x00080000u;
-            if (!t.notes.isEmpty()) {
+            // The header's third byte is the row's var-field count on every
+            // Project-authored task row.
+            if (!t.notes.isEmpty())
                 metaTail[36] = char(quint8(metaTail[36]) | 0x10);
-                metaHeader |= 0x00010000u;
-            }
+            const quint32 metaHeader = quint32(qMin<qsizetype>(taskVarKeys.size(), 0xFF)) << 16;
             fixed.addItem(metaHeader, rec, metaTail);
 
             // Fixed2Meta bit flags: TASK_MODE (manual) int@8 & 0x80.
@@ -1665,6 +1752,31 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             sink.putCurrency(MppFieldIds::resourceCost.actualCost, r.actualCost);
             sink.putCurrency(MppFieldIds::resourceCost.remainingCost, r.remainingCost);
             sink.putCurrency(MppFieldIds::resourceCost.costVariance, r.costVariance);
+            // STANDARD_RATE / OVERTIME_RATE (fixed doubles, per hour): the
+            // table-A rate in effect today. Project costs work from these; a
+            // single-entry table is stored ONLY here (no var-61 blob), and
+            // with them left 0 it reads every rate as $0.00/hr.
+            {
+                const QDateTime now = QDateTime::currentDateTime();
+                const schedule::CostRate *current = nullptr;
+                for (const schedule::CostRate &cr : r.costRates) {
+                    if (cr.table != 0)
+                        continue;
+                    if (!current)
+                        current = &cr;
+                    if ((!cr.startDate.isValid() || cr.startDate <= now)
+                        && (!cr.endDate.isValid() || now <= cr.endDate))
+                        current = &cr;
+                }
+                if (current) {
+                    const quint16 stdFmt = current->standardRateUnit == 2
+                        ? 0xFFFF : quint16(current->standardRateUnit);
+                    const quint16 otFmt = current->overtimeRateUnit == 2
+                        ? 0xFFFF : quint16(current->overtimeRateUnit);
+                    sink.putDouble(6, rateToHours(current->standardRate, stdFmt), true);
+                    sink.putDouble(7, rateToHours(current->overtimeRate, otFmt), true);
+                }
+            }
             sink.putWork(753, r.budgetWorkMillis, true);             // BUDGET_WORK
             sink.putCurrency(754, r.budgetCost, true);               // BUDGET_COST
             putBaselines(sink, r.baselines, MppFieldIds::resourceBaselines);
@@ -1690,6 +1802,7 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             }
             if (!r.availabilityTable.isEmpty())
                 sink.putVarBlob(kAvailabilityVarKey, availabilityBlob(r.availabilityTable));
+            const QList<quint16> rscVarKeys = varKeys(sink);
             flushVars(sink, vars, MppFieldIds::kResourceHigh);
 
             // Internal resource row ordinal. This is not exposed by the field
@@ -1730,6 +1843,10 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             const quint32 resourceMetaFlags =
                 r.type == schedule::Resource::Type::Material ? 0x00060000u
                                                               : 0x00050000u;
+            // Additive only: the hand-fitted live-row patterns above stay as
+            // they are; this adds the bits for var fields like multi-entry
+            // cost-rate tables (keys 61..65), which Project otherwise skips.
+            applyVarPresence(metaTail, rscVarKeys, rscPresence, rscLoc, false);
             fixed.addItem(resourceMetaFlags, rec, metaTail);
             QByteArray f2(kRscF2Block, '\0');
             // Project-authored resource Fixed2 rows contain the resource GUID,
@@ -1914,7 +2031,8 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                 const quint16 workKey = baseline == 0 ? 52 : quint16(282 + baseline * 9);
                 const quint16 costKey = quint16(workKey + 1);
                 const QByteArray baselineWork =
-                    Mpp14Timephased::encodeBaselineWork(a.timephasedValues, baseline);
+                    Mpp14Timephased::encodeBaselineWork(a.timephasedValues, baseline,
+                                                        &workCalendar);
                 const QByteArray baselineCost =
                     Mpp14Timephased::encodeBaselineCost(a.timephasedValues, baseline);
                 if (!baselineWork.isEmpty()) sink.putVarBlob(workKey, baselineWork);
@@ -1928,6 +2046,7 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                 appU32(created, encodeMppTimestamp(in.startDate));
                 sink.putVarBlob(634, created);
             }
+            const QList<quint16> assnVarKeys = varKeys(sink);
             flushVars(sink, vars, MppFieldIds::kAssignmentHigh);
 
             const bool unstarted = a.actualWorkMillis == 0
@@ -1957,6 +2076,10 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // Project-authored live assignment rows set the time-phased field
             // presence bit at metadata byte 32 (tail byte 24).
             metaTail[24] = char(quint8(metaTail[24]) | 0x40);
+            // Advertise the var fields written, above all the timephased
+            // baseline work/cost (52/53): without their bits Project has no
+            // baseline spread, so BCWS/BCWP and with them SV/CPI read 0.
+            applyVarPresence(metaTail, assnVarKeys, assnPresence, assnLoc, false);
             fixed.addItem(hasOvertime ? 0x000F0000u : 0x00090000u, rec, metaTail);
             // Assignment Fixed2Data is three GUIDs: assignment, task and
             // resource. Project uses these links in addition to the integer

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "model/projectreconciliation.h"
+#include "model/earnedvalue.h"
 #include "model/materialcosting.h"
 #include "model/schedulingcalendar.h"
 
@@ -457,6 +458,9 @@ void ProjectReconciliation::reconcile(Project &project)
         resource.remainingCost = totals.remainingCost;
         resource.costVariance = resource.cost - baselineCost(resource.baselines);
     }
+
+    // Earned value last: it reads the costs and rollups settled above.
+    EarnedValueCalculation::recalculate(project);
 }
 
 QStringList ProjectReconciliation::invariantViolations(const Project &project)

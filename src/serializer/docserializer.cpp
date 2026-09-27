@@ -1375,6 +1375,20 @@ void readRealResources(const CompoundFile &cf, schedule::Project &out, const Pro
             if (!rateBlob.isEmpty())
                 r.costRates.append(parseCostRateTable(rateBlob, ti));
         }
+        // Project stores a single-entry table A only in the fixed
+        // STANDARD_RATE / OVERTIME_RATE fields (6/7, per hour), with no
+        // var-61 blob.
+        const bool hasTableA = std::any_of(r.costRates.cbegin(), r.costRates.cend(),
+                                           [](const schedule::CostRate &c) { return c.table == 0; });
+        double standardPerHour = 0.0, overtimePerHour = 0.0;
+        readResourceDouble(6, &standardPerHour);
+        readResourceDouble(7, &overtimePerHour);
+        if (!hasTableA && (standardPerHour != 0.0 || overtimePerHour != 0.0)) {
+            schedule::CostRate a;
+            a.standardRate = standardPerHour;
+            a.overtimeRate = overtimePerHour;
+            r.costRates.prepend(a);
+        }
         const QByteArray availBlob = v.blobFor(uid, kAvailabilityVarKey);
         if (!availBlob.isEmpty())
             r.availabilityTable = parseAvailabilityTable(availBlob);

@@ -54,6 +54,23 @@ public:
     static bool setActualWork(Project &project, int taskUid, qint64 millis);
     static bool setRemainingWork(Project &project, int taskUid, qint64 millis);
 
+    // Task/Resource Usage "Act. Work" entry, after the grid has written the
+    // period's actual work. As in Project, the assignment now starts with its
+    // first actual work and is finished through its last; its planned work
+    // profile (by working-time offset from the start) is kept, and the part
+    // past the finished span is re-laid after Stop, scaled to the remaining
+    // work. Then re-derive the task's progress with syncTaskProgress.
+    static bool closeActualPeriod(Project &project, int assignmentUid);
+
+    // Derive a leaf task's Actual Start, Actual Duration, % Complete and Actual
+    // Finish from its Work assignments' time-phased actual work, as Project
+    // does: each assignment is complete through the end of its last actual
+    // work (snapped to working time), the task's Actual Duration is the working
+    // time from Start to there -- weighted by Work across assignments -- and
+    // % Complete is Actual Duration / Duration. Returns false for summaries or
+    // tasks without Work assignments.
+    static bool syncTaskProgress(Project &project, int taskUid);
+
     // Empty taskUids means the whole project. Returns the number of leaf tasks
     // whose incomplete schedule changed.
     static int rescheduleIncompleteWork(Project &project, const QDateTime &after,

@@ -744,4 +744,203 @@ int ProgressUpdating::rescheduleIncompleteWork(Project &project,
     return changed;
 }
 
+bool ProgressUpdating::closeActualPeriod(Project &project, int assignmentUid)
+{
+    Assignment *assignment = nullptr;
+    for (Assignment &candidate : project.assignments)
+        if (candidate.uniqueId == assignmentUid) {
+            assignment = &candidate;
+            break;
+        }
+    if (!assignment)
+        return false;
+    Task *task = taskByUid(project, assignment->taskUniqueId);
+    if (!task || !isWorkAssignment(project, *assignment))
+        return false;
+    const WorkCalendar calendar = SchedulingCalendar::assignment(project, *task, *assignment);
+    auto isWork = [](const TimephasedValue &v) {
+        return v.type == TimephasedValue::ActualWork || v.type == TimephasedValue::RemainingWork;
+    };
+
+    // The planned profile, by working-time offset from where the work began:
+    // every period's actual + remaining, before this edit moved anything.
+    QDateTime origin;
+    for (const TimephasedValue &v : std::as_const(assignment->timephasedValues))
+        if (isWork(v) && v.durationMillis() > 0 && (!origin.isValid() || v.start < origin))
+            origin = v.start;
+    if (!origin.isValid())
+        return false;
+    origin = calendar.nextWorkStart(origin);
+
+    // The grid writes whole periods (midnight to midnight); Project's actual
+    // work -- and so Stop -- runs over working time only.
+    QDateTime actualStart, stop;
+    qint64 remainingTotal = 0;
+    for (TimephasedValue &v : assignment->timephasedValues) {
+        if (v.type == TimephasedValue::RemainingWork)
+            remainingTotal += qMax<qint64>(0, v.durationMillis());
+        if ((v.type != TimephasedValue::ActualWork
+             && v.type != TimephasedValue::ActualOvertimeWork) || v.durationMillis() <= 0)
+            continue;
+        const QDateTime start = calendar.nextWorkStart(v.start);
+        const QDateTime finish = calendar.prevWorkEnd(v.finish);
+        if (start < finish) {
+            v.start = start;
+            v.finish = finish;
+        }
+        if (v.type == TimephasedValue::ActualWork) {
+            if (!actualStart.isValid() || v.start < actualStart) actualStart = v.start;
+            if (!stop.isValid() || stop < v.finish) stop = v.finish;
+        }
+    }
+    if (!actualStart.isValid())
+        return false;
+
+    struct Piece { qint64 from = 0, to = 0; double work = 0.0; };
+    QList<Piece> profile;
+    for (const TimephasedValue &v : std::as_const(assignment->timephasedValues)) {
+        if (!isWork(v) || v.durationMillis() <= 0)
+            continue;
+        const qint64 from = calendar.workBetween(origin, calendar.nextWorkStart(v.start));
+        const qint64 to = calendar.workBetween(origin, v.finish);
+        if (to > from)
+            profile.append({ from, to, double(v.durationMillis()) });
+    }
+
+    // Project moves Start to the first actual work and keeps the task's shape:
+    // the part of the profile past the completed span is laid out after Stop
+    // and scaled to the remaining work, so the finish holds (Project 2016:
+    // 7 h on day 1 of a flat 10-day task -> 486.67 on each later day; actual
+    // on day 2 only -> the task starts a day later at 500/day).
+    const qint64 completed = calendar.workBetween(actualStart, stop);
+    struct Slot { qint64 from, to; double work; };
+    QList<Slot> layout;
+    double later = 0.0;
+    for (const Piece &piece : std::as_const(profile)) {
+        if (piece.to <= completed)
+            continue;
+        const qint64 from = qMax(piece.from, completed);
+        const double work = piece.work * double(piece.to - from) / double(piece.to - piece.from);
+        layout.append({ from, piece.to, work });
+        later += work;
+    }
+    std::sort(layout.begin(), layout.end(), [](const Slot &a, const Slot &b) { return a.from < b.from; });
+
+    QList<TimephasedValue> kept;
+    for (const TimephasedValue &v : std::as_const(assignment->timephasedValues))
+        if (v.type != TimephasedValue::RemainingWork)
+            kept.append(v);
+    auto remainingBucket = [&](const QDateTime &from, const QDateTime &to, qint64 amount) {
+        TimephasedValue value;
+        value.type = TimephasedValue::RemainingWork;
+        value.uniqueId = assignment->uniqueId;
+        value.start = from;
+        value.finish = to;
+        value.unit = 1;
+        value.value = isoDuration(amount);
+        kept.append(value);
+    };
+    QDateTime finish = stop;
+    if (remainingTotal > 0 && later > 0.0) {
+        qint64 allocated = 0;
+        for (int i = 0; i < layout.size(); ++i) {
+            const qint64 amount = i + 1 == layout.size()
+                ? remainingTotal - allocated
+                // whole seconds: buckets store their value to the second
+                : 1000 * qint64(std::llround(layout.at(i).work * double(remainingTotal)
+                                             / later / 1000.0));
+            allocated += amount;
+            const QDateTime from = calendar.nextWorkStart(
+                calendar.addWork(actualStart, layout.at(i).from));
+            const QDateTime to = calendar.addWork(actualStart, layout.at(i).to);
+            if (amount > 0)
+                remainingBucket(from, to, amount);
+            finish = qMax(finish, to);
+        }
+    } else if (remainingTotal > 0) {
+        // Nothing planned past the actuals: the rest follows Stop.
+        const QDateTime from = calendar.nextWorkStart(stop);
+        finish = calendar.addWork(from, qint64(std::llround(
+            double(remainingTotal) / qMax(kMinUnits, assignment->units))));
+        remainingBucket(from, finish, remainingTotal);
+    }
+    std::sort(kept.begin(), kept.end(), [](const TimephasedValue &a, const TimephasedValue &b) {
+        return a.start != b.start ? a.start < b.start : a.type < b.type;
+    });
+    assignment->timephasedValues = kept;
+    assignment->start = actualStart;
+    assignment->finish = finish;
+    return true;
+}
+
+bool ProgressUpdating::syncTaskProgress(Project &project, int taskUid)
+{
+    Task *task = taskByUid(project, taskUid);
+    if (!task || task->summary)
+        return false;
+    const WorkCalendar calendar = SchedulingCalendar::taskBase(project, *task);
+
+    struct Progress { QDateTime through; qint64 actual = 0; qint64 remaining = 0; double weight = 1.0; };
+    QList<Progress> progress;
+    QDateTime firstActual, lastActual;
+    for (const Assignment &assignment : std::as_const(project.assignments)) {
+        if (assignment.taskUniqueId != taskUid || !isWorkAssignment(project, assignment))
+            continue;
+        Progress p;
+        p.remaining = qMax<qint64>(0, assignment.remainingWorkMillis);
+        p.weight = double(qMax<qint64>(1, assignment.workMillis));
+        for (const TimephasedValue &value : assignment.timephasedValues)
+            if (value.type == TimephasedValue::ActualWork && value.durationMillis() > 0) {
+                p.actual += value.durationMillis();
+                if (!firstActual.isValid() || value.start < firstActual) firstActual = value.start;
+                if (!p.through.isValid() || p.through < value.finish) p.through = value.finish;
+            }
+        if (p.through.isValid()) {
+            p.through = calendar.prevWorkEnd(p.through);
+            if (!lastActual.isValid() || lastActual < p.through) lastActual = p.through;
+        }
+        progress.append(p);
+    }
+    if (progress.isEmpty())
+        return false;
+
+    qint64 totalActual = 0, totalRemaining = 0;
+    for (const Progress &p : std::as_const(progress)) {
+        totalActual += p.actual;
+        totalRemaining += p.remaining;
+    }
+    if (totalActual <= 0) {
+        task->actualStart = {};
+        task->actualFinish = {};
+        task->actualDurationMillis = 0;
+        task->percentComplete = 0.0;
+        return true;
+    }
+
+    // A started task begins at its first actual work and keeps its duration
+    // (Project 2016: actual entered only on day 2 moved Start and Finish a day).
+    task->actualStart = calendar.nextWorkStart(firstActual);
+    task->start = task->actualStart;
+    task->finish = SchedulingCalendar::finish(project, *task, task->start);
+
+    const bool done = totalRemaining == 0;
+    double weighted = 0.0, weights = 0.0;
+    for (const Progress &p : std::as_const(progress)) {
+        const qint64 completed = p.actual > 0 && p.through.isValid()
+            ? qBound<qint64>(0, calendar.workBetween(task->start, p.through),
+                             qMax<qint64>(0, task->durationMillis))
+            : 0;
+        weighted += p.weight * double(completed);
+        weights += p.weight;
+    }
+    task->actualDurationMillis = done
+        ? qMax<qint64>(0, task->durationMillis)
+        : qint64(std::llround(weights > 0.0 ? weighted / weights : 0.0));
+    task->percentComplete = task->durationMillis > 0
+        ? qBound(0.0, double(task->actualDurationMillis) / double(task->durationMillis), 1.0)
+        : (done ? 1.0 : 0.0);
+    task->actualFinish = done && lastActual.isValid() ? lastActual : QDateTime();
+    return true;
+}
+
 } // namespace schedule

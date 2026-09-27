@@ -35,6 +35,14 @@ QHash<quint16, EntityFieldLoc> entityFieldLocations(const QByteArray &fm, quint1
 // keeping only entries whose high word matches the entity and that live in block 0.
 QHash<quint16, int> block0FixedOffsets(const QByteArray &fm, quint16 highWord);
 
+// Field index -> ordinal among this entity's field-map entries (first entry wins).
+// A row's FixedMeta item is a presence bitmap from item byte 8 on: bit `ordinal`
+// of that tail is set exactly when the row carries the field. For var fields
+// Project reads the Var2Data blob only when its bit is set, so a writer must
+// set it (fitted on every task row of the mpp_samples corpus, 2026-09-27).
+// Ordinals past the end of the item have no bit.
+QHash<quint16, int> presenceBitOrdinals(const QByteArray &fm, quint16 highWord);
+
 // Fetch an entity field map from the project Props (primary key, else fallback).
 QByteArray fieldMapBytes(const PropsReader &props, quint32 key1, quint32 key2);
 

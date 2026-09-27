@@ -66,6 +66,24 @@ QHash<quint16, int> block0FixedOffsets(const QByteArray &fm, quint16 highWord)
     return out;
 }
 
+QHash<quint16, int> presenceBitOrdinals(const QByteArray &fm, quint16 highWord)
+{
+    using namespace FieldDecoders;
+    QHash<quint16, int> out;
+    int ordinal = 0;
+    for (int i = 0; i + 28 <= fm.size(); i += 28) {
+        quint32 typeValue = 0;
+        readU32(fm, i + 12, &typeValue);
+        if ((typeValue >> 16) != highWord)
+            continue;
+        const quint16 idx = static_cast<quint16>(typeValue & 0xFFFF);
+        if (!out.contains(idx))
+            out.insert(idx, ordinal);
+        ++ordinal;
+    }
+    return out;
+}
+
 QByteArray fieldMapBytes(const PropsReader &props, quint32 key1, quint32 key2)
 {
     QByteArray b = props.value(key1);

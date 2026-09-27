@@ -53,6 +53,7 @@ set(SCHEDULEIO_SOURCES
     src/model/materialcosting.cpp
     src/model/projectreconciliation.cpp
     src/model/progressupdating.cpp
+    src/model/earnedvalue.cpp
     src/model/workcontouring.cpp
     src/model/resourceleveling.cpp
     src/serializer/docserializer.cpp
@@ -100,6 +101,7 @@ set(SCHEDULEIO_HEADERS
     src/model/materialcosting.h
     src/model/projectreconciliation.h
     src/model/progressupdating.h
+    src/model/earnedvalue.h
     src/model/workcontouring.h
     src/model/resourceleveling.h
     src/serializer/docserializer.h
