@@ -1,0 +1,6 @@
+/* Let documentation use the full space beside the Read the Docs sidebar. */
+.wy-nav-content {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}

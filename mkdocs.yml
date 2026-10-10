@@ -33,6 +33,7 @@ nav:
     - 'MPP File Format and Storage': Reference/FileFormat.md
 
 extra_css:
+  - stylesheets/layout.css
   - stylesheets/erd.css
 
 markdown_extensions:
