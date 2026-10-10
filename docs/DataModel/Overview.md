@@ -1,5 +1,8 @@
 # Data Model Overview
 
+See the [Entity Relationship Diagram](EntityRelationship.md) for the full attribute catalog,
+primary and foreign keys, and collection relationships.
+
 When you read a file, MppIO fills in a single [`schedule::Project`](Project.md) object. Everything else
 hangs off it as `QList`s of value types.
 

@@ -17,6 +17,7 @@ nav:
     - 'XmlIO Class': API/XmlIO.md
     - 'Scheduling Utilities': API/Scheduling.md
   - 'Data Model':
+    - 'Entity Relationship Diagram': DataModel/EntityRelationship.md
     - 'Overview': DataModel/Overview.md
     - 'Project': DataModel/Project.md
     - 'Task': DataModel/Task.md
@@ -30,6 +31,9 @@ nav:
   - 'Reference':
     - 'Field Coverage': Reference/FieldCoverage.md
     - 'MPP File Format and Storage': Reference/FileFormat.md
+
+extra_css:
+  - stylesheets/erd.css
 
 markdown_extensions:
   - tables

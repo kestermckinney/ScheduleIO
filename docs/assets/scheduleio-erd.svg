@@ -1,0 +1,1258 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 2000 7900" role="img" aria-labelledby="title desc">
+<title id="title">ScheduleIO entity relationship diagram</title>
+<desc id="desc">A scalable entity relationship diagram and complete attribute catalog for the ScheduleIO project model, including primary keys, foreign keys, project and task fields, owned value records, calendars, assignments, dependencies, and view state.</desc>
+<defs>
+  <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#138b88"/></marker>
+  <linearGradient id="page" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f5f9ff"/><stop offset="1" stop-color="#edf5f6"/></linearGradient>
+</defs>
+<style>
+  * { box-sizing:border-box }
+  .bg { fill:url(#page) }
+  .title { font:700 42px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#12243a;letter-spacing:-.7px }
+  .lead { font:400 19px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#496176 }
+  .section { font:700 25px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#17304a }
+  .section-note { font:400 16px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#607488 }
+  .rel-row { fill:#fff;stroke:#cfdae5;stroke-width:1.5 }
+  .rel-entity { font:700 18px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#18314a }
+  .rel-line { fill:none;stroke:#138b88;stroke-width:2.3 }
+  .rel-label { font:600 15px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#138b88 }
+  .rel-detail { font:400 13px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#607488 }
+  .card { fill:#fff;stroke-width:2 }
+  .card-title { font:700 22px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#fff }
+  .card-subtitle { font:400 13px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#e6f3f3 }
+  .rowline { stroke:#e9eef3;stroke-width:1 }
+  .field { font:600 15px ui-monospace,SFMono-Regular,Consolas,monospace;fill:#20364d }
+  .type { font:400 13px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#75869a }
+  .badge-pk { fill:#f5c857 } .badge-fk { fill:#b9e9e5 }
+  .badge-text { font:700 11px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#18314a }
+  .note { font:400 15px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#536b80 }
+  .footer { font:500 14px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#6c7e90 }
+</style>
+<rect class="bg" x="0" y="0" width="2000" height="7900"/>
+<text class="title" x="80" y="82">ScheduleIO · Entity Relationship Diagram</text>
+<text class="lead" x="80" y="119">Complete model map · scalar attributes · stable identities · explicit and collection-owned links</text>
+<text class="section" x="80" y="181">Relationships</text>
+<text class="section-note" x="340" y="181">ScheduleIO stores a value model; owned values are not separate SQL tables.</text>
+
+<g><rect class="rel-row" x="90" y="206" width="1820" height="62" rx="15"/>
+<text class="rel-entity" x="114" y="231">Project</text>
+<path class="rel-line" d="M690 229H1310" marker-end="url(#arrow)"/>
+<text class="rel-label" x="1000.0" y="222" text-anchor="middle">1 : *</text>
+<text class="rel-entity" x="1886" y="231" text-anchor="end">Project collections</text>
+<text class="rel-detail" x="1000.0" y="254" text-anchor="middle">tasks · resources · assignments · relations · calendars · customFieldDefinitions</text></g>
+<g><rect class="rel-row" x="90" y="275" width="1820" height="62" rx="15"/>
+<text class="rel-entity" x="114" y="300">Task</text>
+<path class="rel-line" d="M690 298H1310" marker-end="url(#arrow)"/>
+<text class="rel-label" x="1000.0" y="291" text-anchor="middle">1 : *</text>
+<text class="rel-entity" x="1886" y="300" text-anchor="end">Assignment</text>
+<text class="rel-detail" x="1000.0" y="323" text-anchor="middle">Assignment.taskUniqueId → Task.uniqueId</text></g>
+<g><rect class="rel-row" x="90" y="344" width="1820" height="62" rx="15"/>
+<text class="rel-entity" x="114" y="369">Resource</text>
+<path class="rel-line" d="M690 367H1310" marker-end="url(#arrow)"/>
+<text class="rel-label" x="1000.0" y="360" text-anchor="middle">1 : *</text>
+<text class="rel-entity" x="1886" y="369" text-anchor="end">Assignment</text>
+<text class="rel-detail" x="1000.0" y="392" text-anchor="middle">Assignment.resourceUniqueId → Resource.uniqueId</text></g>
+<g><rect class="rel-row" x="90" y="413" width="1820" height="62" rx="15"/>
+<text class="rel-entity" x="114" y="438">Task</text>
+<path class="rel-line" d="M690 436H1310" marker-end="url(#arrow)"/>
+<text class="rel-label" x="1000.0" y="429" text-anchor="middle">1 : *</text>
+<text class="rel-entity" x="1886" y="438" text-anchor="end">Relation</text>
+<text class="rel-detail" x="1000.0" y="461" text-anchor="middle">Relation.predecessorTaskUid / successorTaskUid → Task.uniqueId</text></g>
+<g><rect class="rel-row" x="90" y="482" width="1820" height="62" rx="15"/>
+<text class="rel-entity" x="114" y="507">Calendar</text>
+<path class="rel-line" d="M690 505H1310" marker-end="url(#arrow)"/>
+<text class="rel-label" x="1000.0" y="498" text-anchor="middle">0..1 : *</text>
+<text class="rel-entity" x="1886" y="507" text-anchor="end">Calendar</text>
+<text class="rel-detail" x="1000.0" y="530" text-anchor="middle">Calendar.baseCalendarUniqueId → Calendar.uniqueId</text></g>
+<g><rect class="rel-row" x="90" y="551" width="1820" height="62" rx="15"/>
+<text class="rel-entity" x="114" y="576">Project · Task · Resource</text>
+<path class="rel-line" d="M690 574H1310" marker-end="url(#arrow)"/>
+<text class="rel-label" x="1000.0" y="567" text-anchor="middle">0..1 : 1</text>
+<text class="rel-entity" x="1886" y="576" text-anchor="end">Calendar</text>
+<text class="rel-detail" x="1000.0" y="599" text-anchor="middle">calendarUniqueId → Calendar.uniqueId</text></g>
+<g><rect class="rel-row" x="90" y="620" width="1820" height="62" rx="15"/>
+<text class="rel-entity" x="114" y="645">Task · Resource · Assignment</text>
+<path class="rel-line" d="M690 643H1310" marker-end="url(#arrow)"/>
+<text class="rel-label" x="1000.0" y="636" text-anchor="middle">1 : *</text>
+<text class="rel-entity" x="1886" y="645" text-anchor="end">Baseline · CustomField</text>
+<text class="rel-detail" x="1000.0" y="668" text-anchor="middle">value collections scoped to their owning record</text></g>
+<g><rect class="rel-row" x="90" y="689" width="1820" height="62" rx="15"/>
+<text class="rel-entity" x="114" y="714">Resource · Assignment · Calendar</text>
+<path class="rel-line" d="M690 712H1310" marker-end="url(#arrow)"/>
+<text class="rel-label" x="1000.0" y="705" text-anchor="middle">1 : *</text>
+<text class="rel-entity" x="1886" y="714" text-anchor="end">Owned value records</text>
+<text class="rel-detail" x="1000.0" y="737" text-anchor="middle">CostRate · AvailabilityPeriod · TimephasedValue · CalendarException · TimeRange</text></g>
+<text class="section" x="80" y="820">Core entities and every public attribute</text>
+<text class="section-note" x="80" y="850">PK = stable uniqueId; FK = UID reference. Project is the root document and has no standalone UID.</text>
+<g class="entity"><rect class="card" x="80" y="885" width="2240" height="713" rx="18" stroke="#183c63"/>
+<path d="M98 885H2302Q2320 885 2320 903V967H80V903Q80 885 98 885Z" fill="#183c63"/>
+<text class="card-title" x="104" y="919">Project</text>
+<text class="card-subtitle" x="104" y="946">Root document · no standalone primary key · options, collections, opaque preservation, and view state</text>
+<text class="field" x="97.0" y="964">formatVersion</text>
+<text class="type" x="808.6666666666666" y="964" text-anchor="end">FormatVersion</text>
+<path class="rowline" d="M96.0 989H810.6666666666666"/>
+<text class="field" x="97.0" y="993">title</text>
+<text class="type" x="808.6666666666666" y="993" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 1018H810.6666666666666"/>
+<text class="field" x="97.0" y="1022">author</text>
+<text class="type" x="808.6666666666666" y="1022" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 1047H810.6666666666666"/>
+<text class="field" x="97.0" y="1051">startDate</text>
+<text class="type" x="808.6666666666666" y="1051" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 1076H810.6666666666666"/>
+<text class="field" x="97.0" y="1080">finishDate</text>
+<text class="type" x="808.6666666666666" y="1080" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 1105H810.6666666666666"/>
+<text class="field" x="97.0" y="1109">scheduleFromStart</text>
+<text class="type" x="808.6666666666666" y="1109" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 1134H810.6666666666666"/>
+<text class="field" x="97.0" y="1138">multipleCriticalPaths</text>
+<text class="type" x="808.6666666666666" y="1138" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 1163H810.6666666666666"/>
+<text class="field" x="97.0" y="1167">statusDate</text>
+<text class="type" x="808.6666666666666" y="1167" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 1192H810.6666666666666"/>
+<rect class="badge-fk" x="767.6666666666666" y="1181" width="43" height="20" rx="7"/>
+<text class="badge-text" x="789.1666666666666" y="1195" text-anchor="middle">FK</text>
+<text class="field" x="97.0" y="1196">calendarUniqueId</text>
+<text class="type" x="745.6666666666666" y="1196" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 1221H810.6666666666666"/>
+<text class="field" x="97.0" y="1225">budgetCost</text>
+<text class="type" x="808.6666666666666" y="1225" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 1250H810.6666666666666"/>
+<text class="field" x="97.0" y="1254">budgetWorkMillis</text>
+<text class="type" x="808.6666666666666" y="1254" text-anchor="end">qint64</text>
+<path class="rowline" d="M96.0 1279H810.6666666666666"/>
+<text class="field" x="97.0" y="1283">tasks</text>
+<text class="type" x="808.6666666666666" y="1283" text-anchor="end">QList&lt;Task&gt;</text>
+<path class="rowline" d="M96.0 1308H810.6666666666666"/>
+<text class="field" x="97.0" y="1312">resources</text>
+<text class="type" x="808.6666666666666" y="1312" text-anchor="end">QList&lt;Resource&gt;</text>
+<path class="rowline" d="M96.0 1337H810.6666666666666"/>
+<text class="field" x="97.0" y="1341">assignments</text>
+<text class="type" x="808.6666666666666" y="1341" text-anchor="end">QList&lt;Assignment&gt;</text>
+<path class="rowline" d="M96.0 1366H810.6666666666666"/>
+<text class="field" x="97.0" y="1370">calendars</text>
+<text class="type" x="808.6666666666666" y="1370" text-anchor="end">QList&lt;Calendar&gt;</text>
+<path class="rowline" d="M96.0 1395H810.6666666666666"/>
+<text class="field" x="97.0" y="1399">relations</text>
+<text class="type" x="808.6666666666666" y="1399" text-anchor="end">QList&lt;Relation&gt;</text>
+<path class="rowline" d="M96.0 1424H810.6666666666666"/>
+<text class="field" x="97.0" y="1428">customFieldDefinitions</text>
+<text class="type" x="808.6666666666666" y="1428" text-anchor="end">QList&lt;CustomField&gt;</text>
+<path class="rowline" d="M96.0 1453H810.6666666666666"/>
+<text class="field" x="97.0" y="1457">mppFontBases</text>
+<text class="type" x="808.6666666666666" y="1457" text-anchor="end">QByteArray</text>
+<path class="rowline" d="M96.0 1482H810.6666666666666"/>
+<text class="field" x="97.0" y="1486">mppBarExceptions</text>
+<text class="type" x="808.6666666666666" y="1486" text-anchor="end">QByteArray</text>
+<path class="rowline" d="M96.0 1511H810.6666666666666"/>
+<text class="field" x="97.0" y="1515">mppSourceTemplate</text>
+<text class="type" x="808.6666666666666" y="1515" text-anchor="end">QByteArray</text>
+<path class="rowline" d="M96.0 1540H810.6666666666666"/>
+<text class="field" x="97.0" y="1544">viewStyles</text>
+<text class="type" x="808.6666666666666" y="1544" text-anchor="end">ViewStyles</text>
+<text class="field" x="843.6666666666666" y="964">resourceUsageStyles</text>
+<text class="type" x="1555.3333333333333" y="964" text-anchor="end">ViewStyles</text>
+<path class="rowline" d="M842.6666666666666 989H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="993">ganttView</text>
+<text class="type" x="1555.3333333333333" y="993" text-anchor="end">UsageViewSettings</text>
+<path class="rowline" d="M842.6666666666666 1018H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1022">resourceUsageView</text>
+<text class="type" x="1555.3333333333333" y="1022" text-anchor="end">UsageViewSettings</text>
+<path class="rowline" d="M842.6666666666666 1047H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1051">taskUsageView</text>
+<text class="type" x="1555.3333333333333" y="1051" text-anchor="end">UsageViewSettings</text>
+<path class="rowline" d="M842.6666666666666 1076H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1080">teamPlannerView</text>
+<text class="type" x="1555.3333333333333" y="1080" text-anchor="end">UsageViewSettings</text>
+<path class="rowline" d="M842.6666666666666 1105H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1109">teamPlannerStyles</text>
+<text class="type" x="1555.3333333333333" y="1109" text-anchor="end">ViewStyles</text>
+<path class="rowline" d="M842.6666666666666 1134H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1138">calendarStyles</text>
+<text class="type" x="1555.3333333333333" y="1138" text-anchor="end">ViewStyles</text>
+<path class="rowline" d="M842.6666666666666 1163H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1167">timelineView</text>
+<text class="type" x="1555.3333333333333" y="1167" text-anchor="end">TimelineViewSettings</text>
+<path class="rowline" d="M842.6666666666666 1192H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1196">reportAccentColor</text>
+<text class="type" x="1555.3333333333333" y="1196" text-anchor="end">qint32</text>
+<path class="rowline" d="M842.6666666666666 1221H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1225">newTasksManual</text>
+<text class="type" x="1555.3333333333333" y="1225" text-anchor="end">bool</text>
+<path class="rowline" d="M842.6666666666666 1250H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1254">newTaskStartIsProjectStart</text>
+<text class="type" x="1555.3333333333333" y="1254" text-anchor="end">bool</text>
+<path class="rowline" d="M842.6666666666666 1279H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1283">defaultTaskType</text>
+<text class="type" x="1555.3333333333333" y="1283" text-anchor="end">int</text>
+<path class="rowline" d="M842.6666666666666 1308H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1312">defaultDurationUnits</text>
+<text class="type" x="1555.3333333333333" y="1312" text-anchor="end">int</text>
+<path class="rowline" d="M842.6666666666666 1337H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1341">defaultWorkUnits</text>
+<text class="type" x="1555.3333333333333" y="1341" text-anchor="end">int</text>
+<path class="rowline" d="M842.6666666666666 1366H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1370">newTasksEffortDriven</text>
+<text class="type" x="1555.3333333333333" y="1370" text-anchor="end">bool</text>
+<path class="rowline" d="M842.6666666666666 1395H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1399">autoLinkTasks</text>
+<text class="type" x="1555.3333333333333" y="1399" text-anchor="end">bool</text>
+<path class="rowline" d="M842.6666666666666 1424H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1428">splitInProgressTasks</text>
+<text class="type" x="1555.3333333333333" y="1428" text-anchor="end">bool</text>
+<path class="rowline" d="M842.6666666666666 1453H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1457">honorConstraints</text>
+<text class="type" x="1555.3333333333333" y="1457" text-anchor="end">bool</text>
+<path class="rowline" d="M842.6666666666666 1482H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1486">criticalSlackLimit</text>
+<text class="type" x="1555.3333333333333" y="1486" text-anchor="end">int</text>
+<path class="rowline" d="M842.6666666666666 1511H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1515">weekStartDay</text>
+<text class="type" x="1555.3333333333333" y="1515" text-anchor="end">int</text>
+<path class="rowline" d="M842.6666666666666 1540H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1544">fiscalYearStartMonth</text>
+<text class="type" x="1555.3333333333333" y="1544" text-anchor="end">int</text>
+<text class="field" x="1590.3333333333333" y="964">fiscalYearUsesStartYear</text>
+<text class="type" x="2302.0" y="964" text-anchor="end">bool</text>
+<path class="rowline" d="M1589.3333333333333 989H2304.0"/>
+<text class="field" x="1590.3333333333333" y="993">defaultStartTime</text>
+<text class="type" x="2302.0" y="993" text-anchor="end">QTime</text>
+<path class="rowline" d="M1589.3333333333333 1018H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1022">defaultEndTime</text>
+<text class="type" x="2302.0" y="1022" text-anchor="end">QTime</text>
+<path class="rowline" d="M1589.3333333333333 1047H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1051">minutesPerDay</text>
+<text class="type" x="2302.0" y="1051" text-anchor="end">int</text>
+<path class="rowline" d="M1589.3333333333333 1076H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1080">minutesPerWeek</text>
+<text class="type" x="2302.0" y="1080" text-anchor="end">int</text>
+<path class="rowline" d="M1589.3333333333333 1105H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1109">daysPerMonth</text>
+<text class="type" x="2302.0" y="1109" text-anchor="end">int</text>
+<path class="rowline" d="M1589.3333333333333 1134H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1138">moveCompletedEndsBack</text>
+<text class="type" x="2302.0" y="1138" text-anchor="end">bool</text>
+<path class="rowline" d="M1589.3333333333333 1163H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1167">moveRemainingStartsBack</text>
+<text class="type" x="2302.0" y="1167" text-anchor="end">bool</text>
+<path class="rowline" d="M1589.3333333333333 1192H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1196">moveRemainingStartsForward</text>
+<text class="type" x="2302.0" y="1196" text-anchor="end">bool</text>
+<path class="rowline" d="M1589.3333333333333 1221H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1225">moveCompletedEndsForward</text>
+<text class="type" x="2302.0" y="1225" text-anchor="end">bool</text>
+<path class="rowline" d="M1589.3333333333333 1250H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1254">statusUpdatesResource</text>
+<text class="type" x="2302.0" y="1254" text-anchor="end">bool</text>
+<path class="rowline" d="M1589.3333333333333 1279H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1283">currencySymbol</text>
+<text class="type" x="2302.0" y="1283" text-anchor="end">QString</text>
+<path class="rowline" d="M1589.3333333333333 1308H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1312">currencySymbolPosition</text>
+<text class="type" x="2302.0" y="1312" text-anchor="end">int</text>
+<path class="rowline" d="M1589.3333333333333 1337H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1341">currencyDigits</text>
+<text class="type" x="2302.0" y="1341" text-anchor="end">int</text>
+<path class="rowline" d="M1589.3333333333333 1366H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1370">currencyCode</text>
+<text class="type" x="2302.0" y="1370" text-anchor="end">QString</text>
+<path class="rowline" d="M1589.3333333333333 1395H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1399">defaultStandardRate</text>
+<text class="type" x="2302.0" y="1399" text-anchor="end">double</text>
+<path class="rowline" d="M1589.3333333333333 1424H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1428">defaultOvertimeRate</text>
+<text class="type" x="2302.0" y="1428" text-anchor="end">double</text>
+<path class="rowline" d="M1589.3333333333333 1453H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1457">defaultFixedCostAccrual</text>
+<text class="type" x="2302.0" y="1457" text-anchor="end">int</text>
+<path class="rowline" d="M1589.3333333333333 1482H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1486">defaultEarnedValueMethod</text>
+<text class="type" x="2302.0" y="1486" text-anchor="end">int</text>
+<path class="rowline" d="M1589.3333333333333 1511H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1515">baselineForEarnedValue</text>
+<text class="type" x="2302.0" y="1515" text-anchor="end">int</text>
+<path class="rowline" d="M1589.3333333333333 1540H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1544">showProjectSummaryTask</text>
+<text class="type" x="2302.0" y="1544" text-anchor="end">bool</text>
+</g>
+<g class="entity"><rect class="card" x="80" y="1626" width="2240" height="713" rx="18" stroke="#176d78"/>
+<path d="M98 1626H2302Q2320 1626 2320 1644V1708H80V1644Q80 1626 98 1626Z" fill="#176d78"/>
+<text class="card-title" x="104" y="1660">Task</text>
+<text class="card-subtitle" x="104" y="1687">PK uniqueId · id is display order; outlineLevel and WBS describe hierarchy without a parent FK</text>
+<rect class="badge-pk" x="767.6666666666666" y="1690" width="43" height="20" rx="7"/>
+<text class="badge-text" x="789.1666666666666" y="1704" text-anchor="middle">PK</text>
+<text class="field" x="97.0" y="1705">uniqueId</text>
+<text class="type" x="745.6666666666666" y="1705" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 1730H810.6666666666666"/>
+<text class="field" x="97.0" y="1734">id</text>
+<text class="type" x="808.6666666666666" y="1734" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 1759H810.6666666666666"/>
+<text class="field" x="97.0" y="1763">outlineLevel</text>
+<text class="type" x="808.6666666666666" y="1763" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 1788H810.6666666666666"/>
+<text class="field" x="97.0" y="1792">name</text>
+<text class="type" x="808.6666666666666" y="1792" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 1817H810.6666666666666"/>
+<text class="field" x="97.0" y="1821">start</text>
+<text class="type" x="808.6666666666666" y="1821" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 1846H810.6666666666666"/>
+<text class="field" x="97.0" y="1850">finish</text>
+<text class="type" x="808.6666666666666" y="1850" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 1875H810.6666666666666"/>
+<text class="field" x="97.0" y="1879">durationMillis</text>
+<text class="type" x="808.6666666666666" y="1879" text-anchor="end">qint64</text>
+<path class="rowline" d="M96.0 1904H810.6666666666666"/>
+<text class="field" x="97.0" y="1908">durationFormat</text>
+<text class="type" x="808.6666666666666" y="1908" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 1933H810.6666666666666"/>
+<text class="field" x="97.0" y="1937">workMillis</text>
+<text class="type" x="808.6666666666666" y="1937" text-anchor="end">qint64</text>
+<path class="rowline" d="M96.0 1962H810.6666666666666"/>
+<text class="field" x="97.0" y="1966">percentComplete</text>
+<text class="type" x="808.6666666666666" y="1966" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 1991H810.6666666666666"/>
+<text class="field" x="97.0" y="1995">physicalPercentComplete</text>
+<text class="type" x="808.6666666666666" y="1995" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 2020H810.6666666666666"/>
+<text class="field" x="97.0" y="2024">earnedValueMethod</text>
+<text class="type" x="808.6666666666666" y="2024" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 2049H810.6666666666666"/>
+<text class="field" x="97.0" y="2053">milestone</text>
+<text class="type" x="808.6666666666666" y="2053" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 2078H810.6666666666666"/>
+<text class="field" x="97.0" y="2082">summary</text>
+<text class="type" x="808.6666666666666" y="2082" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 2107H810.6666666666666"/>
+<text class="field" x="97.0" y="2111">recurring</text>
+<text class="type" x="808.6666666666666" y="2111" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 2136H810.6666666666666"/>
+<text class="field" x="97.0" y="2140">segments</text>
+<text class="type" x="808.6666666666666" y="2140" text-anchor="end">QList&lt;TaskSegment&gt;</text>
+<path class="rowline" d="M96.0 2165H810.6666666666666"/>
+<text class="field" x="97.0" y="2169">constraintType</text>
+<text class="type" x="808.6666666666666" y="2169" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 2194H810.6666666666666"/>
+<text class="field" x="97.0" y="2198">constraintDate</text>
+<text class="type" x="808.6666666666666" y="2198" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 2223H810.6666666666666"/>
+<text class="field" x="97.0" y="2227">wbs</text>
+<text class="type" x="808.6666666666666" y="2227" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 2252H810.6666666666666"/>
+<text class="field" x="97.0" y="2256">notes</text>
+<text class="type" x="808.6666666666666" y="2256" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 2281H810.6666666666666"/>
+<text class="field" x="97.0" y="2285">hyperlink</text>
+<text class="type" x="808.6666666666666" y="2285" text-anchor="end">QString</text>
+<text class="field" x="843.6666666666666" y="1705">hyperlinkAddress</text>
+<text class="type" x="1555.3333333333333" y="1705" text-anchor="end">QString</text>
+<path class="rowline" d="M842.6666666666666 1730H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1734">hyperlinkSubAddress</text>
+<text class="type" x="1555.3333333333333" y="1734" text-anchor="end">QString</text>
+<path class="rowline" d="M842.6666666666666 1759H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1763">active</text>
+<text class="type" x="1555.3333333333333" y="1763" text-anchor="end">bool</text>
+<path class="rowline" d="M842.6666666666666 1788H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1792">manual</text>
+<text class="type" x="1555.3333333333333" y="1792" text-anchor="end">bool</text>
+<path class="rowline" d="M842.6666666666666 1817H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1821">levelingDelayMillis</text>
+<text class="type" x="1555.3333333333333" y="1821" text-anchor="end">qint64</text>
+<path class="rowline" d="M842.6666666666666 1846H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1850">levelingAnchor</text>
+<text class="type" x="1555.3333333333333" y="1850" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M842.6666666666666 1875H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1879">effortDriven</text>
+<text class="type" x="1555.3333333333333" y="1879" text-anchor="end">bool</text>
+<path class="rowline" d="M842.6666666666666 1904H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1908">taskType</text>
+<text class="type" x="1555.3333333333333" y="1908" text-anchor="end">int</text>
+<path class="rowline" d="M842.6666666666666 1933H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1937">priority</text>
+<text class="type" x="1555.3333333333333" y="1937" text-anchor="end">int</text>
+<path class="rowline" d="M842.6666666666666 1962H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="1966">deadline</text>
+<text class="type" x="1555.3333333333333" y="1966" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M842.6666666666666 1991H1557.3333333333333"/>
+<rect class="badge-fk" x="1514.3333333333333" y="1980" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1535.8333333333333" y="1994" text-anchor="middle">FK</text>
+<text class="field" x="843.6666666666666" y="1995">calendarUniqueId</text>
+<text class="type" x="1492.3333333333333" y="1995" text-anchor="end">int</text>
+<path class="rowline" d="M842.6666666666666 2020H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="2024">ignoreResourceCalendar</text>
+<text class="type" x="1555.3333333333333" y="2024" text-anchor="end">bool</text>
+<path class="rowline" d="M842.6666666666666 2049H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="2053">earlyStart</text>
+<text class="type" x="1555.3333333333333" y="2053" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M842.6666666666666 2078H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="2082">earlyFinish</text>
+<text class="type" x="1555.3333333333333" y="2082" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M842.6666666666666 2107H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="2111">lateStart</text>
+<text class="type" x="1555.3333333333333" y="2111" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M842.6666666666666 2136H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="2140">lateFinish</text>
+<text class="type" x="1555.3333333333333" y="2140" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M842.6666666666666 2165H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="2169">startSlackMillis</text>
+<text class="type" x="1555.3333333333333" y="2169" text-anchor="end">qint64</text>
+<path class="rowline" d="M842.6666666666666 2194H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="2198">finishSlackMillis</text>
+<text class="type" x="1555.3333333333333" y="2198" text-anchor="end">qint64</text>
+<path class="rowline" d="M842.6666666666666 2223H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="2227">totalSlackMillis</text>
+<text class="type" x="1555.3333333333333" y="2227" text-anchor="end">qint64</text>
+<path class="rowline" d="M842.6666666666666 2252H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="2256">freeSlackMillis</text>
+<text class="type" x="1555.3333333333333" y="2256" text-anchor="end">qint64</text>
+<path class="rowline" d="M842.6666666666666 2281H1557.3333333333333"/>
+<text class="field" x="843.6666666666666" y="2285">critical</text>
+<text class="type" x="1555.3333333333333" y="2285" text-anchor="end">bool</text>
+<text class="field" x="1590.3333333333333" y="1705">actualStart</text>
+<text class="type" x="2302.0" y="1705" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M1589.3333333333333 1730H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1734">actualFinish</text>
+<text class="type" x="2302.0" y="1734" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M1589.3333333333333 1759H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1763">actualDurationMillis</text>
+<text class="type" x="2302.0" y="1763" text-anchor="end">qint64</text>
+<path class="rowline" d="M1589.3333333333333 1788H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1792">actualWorkMillis</text>
+<text class="type" x="2302.0" y="1792" text-anchor="end">qint64</text>
+<path class="rowline" d="M1589.3333333333333 1817H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1821">evm</text>
+<text class="type" x="2302.0" y="1821" text-anchor="end">EarnedValue</text>
+<path class="rowline" d="M1589.3333333333333 1846H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1850">cost</text>
+<text class="type" x="2302.0" y="1850" text-anchor="end">double</text>
+<path class="rowline" d="M1589.3333333333333 1875H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1879">fixedCost</text>
+<text class="type" x="2302.0" y="1879" text-anchor="end">double</text>
+<path class="rowline" d="M1589.3333333333333 1904H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1908">fixedCostAccrual</text>
+<text class="type" x="2302.0" y="1908" text-anchor="end">int</text>
+<path class="rowline" d="M1589.3333333333333 1933H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1937">actualCost</text>
+<text class="type" x="2302.0" y="1937" text-anchor="end">double</text>
+<path class="rowline" d="M1589.3333333333333 1962H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1966">remainingCost</text>
+<text class="type" x="2302.0" y="1966" text-anchor="end">double</text>
+<path class="rowline" d="M1589.3333333333333 1991H2304.0"/>
+<text class="field" x="1590.3333333333333" y="1995">costVariance</text>
+<text class="type" x="2302.0" y="1995" text-anchor="end">double</text>
+<path class="rowline" d="M1589.3333333333333 2020H2304.0"/>
+<text class="field" x="1590.3333333333333" y="2024">startVarianceMillis</text>
+<text class="type" x="2302.0" y="2024" text-anchor="end">qint64</text>
+<path class="rowline" d="M1589.3333333333333 2049H2304.0"/>
+<text class="field" x="1590.3333333333333" y="2053">finishVarianceMillis</text>
+<text class="type" x="2302.0" y="2053" text-anchor="end">qint64</text>
+<path class="rowline" d="M1589.3333333333333 2078H2304.0"/>
+<text class="field" x="1590.3333333333333" y="2082">durationVarianceMillis</text>
+<text class="type" x="2302.0" y="2082" text-anchor="end">qint64</text>
+<path class="rowline" d="M1589.3333333333333 2107H2304.0"/>
+<text class="field" x="1590.3333333333333" y="2111">workVarianceMillis</text>
+<text class="type" x="2302.0" y="2111" text-anchor="end">qint64</text>
+<path class="rowline" d="M1589.3333333333333 2136H2304.0"/>
+<text class="field" x="1590.3333333333333" y="2140">rowFormat</text>
+<text class="type" x="2302.0" y="2140" text-anchor="end">TextStyle</text>
+<path class="rowline" d="M1589.3333333333333 2165H2304.0"/>
+<text class="field" x="1590.3333333333333" y="2169">barColor</text>
+<text class="type" x="2302.0" y="2169" text-anchor="end">qint32</text>
+<path class="rowline" d="M1589.3333333333333 2194H2304.0"/>
+<text class="field" x="1590.3333333333333" y="2198">cellFormats</text>
+<text class="type" x="2302.0" y="2198" text-anchor="end">QHash&lt;QString,TextStyle&gt;</text>
+<path class="rowline" d="M1589.3333333333333 2223H2304.0"/>
+<text class="field" x="1590.3333333333333" y="2227">baselines</text>
+<text class="type" x="2302.0" y="2227" text-anchor="end">QList&lt;Baseline&gt;</text>
+<path class="rowline" d="M1589.3333333333333 2252H2304.0"/>
+<text class="field" x="1590.3333333333333" y="2256">customFields</text>
+<text class="type" x="2302.0" y="2256" text-anchor="end">QList&lt;CustomField&gt;</text>
+</g>
+<g class="entity"><rect class="card" x="80" y="2367" width="2240" height="597" rx="18" stroke="#256b89"/>
+<path d="M98 2367H2302Q2320 2367 2320 2385V2449H80V2385Q80 2367 98 2367Z" fill="#256b89"/>
+<text class="card-title" x="104" y="2401">Assignment</text>
+<text class="card-subtitle" x="104" y="2428">PK uniqueId · associative record connecting one task to one resource</text>
+<rect class="badge-pk" x="1141.0" y="2431" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1162.5" y="2445" text-anchor="middle">PK</text>
+<text class="field" x="97.0" y="2446">uniqueId</text>
+<text class="type" x="1119.0" y="2446" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 2471H1184.0"/>
+<rect class="badge-fk" x="1141.0" y="2460" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1162.5" y="2474" text-anchor="middle">FK</text>
+<text class="field" x="97.0" y="2475">taskUniqueId</text>
+<text class="type" x="1119.0" y="2475" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 2500H1184.0"/>
+<rect class="badge-fk" x="1141.0" y="2489" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1162.5" y="2503" text-anchor="middle">FK</text>
+<text class="field" x="97.0" y="2504">resourceUniqueId</text>
+<text class="type" x="1119.0" y="2504" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 2529H1184.0"/>
+<text class="field" x="97.0" y="2533">budget</text>
+<text class="type" x="1182.0" y="2533" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 2558H1184.0"/>
+<text class="field" x="97.0" y="2562">budgetCost</text>
+<text class="type" x="1182.0" y="2562" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 2587H1184.0"/>
+<text class="field" x="97.0" y="2591">budgetWorkMillis</text>
+<text class="type" x="1182.0" y="2591" text-anchor="end">qint64</text>
+<path class="rowline" d="M96.0 2616H1184.0"/>
+<text class="field" x="97.0" y="2620">units</text>
+<text class="type" x="1182.0" y="2620" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 2645H1184.0"/>
+<text class="field" x="97.0" y="2649">costRateTable</text>
+<text class="type" x="1182.0" y="2649" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 2674H1184.0"/>
+<text class="field" x="97.0" y="2678">variableRateUnits</text>
+<text class="type" x="1182.0" y="2678" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 2703H1184.0"/>
+<text class="field" x="97.0" y="2707">workContour</text>
+<text class="type" x="1182.0" y="2707" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 2732H1184.0"/>
+<text class="field" x="97.0" y="2736">workMillis</text>
+<text class="type" x="1182.0" y="2736" text-anchor="end">qint64</text>
+<path class="rowline" d="M96.0 2761H1184.0"/>
+<text class="field" x="97.0" y="2765">notes</text>
+<text class="type" x="1182.0" y="2765" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 2790H1184.0"/>
+<text class="field" x="97.0" y="2794">start</text>
+<text class="type" x="1182.0" y="2794" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 2819H1184.0"/>
+<text class="field" x="97.0" y="2823">finish</text>
+<text class="type" x="1182.0" y="2823" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 2848H1184.0"/>
+<text class="field" x="97.0" y="2852">stop</text>
+<text class="type" x="1182.0" y="2852" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 2877H1184.0"/>
+<text class="field" x="97.0" y="2881">resume</text>
+<text class="type" x="1182.0" y="2881" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 2906H1184.0"/>
+<text class="field" x="97.0" y="2910">delayMillis</text>
+<text class="type" x="1182.0" y="2910" text-anchor="end">qint64</text>
+<text class="field" x="1217.0" y="2446">levelingDelayMillis</text>
+<text class="type" x="2302.0" y="2446" text-anchor="end">qint64</text>
+<path class="rowline" d="M1216.0 2471H2304.0"/>
+<text class="field" x="1217.0" y="2475">actualWorkMillis</text>
+<text class="type" x="2302.0" y="2475" text-anchor="end">qint64</text>
+<path class="rowline" d="M1216.0 2500H2304.0"/>
+<text class="field" x="1217.0" y="2504">remainingWorkMillis</text>
+<text class="type" x="2302.0" y="2504" text-anchor="end">qint64</text>
+<path class="rowline" d="M1216.0 2529H2304.0"/>
+<text class="field" x="1217.0" y="2533">overtimeWorkMillis</text>
+<text class="type" x="2302.0" y="2533" text-anchor="end">qint64</text>
+<path class="rowline" d="M1216.0 2558H2304.0"/>
+<text class="field" x="1217.0" y="2562">actualOvertimeWorkMillis</text>
+<text class="type" x="2302.0" y="2562" text-anchor="end">qint64</text>
+<path class="rowline" d="M1216.0 2587H2304.0"/>
+<text class="field" x="1217.0" y="2591">remainingOvertimeWorkMillis</text>
+<text class="type" x="2302.0" y="2591" text-anchor="end">qint64</text>
+<path class="rowline" d="M1216.0 2616H2304.0"/>
+<text class="field" x="1217.0" y="2620">cost</text>
+<text class="type" x="2302.0" y="2620" text-anchor="end">double</text>
+<path class="rowline" d="M1216.0 2645H2304.0"/>
+<text class="field" x="1217.0" y="2649">actualCost</text>
+<text class="type" x="2302.0" y="2649" text-anchor="end">double</text>
+<path class="rowline" d="M1216.0 2674H2304.0"/>
+<text class="field" x="1217.0" y="2678">remainingCost</text>
+<text class="type" x="2302.0" y="2678" text-anchor="end">double</text>
+<path class="rowline" d="M1216.0 2703H2304.0"/>
+<text class="field" x="1217.0" y="2707">costVariance</text>
+<text class="type" x="2302.0" y="2707" text-anchor="end">double</text>
+<path class="rowline" d="M1216.0 2732H2304.0"/>
+<text class="field" x="1217.0" y="2736">overtimeCost</text>
+<text class="type" x="2302.0" y="2736" text-anchor="end">double</text>
+<path class="rowline" d="M1216.0 2761H2304.0"/>
+<text class="field" x="1217.0" y="2765">actualOvertimeCost</text>
+<text class="type" x="2302.0" y="2765" text-anchor="end">double</text>
+<path class="rowline" d="M1216.0 2790H2304.0"/>
+<text class="field" x="1217.0" y="2794">remainingOvertimeCost</text>
+<text class="type" x="2302.0" y="2794" text-anchor="end">double</text>
+<path class="rowline" d="M1216.0 2819H2304.0"/>
+<text class="field" x="1217.0" y="2823">baselines</text>
+<text class="type" x="2302.0" y="2823" text-anchor="end">QList&lt;Baseline&gt;</text>
+<path class="rowline" d="M1216.0 2848H2304.0"/>
+<text class="field" x="1217.0" y="2852">customFields</text>
+<text class="type" x="2302.0" y="2852" text-anchor="end">QList&lt;CustomField&gt;</text>
+<path class="rowline" d="M1216.0 2877H2304.0"/>
+<text class="field" x="1217.0" y="2881">timephasedValues</text>
+<text class="type" x="2302.0" y="2881" text-anchor="end">QList&lt;TimephasedValue&gt;</text>
+</g>
+<g class="entity"><rect class="card" x="80" y="2992" width="1094" height="684" rx="18" stroke="#35745e"/>
+<path d="M98 2992H1156Q1174 2992 1174 3010V3074H80V3010Q80 2992 98 2992Z" fill="#35745e"/>
+<text class="card-title" x="104" y="3026">Resource</text>
+<text class="card-subtitle" x="104" y="3053">PK uniqueId · cost, availability, baselines, and resource calendar</text>
+<rect class="badge-pk" x="1115.0" y="3056" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1136.5" y="3070" text-anchor="middle">PK</text>
+<text class="field" x="97.0" y="3071">uniqueId</text>
+<text class="type" x="1093.0" y="3071" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 3096H1158.0"/>
+<text class="field" x="97.0" y="3100">id</text>
+<text class="type" x="1156.0" y="3100" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 3125H1158.0"/>
+<text class="field" x="97.0" y="3129">name</text>
+<text class="type" x="1156.0" y="3129" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 3154H1158.0"/>
+<text class="field" x="97.0" y="3158">initials</text>
+<text class="type" x="1156.0" y="3158" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 3183H1158.0"/>
+<text class="field" x="97.0" y="3187">type</text>
+<text class="type" x="1156.0" y="3187" text-anchor="end">Resource::Type</text>
+<path class="rowline" d="M96.0 3212H1158.0"/>
+<text class="field" x="97.0" y="3216">budget</text>
+<text class="type" x="1156.0" y="3216" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 3241H1158.0"/>
+<text class="field" x="97.0" y="3245">materialLabel</text>
+<text class="type" x="1156.0" y="3245" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 3270H1158.0"/>
+<text class="field" x="97.0" y="3274">maxUnits</text>
+<text class="type" x="1156.0" y="3274" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 3299H1158.0"/>
+<text class="field" x="97.0" y="3303">notes</text>
+<text class="type" x="1156.0" y="3303" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 3328H1158.0"/>
+<rect class="badge-fk" x="1115.0" y="3317" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1136.5" y="3331" text-anchor="middle">FK</text>
+<text class="field" x="97.0" y="3332">calendarUniqueId</text>
+<text class="type" x="1093.0" y="3332" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 3357H1158.0"/>
+<text class="field" x="97.0" y="3361">cost</text>
+<text class="type" x="1156.0" y="3361" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 3386H1158.0"/>
+<text class="field" x="97.0" y="3390">actualCost</text>
+<text class="type" x="1156.0" y="3390" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 3415H1158.0"/>
+<text class="field" x="97.0" y="3419">remainingCost</text>
+<text class="type" x="1156.0" y="3419" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 3444H1158.0"/>
+<text class="field" x="97.0" y="3448">costVariance</text>
+<text class="type" x="1156.0" y="3448" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 3473H1158.0"/>
+<text class="field" x="97.0" y="3477">budgetCost</text>
+<text class="type" x="1156.0" y="3477" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 3502H1158.0"/>
+<text class="field" x="97.0" y="3506">budgetWorkMillis</text>
+<text class="type" x="1156.0" y="3506" text-anchor="end">qint64</text>
+<path class="rowline" d="M96.0 3531H1158.0"/>
+<text class="field" x="97.0" y="3535">baselines</text>
+<text class="type" x="1156.0" y="3535" text-anchor="end">QList&lt;Baseline&gt;</text>
+<path class="rowline" d="M96.0 3560H1158.0"/>
+<text class="field" x="97.0" y="3564">customFields</text>
+<text class="type" x="1156.0" y="3564" text-anchor="end">QList&lt;CustomField&gt;</text>
+<path class="rowline" d="M96.0 3589H1158.0"/>
+<text class="field" x="97.0" y="3593">costRates</text>
+<text class="type" x="1156.0" y="3593" text-anchor="end">QList&lt;CostRate&gt;</text>
+<path class="rowline" d="M96.0 3618H1158.0"/>
+<text class="field" x="97.0" y="3622">availabilityTable</text>
+<text class="type" x="1156.0" y="3622" text-anchor="end">QList&lt;AvailabilityPeriod&gt;</text>
+</g>
+<g class="entity"><rect class="card" x="1202" y="2992" width="1118" height="278" rx="18" stroke="#7661a7"/>
+<path d="M1220 2992H2302Q2320 2992 2320 3010V3074H1202V3010Q1202 2992 1220 2992Z" fill="#7661a7"/>
+<text class="card-title" x="1226" y="3026">Calendar</text>
+<text class="card-subtitle" x="1226" y="3053">PK uniqueId · working week, exceptions, and optional base calendar</text>
+<rect class="badge-pk" x="2261.0" y="3056" width="43" height="20" rx="7"/>
+<text class="badge-text" x="2282.5" y="3070" text-anchor="middle">PK</text>
+<text class="field" x="1219.0" y="3071">uniqueId</text>
+<text class="type" x="2239.0" y="3071" text-anchor="end">int</text>
+<path class="rowline" d="M1218.0 3096H2304.0"/>
+<text class="field" x="1219.0" y="3100">name</text>
+<text class="type" x="2302.0" y="3100" text-anchor="end">QString</text>
+<path class="rowline" d="M1218.0 3125H2304.0"/>
+<rect class="badge-fk" x="2261.0" y="3114" width="43" height="20" rx="7"/>
+<text class="badge-text" x="2282.5" y="3128" text-anchor="middle">FK</text>
+<text class="field" x="1219.0" y="3129">baseCalendarUniqueId</text>
+<text class="type" x="2239.0" y="3129" text-anchor="end">int</text>
+<path class="rowline" d="M1218.0 3154H2304.0"/>
+<text class="field" x="1219.0" y="3158">workingDayMask</text>
+<text class="type" x="2302.0" y="3158" text-anchor="end">quint8</text>
+<path class="rowline" d="M1218.0 3183H2304.0"/>
+<text class="field" x="1219.0" y="3187">workingTimes</text>
+<text class="type" x="2302.0" y="3187" text-anchor="end">QList&lt;QList&lt;TimeRange&gt;&gt;</text>
+<path class="rowline" d="M1218.0 3212H2304.0"/>
+<text class="field" x="1219.0" y="3216">exceptions</text>
+<text class="type" x="2302.0" y="3216" text-anchor="end">QList&lt;CalendarException&gt;</text>
+</g>
+<g class="entity"><rect class="card" x="80" y="3704" width="700" height="278" rx="18" stroke="#b36b36"/>
+<path d="M98 3704H762Q780 3704 780 3722V3786H80V3722Q80 3704 98 3704Z" fill="#b36b36"/>
+<text class="card-title" x="104" y="3738">Relation</text>
+<text class="card-subtitle" x="104" y="3765">PK uniqueId · task dependency</text>
+<rect class="badge-pk" x="721.0" y="3768" width="43" height="20" rx="7"/>
+<text class="badge-text" x="742.5" y="3782" text-anchor="middle">PK</text>
+<text class="field" x="97.0" y="3783">uniqueId</text>
+<text class="type" x="699.0" y="3783" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 3808H764.0"/>
+<rect class="badge-fk" x="721.0" y="3797" width="43" height="20" rx="7"/>
+<text class="badge-text" x="742.5" y="3811" text-anchor="middle">FK</text>
+<text class="field" x="97.0" y="3812">predecessorTaskUid</text>
+<text class="type" x="699.0" y="3812" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 3837H764.0"/>
+<rect class="badge-fk" x="721.0" y="3826" width="43" height="20" rx="7"/>
+<text class="badge-text" x="742.5" y="3840" text-anchor="middle">FK</text>
+<text class="field" x="97.0" y="3841">successorTaskUid</text>
+<text class="type" x="699.0" y="3841" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 3866H764.0"/>
+<text class="field" x="97.0" y="3870">type</text>
+<text class="type" x="762.0" y="3870" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 3895H764.0"/>
+<text class="field" x="97.0" y="3899">lagMillis</text>
+<text class="type" x="762.0" y="3899" text-anchor="end">qint64</text>
+<path class="rowline" d="M96.0 3924H764.0"/>
+<text class="field" x="97.0" y="3928">lagFormat</text>
+<text class="type" x="762.0" y="3928" text-anchor="end">int</text>
+</g>
+<g><rect class="card" x="808" y="3704" width="1112" height="278" rx="18" stroke="#53728c"/><path d="M808 3722Q808 3704 826 3704H1094Q1112 3704 1112 3722V3770H808Z" fill="#53728c"/><text class="card-title" x="832" y="3738">Keys and ownership</text><text class="card-subtitle" x="832" y="3765">How to read the complete attribute catalog</text>
+<text class="note" x="832" y="3821">• Yellow PK marks a stable UID; PK* marks a scoped or composite key in a value collection.</text>
+<text class="note" x="832" y="3863">• Teal FK marks an explicit UID reference to another core entity.</text>
+<text class="note" x="832" y="3905">• Lists are owned values. Their owner is implied by the containing Project, Task, Resource, Assignment, or Calendar collection.</text>
+<text class="note" x="832" y="3947">• Collection records without a declared UID use owner scope and, where shown, a conceptual natural/composite key (PK*).</text>
+<text class="note" x="832" y="3989">• Task.id is a display/outline position, not a primary key. Task hierarchy has no parentTaskUid field.</text>
+</g>
+<text class="section" x="80" y="4022">Owned value records and their complete attributes</text>
+<text class="section-note" x="80" y="4050">Each record below is stored in an owner collection; no standalone PK is declared unless a member is marked.</text>
+<g class="entity"><rect class="card" x="80" y="4077" width="594" height="278" rx="18" stroke="#89702d"/>
+<path d="M98 4077H656Q674 4077 674 4095V4159H80V4095Q80 4077 98 4077Z" fill="#89702d"/>
+<text class="card-title" x="104" y="4111">Baseline</text>
+<text class="card-subtitle" x="104" y="4138">Task · Resource · Assignment baselines</text>
+<rect class="badge-pk" x="615.0" y="4141" width="43" height="20" rx="7"/>
+<text class="badge-text" x="636.5" y="4155" text-anchor="middle">PK*</text>
+<text class="field" x="97.0" y="4156">number</text>
+<text class="type" x="593.0" y="4156" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 4181H658.0"/>
+<text class="field" x="97.0" y="4185">cost</text>
+<text class="type" x="656.0" y="4185" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 4210H658.0"/>
+<text class="field" x="97.0" y="4214">workMillis</text>
+<text class="type" x="656.0" y="4214" text-anchor="end">qint64</text>
+<path class="rowline" d="M96.0 4239H658.0"/>
+<text class="field" x="97.0" y="4243">start</text>
+<text class="type" x="656.0" y="4243" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 4268H658.0"/>
+<text class="field" x="97.0" y="4272">finish</text>
+<text class="type" x="656.0" y="4272" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 4297H658.0"/>
+<text class="field" x="97.0" y="4301">durationMillis</text>
+<text class="type" x="656.0" y="4301" text-anchor="end">qint64</text>
+</g>
+<g class="entity"><rect class="card" x="702" y="4077" width="594" height="278" rx="18" stroke="#89702d"/>
+<path d="M720 4077H1278Q1296 4077 1296 4095V4159H702V4095Q702 4077 720 4077Z" fill="#89702d"/>
+<text class="card-title" x="726" y="4111">CustomField</text>
+<text class="card-subtitle" x="726" y="4138">Project definitions · Task · Resource · Assignment</text>
+<rect class="badge-pk" x="1237.0" y="4141" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1258.5" y="4155" text-anchor="middle">PK*</text>
+<text class="field" x="719.0" y="4156">fieldId</text>
+<text class="type" x="1215.0" y="4156" text-anchor="end">int</text>
+<path class="rowline" d="M718.0 4181H1280.0"/>
+<text class="field" x="719.0" y="4185">name</text>
+<text class="type" x="1278.0" y="4185" text-anchor="end">QString</text>
+<path class="rowline" d="M718.0 4210H1280.0"/>
+<text class="field" x="719.0" y="4214">value</text>
+<text class="type" x="1278.0" y="4214" text-anchor="end">QVariant</text>
+<path class="rowline" d="M718.0 4239H1280.0"/>
+<text class="field" x="719.0" y="4243">formula</text>
+<text class="type" x="1278.0" y="4243" text-anchor="end">QString</text>
+<path class="rowline" d="M718.0 4268H1280.0"/>
+<text class="field" x="719.0" y="4272">lookupValues</text>
+<text class="type" x="1278.0" y="4272" text-anchor="end">QStringList</text>
+<path class="rowline" d="M718.0 4297H1280.0"/>
+<text class="field" x="719.0" y="4301">graphicalIndicators</text>
+<text class="type" x="1278.0" y="4301" text-anchor="end">QList&lt;IndicatorRule&gt;</text>
+</g>
+<g class="entity"><rect class="card" x="1324" y="4077" width="594" height="191" rx="18" stroke="#89702d"/>
+<path d="M1342 4077H1900Q1918 4077 1918 4095V4159H1324V4095Q1324 4077 1342 4077Z" fill="#89702d"/>
+<text class="card-title" x="1348" y="4111">IndicatorRule</text>
+<text class="card-subtitle" x="1348" y="4138">Nested in CustomField.graphicalIndicators</text>
+<text class="field" x="1341.0" y="4156">comparison</text>
+<text class="type" x="1900.0" y="4156" text-anchor="end">QString</text>
+<path class="rowline" d="M1340.0 4181H1902.0"/>
+<text class="field" x="1341.0" y="4185">value</text>
+<text class="type" x="1900.0" y="4185" text-anchor="end">QVariant</text>
+<path class="rowline" d="M1340.0 4210H1902.0"/>
+<text class="field" x="1341.0" y="4214">indicator</text>
+<text class="type" x="1900.0" y="4214" text-anchor="end">QString</text>
+</g>
+<g class="entity"><rect class="card" x="80" y="4379" width="594" height="336" rx="18" stroke="#89702d"/>
+<path d="M98 4379H656Q674 4379 674 4397V4461H80V4397Q80 4379 98 4379Z" fill="#89702d"/>
+<text class="card-title" x="104" y="4413">CostRate</text>
+<text class="card-subtitle" x="104" y="4440">Resource cost-rate table entries</text>
+<rect class="badge-pk" x="615.0" y="4443" width="43" height="20" rx="7"/>
+<text class="badge-text" x="636.5" y="4457" text-anchor="middle">PK*</text>
+<text class="field" x="97.0" y="4458">table</text>
+<text class="type" x="593.0" y="4458" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 4483H658.0"/>
+<rect class="badge-pk" x="615.0" y="4472" width="43" height="20" rx="7"/>
+<text class="badge-text" x="636.5" y="4486" text-anchor="middle">PK*</text>
+<text class="field" x="97.0" y="4487">startDate</text>
+<text class="type" x="593.0" y="4487" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 4512H658.0"/>
+<text class="field" x="97.0" y="4516">endDate</text>
+<text class="type" x="656.0" y="4516" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M96.0 4541H658.0"/>
+<text class="field" x="97.0" y="4545">standardRate</text>
+<text class="type" x="656.0" y="4545" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 4570H658.0"/>
+<text class="field" x="97.0" y="4574">standardRateUnit</text>
+<text class="type" x="656.0" y="4574" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 4599H658.0"/>
+<text class="field" x="97.0" y="4603">overtimeRate</text>
+<text class="type" x="656.0" y="4603" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 4628H658.0"/>
+<text class="field" x="97.0" y="4632">overtimeRateUnit</text>
+<text class="type" x="656.0" y="4632" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 4657H658.0"/>
+<text class="field" x="97.0" y="4661">costPerUse</text>
+<text class="type" x="656.0" y="4661" text-anchor="end">double</text>
+</g>
+<g class="entity"><rect class="card" x="702" y="4379" width="594" height="191" rx="18" stroke="#89702d"/>
+<path d="M720 4379H1278Q1296 4379 1296 4397V4461H702V4397Q702 4379 720 4379Z" fill="#89702d"/>
+<text class="card-title" x="726" y="4413">AvailabilityPeriod</text>
+<text class="card-subtitle" x="726" y="4440">Resource availabilityTable rows</text>
+<rect class="badge-pk" x="1237.0" y="4443" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1258.5" y="4457" text-anchor="middle">PK*</text>
+<text class="field" x="719.0" y="4458">startDate</text>
+<text class="type" x="1215.0" y="4458" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M718.0 4483H1280.0"/>
+<text class="field" x="719.0" y="4487">endDate</text>
+<text class="type" x="1278.0" y="4487" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M718.0 4512H1280.0"/>
+<text class="field" x="719.0" y="4516">units</text>
+<text class="type" x="1278.0" y="4516" text-anchor="end">double</text>
+</g>
+<g class="entity"><rect class="card" x="1324" y="4379" width="594" height="307" rx="18" stroke="#89702d"/>
+<path d="M1342 4379H1900Q1918 4379 1918 4397V4461H1324V4397Q1324 4379 1342 4379Z" fill="#89702d"/>
+<text class="card-title" x="1348" y="4413">TimephasedValue</text>
+<text class="card-subtitle" x="1348" y="4440">Assignment timephasedValues buckets</text>
+<rect class="badge-pk" x="1859.0" y="4443" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1880.5" y="4457" text-anchor="middle">PK*</text>
+<text class="field" x="1341.0" y="4458">type</text>
+<text class="type" x="1837.0" y="4458" text-anchor="end">int</text>
+<path class="rowline" d="M1340.0 4483H1902.0"/>
+<text class="field" x="1341.0" y="4487">uniqueId</text>
+<text class="type" x="1900.0" y="4487" text-anchor="end">int</text>
+<path class="rowline" d="M1340.0 4512H1902.0"/>
+<rect class="badge-pk" x="1859.0" y="4501" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1880.5" y="4515" text-anchor="middle">PK*</text>
+<text class="field" x="1341.0" y="4516">start</text>
+<text class="type" x="1837.0" y="4516" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M1340.0 4541H1902.0"/>
+<rect class="badge-pk" x="1859.0" y="4530" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1880.5" y="4544" text-anchor="middle">PK*</text>
+<text class="field" x="1341.0" y="4545">finish</text>
+<text class="type" x="1837.0" y="4545" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M1340.0 4570H1902.0"/>
+<text class="field" x="1341.0" y="4574">unit</text>
+<text class="type" x="1900.0" y="4574" text-anchor="end">int</text>
+<path class="rowline" d="M1340.0 4599H1902.0"/>
+<rect class="badge-pk" x="1859.0" y="4588" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1880.5" y="4602" text-anchor="middle">PK*</text>
+<text class="field" x="1341.0" y="4603">baselineNumber</text>
+<text class="type" x="1837.0" y="4603" text-anchor="end">int</text>
+<path class="rowline" d="M1340.0 4628H1902.0"/>
+<text class="field" x="1341.0" y="4632">value</text>
+<text class="type" x="1900.0" y="4632" text-anchor="end">QString</text>
+</g>
+<g class="entity"><rect class="card" x="80" y="4739" width="594" height="452" rx="18" stroke="#89702d"/>
+<path d="M98 4739H656Q674 4739 674 4757V4821H80V4757Q80 4739 98 4739Z" fill="#89702d"/>
+<text class="card-title" x="104" y="4773">CalendarException</text>
+<text class="card-subtitle" x="104" y="4800">Calendar.exceptions date overrides</text>
+<text class="field" x="97.0" y="4818">fromDate</text>
+<text class="type" x="656.0" y="4818" text-anchor="end">QDate</text>
+<path class="rowline" d="M96.0 4843H658.0"/>
+<text class="field" x="97.0" y="4847">toDate</text>
+<text class="type" x="656.0" y="4847" text-anchor="end">QDate</text>
+<path class="rowline" d="M96.0 4872H658.0"/>
+<text class="field" x="97.0" y="4876">name</text>
+<text class="type" x="656.0" y="4876" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 4901H658.0"/>
+<text class="field" x="97.0" y="4905">working</text>
+<text class="type" x="656.0" y="4905" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 4930H658.0"/>
+<text class="field" x="97.0" y="4934">workingTimes</text>
+<text class="type" x="656.0" y="4934" text-anchor="end">QList&lt;TimeRange&gt;</text>
+<path class="rowline" d="M96.0 4959H658.0"/>
+<text class="field" x="97.0" y="4963">recurrence</text>
+<text class="type" x="656.0" y="4963" text-anchor="end">Recurrence</text>
+<path class="rowline" d="M96.0 4988H658.0"/>
+<text class="field" x="97.0" y="4992">interval</text>
+<text class="type" x="656.0" y="4992" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 5017H658.0"/>
+<text class="field" x="97.0" y="5021">weekDayMask</text>
+<text class="type" x="656.0" y="5021" text-anchor="end">quint8</text>
+<path class="rowline" d="M96.0 5046H658.0"/>
+<text class="field" x="97.0" y="5050">dayOfMonth</text>
+<text class="type" x="656.0" y="5050" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 5075H658.0"/>
+<text class="field" x="97.0" y="5079">month</text>
+<text class="type" x="656.0" y="5079" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 5104H658.0"/>
+<text class="field" x="97.0" y="5108">weekPosition</text>
+<text class="type" x="656.0" y="5108" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 5133H658.0"/>
+<text class="field" x="97.0" y="5137">occurrences</text>
+<text class="type" x="656.0" y="5137" text-anchor="end">int</text>
+</g>
+<g class="entity"><rect class="card" x="702" y="4739" width="594" height="162" rx="18" stroke="#89702d"/>
+<path d="M720 4739H1278Q1296 4739 1296 4757V4821H702V4757Q702 4739 720 4739Z" fill="#89702d"/>
+<text class="card-title" x="726" y="4773">TimeRange</text>
+<text class="card-subtitle" x="726" y="4800">Calendar working-time periods</text>
+<text class="field" x="719.0" y="4818">start</text>
+<text class="type" x="1278.0" y="4818" text-anchor="end">QTime</text>
+<path class="rowline" d="M718.0 4843H1280.0"/>
+<text class="field" x="719.0" y="4847">end</text>
+<text class="type" x="1278.0" y="4847" text-anchor="end">QTime</text>
+</g>
+<g class="entity"><rect class="card" x="1324" y="4739" width="594" height="162" rx="18" stroke="#89702d"/>
+<path d="M1342 4739H1900Q1918 4739 1918 4757V4821H1324V4757Q1324 4739 1342 4739Z" fill="#89702d"/>
+<text class="card-title" x="1348" y="4773">TaskSegment</text>
+<text class="card-subtitle" x="1348" y="4800">Task split segments</text>
+<text class="field" x="1341.0" y="4818">start</text>
+<text class="type" x="1900.0" y="4818" text-anchor="end">QDateTime</text>
+<path class="rowline" d="M1340.0 4843H1902.0"/>
+<text class="field" x="1341.0" y="4847">finish</text>
+<text class="type" x="1900.0" y="4847" text-anchor="end">QDateTime</text>
+</g>
+<g class="entity"><rect class="card" x="80" y="5215" width="594" height="365" rx="18" stroke="#89702d"/>
+<path d="M98 5215H656Q674 5215 674 5233V5297H80V5233Q80 5215 98 5215Z" fill="#89702d"/>
+<text class="card-title" x="104" y="5249">EarnedValue</text>
+<text class="card-subtitle" x="104" y="5276">Task.evm metrics</text>
+<text class="field" x="97.0" y="5294">pv</text>
+<text class="type" x="656.0" y="5294" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 5319H658.0"/>
+<text class="field" x="97.0" y="5323">ev</text>
+<text class="type" x="656.0" y="5323" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 5348H658.0"/>
+<text class="field" x="97.0" y="5352">ac</text>
+<text class="type" x="656.0" y="5352" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 5377H658.0"/>
+<text class="field" x="97.0" y="5381">cv</text>
+<text class="type" x="656.0" y="5381" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 5406H658.0"/>
+<text class="field" x="97.0" y="5410">sv</text>
+<text class="type" x="656.0" y="5410" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 5435H658.0"/>
+<text class="field" x="97.0" y="5439">cpi</text>
+<text class="type" x="656.0" y="5439" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 5464H658.0"/>
+<text class="field" x="97.0" y="5468">spi</text>
+<text class="type" x="656.0" y="5468" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 5493H658.0"/>
+<text class="field" x="97.0" y="5497">eac</text>
+<text class="type" x="656.0" y="5497" text-anchor="end">double</text>
+<path class="rowline" d="M96.0 5522H658.0"/>
+<text class="field" x="97.0" y="5526">tcpi</text>
+<text class="type" x="656.0" y="5526" text-anchor="end">double</text>
+</g>
+<text class="section" x="80" y="5604">View and presentation state</text>
+<text class="section-note" x="80" y="5632">These nested value objects are Project or Task attributes, shown here with every public member.</text>
+<g class="entity"><rect class="card" x="80" y="5659" width="594" height="394" rx="18" stroke="#416d9c"/>
+<path d="M98 5659H656Q674 5659 674 5677V5741H80V5677Q80 5659 98 5659Z" fill="#416d9c"/>
+<text class="card-title" x="104" y="5693">TextStyle</text>
+<text class="card-subtitle" x="104" y="5720">Text and cell text format</text>
+<text class="field" x="97.0" y="5738">bold</text>
+<text class="type" x="656.0" y="5738" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 5763H658.0"/>
+<text class="field" x="97.0" y="5767">italic</text>
+<text class="type" x="656.0" y="5767" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 5792H658.0"/>
+<text class="field" x="97.0" y="5796">underline</text>
+<text class="type" x="656.0" y="5796" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 5821H658.0"/>
+<text class="field" x="97.0" y="5825">strikethrough</text>
+<text class="type" x="656.0" y="5825" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 5850H658.0"/>
+<text class="field" x="97.0" y="5854">color</text>
+<text class="type" x="656.0" y="5854" text-anchor="end">qint32</text>
+<path class="rowline" d="M96.0 5879H658.0"/>
+<text class="field" x="97.0" y="5883">backColor</text>
+<text class="type" x="656.0" y="5883" text-anchor="end">qint32</text>
+<path class="rowline" d="M96.0 5908H658.0"/>
+<text class="field" x="97.0" y="5912">backPattern</text>
+<text class="type" x="656.0" y="5912" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 5937H658.0"/>
+<text class="field" x="97.0" y="5941">fontName</text>
+<text class="type" x="656.0" y="5941" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 5966H658.0"/>
+<text class="field" x="97.0" y="5970">fontSize</text>
+<text class="type" x="656.0" y="5970" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 5995H658.0"/>
+<text class="field" x="97.0" y="5999">fontBaseIndex</text>
+<text class="type" x="656.0" y="5999" text-anchor="end">int</text>
+</g>
+<g class="entity"><rect class="card" x="702" y="5659" width="594" height="162" rx="18" stroke="#416d9c"/>
+<path d="M720 5659H1278Q1296 5659 1296 5677V5741H702V5677Q702 5659 720 5659Z" fill="#416d9c"/>
+<text class="card-title" x="726" y="5693">ViewLineStyle</text>
+<text class="card-subtitle" x="726" y="5720">Gantt line format</text>
+<text class="field" x="719.0" y="5738">color</text>
+<text class="type" x="1278.0" y="5738" text-anchor="end">qint32</text>
+<path class="rowline" d="M718.0 5763H1280.0"/>
+<text class="field" x="719.0" y="5767">lineStyle</text>
+<text class="type" x="1278.0" y="5767" text-anchor="end">int</text>
+</g>
+<g class="entity"><rect class="card" x="1324" y="5659" width="594" height="597" rx="18" stroke="#416d9c"/>
+<path d="M1342 5659H1900Q1918 5659 1918 5677V5741H1324V5677Q1324 5659 1342 5659Z" fill="#416d9c"/>
+<text class="card-title" x="1348" y="5693">ViewBarStyle</text>
+<text class="card-subtitle" x="1348" y="5720">Default Gantt bar format</text>
+<text class="field" x="1341.0" y="5738">middleColor</text>
+<text class="type" x="1900.0" y="5738" text-anchor="end">qint32</text>
+<path class="rowline" d="M1340.0 5763H1902.0"/>
+<text class="field" x="1341.0" y="5767">startColor</text>
+<text class="type" x="1900.0" y="5767" text-anchor="end">qint32</text>
+<path class="rowline" d="M1340.0 5792H1902.0"/>
+<text class="field" x="1341.0" y="5796">endColor</text>
+<text class="type" x="1900.0" y="5796" text-anchor="end">qint32</text>
+<path class="rowline" d="M1340.0 5821H1902.0"/>
+<rect class="badge-pk" x="1859.0" y="5810" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1880.5" y="5824" text-anchor="middle">PK*</text>
+<text class="field" x="1341.0" y="5825">name</text>
+<text class="type" x="1837.0" y="5825" text-anchor="end">QString</text>
+<path class="rowline" d="M1340.0 5850H1902.0"/>
+<text class="field" x="1341.0" y="5854">middleShape</text>
+<text class="type" x="1900.0" y="5854" text-anchor="end">quint8</text>
+<path class="rowline" d="M1340.0 5879H1902.0"/>
+<text class="field" x="1341.0" y="5883">middlePattern</text>
+<text class="type" x="1900.0" y="5883" text-anchor="end">quint8</text>
+<path class="rowline" d="M1340.0 5908H1902.0"/>
+<text class="field" x="1341.0" y="5912">middleFlag</text>
+<text class="type" x="1900.0" y="5912" text-anchor="end">quint8</text>
+<path class="rowline" d="M1340.0 5937H1902.0"/>
+<text class="field" x="1341.0" y="5941">startShape</text>
+<text class="type" x="1900.0" y="5941" text-anchor="end">quint8</text>
+<path class="rowline" d="M1340.0 5966H1902.0"/>
+<text class="field" x="1341.0" y="5970">endShape</text>
+<text class="type" x="1900.0" y="5970" text-anchor="end">quint8</text>
+<path class="rowline" d="M1340.0 5995H1902.0"/>
+<text class="field" x="1341.0" y="5999">fromField</text>
+<text class="type" x="1900.0" y="5999" text-anchor="end">qint32</text>
+<path class="rowline" d="M1340.0 6024H1902.0"/>
+<text class="field" x="1341.0" y="6028">toField</text>
+<text class="type" x="1900.0" y="6028" text-anchor="end">qint32</text>
+<path class="rowline" d="M1340.0 6053H1902.0"/>
+<text class="field" x="1341.0" y="6057">showFor</text>
+<text class="type" x="1900.0" y="6057" text-anchor="end">quint64</text>
+<path class="rowline" d="M1340.0 6082H1902.0"/>
+<text class="field" x="1341.0" y="6086">showForNot</text>
+<text class="type" x="1900.0" y="6086" text-anchor="end">quint64</text>
+<path class="rowline" d="M1340.0 6111H1902.0"/>
+<text class="field" x="1341.0" y="6115">row</text>
+<text class="type" x="1900.0" y="6115" text-anchor="end">int</text>
+<path class="rowline" d="M1340.0 6140H1902.0"/>
+<text class="field" x="1341.0" y="6144">barText</text>
+<text class="type" x="1900.0" y="6144" text-anchor="end">std::array&lt;qint32,5&gt;</text>
+<path class="rowline" d="M1340.0 6169H1902.0"/>
+<text class="field" x="1341.0" y="6173">styleId</text>
+<text class="type" x="1900.0" y="6173" text-anchor="end">quint16</text>
+<path class="rowline" d="M1340.0 6198H1902.0"/>
+<text class="field" x="1341.0" y="6202">flag87</text>
+<text class="type" x="1900.0" y="6202" text-anchor="end">quint16</text>
+</g>
+<g class="entity"><rect class="card" x="80" y="6280" width="594" height="336" rx="18" stroke="#416d9c"/>
+<path d="M98 6280H656Q674 6280 674 6298V6362H80V6298Q80 6280 98 6280Z" fill="#416d9c"/>
+<text class="card-title" x="104" y="6314">ViewStyles</text>
+<text class="card-subtitle" x="104" y="6341">Project-level style collection</text>
+<text class="field" x="97.0" y="6359">present</text>
+<text class="type" x="656.0" y="6359" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 6384H658.0"/>
+<text class="field" x="97.0" y="6388">text</text>
+<text class="type" x="656.0" y="6388" text-anchor="end">TextStyle[TextCategoryCount]</text>
+<path class="rowline" d="M96.0 6413H658.0"/>
+<text class="field" x="97.0" y="6417">sheetRows</text>
+<text class="type" x="656.0" y="6417" text-anchor="end">ViewLineStyle</text>
+<path class="rowline" d="M96.0 6442H658.0"/>
+<text class="field" x="97.0" y="6446">sheetColumns</text>
+<text class="type" x="656.0" y="6446" text-anchor="end">ViewLineStyle</text>
+<path class="rowline" d="M96.0 6471H658.0"/>
+<text class="field" x="97.0" y="6475">ganttRows</text>
+<text class="type" x="656.0" y="6475" text-anchor="end">ViewLineStyle</text>
+<path class="rowline" d="M96.0 6500H658.0"/>
+<text class="field" x="97.0" y="6504">currentDateLine</text>
+<text class="type" x="656.0" y="6504" text-anchor="end">ViewLineStyle</text>
+<path class="rowline" d="M96.0 6529H658.0"/>
+<text class="field" x="97.0" y="6533">statusDateLine</text>
+<text class="type" x="656.0" y="6533" text-anchor="end">ViewLineStyle</text>
+<path class="rowline" d="M96.0 6558H658.0"/>
+<text class="field" x="97.0" y="6562">barStyles</text>
+<text class="type" x="656.0" y="6562" text-anchor="end">QVector&lt;ViewBarStyle&gt;</text>
+</g>
+<g class="entity"><rect class="card" x="702" y="6280" width="594" height="365" rx="18" stroke="#416d9c"/>
+<path d="M720 6280H1278Q1296 6280 1296 6298V6362H702V6298Q702 6280 720 6280Z" fill="#416d9c"/>
+<text class="card-title" x="726" y="6314">UsageViewSettings</text>
+<text class="card-subtitle" x="726" y="6341">Gantt and Usage view state</text>
+<text class="field" x="719.0" y="6359">present</text>
+<text class="type" x="1278.0" y="6359" text-anchor="end">bool</text>
+<path class="rowline" d="M718.0 6384H1280.0"/>
+<text class="field" x="719.0" y="6388">modified</text>
+<text class="type" x="1278.0" y="6388" text-anchor="end">bool</text>
+<path class="rowline" d="M718.0 6413H1280.0"/>
+<text class="field" x="719.0" y="6417">viewName</text>
+<text class="type" x="1278.0" y="6417" text-anchor="end">QString</text>
+<path class="rowline" d="M718.0 6442H1280.0"/>
+<text class="field" x="719.0" y="6446">tableName</text>
+<text class="type" x="1278.0" y="6446" text-anchor="end">QString</text>
+<path class="rowline" d="M718.0 6471H1280.0"/>
+<text class="field" x="719.0" y="6475">columns</text>
+<text class="type" x="1278.0" y="6475" text-anchor="end">QList&lt;UsageTableColumn&gt;</text>
+<path class="rowline" d="M718.0 6500H1280.0"/>
+<text class="field" x="719.0" y="6504">detailFields</text>
+<text class="type" x="1278.0" y="6504" text-anchor="end">QList&lt;int&gt;</text>
+<path class="rowline" d="M718.0 6529H1280.0"/>
+<text class="field" x="719.0" y="6533">detailSelection</text>
+<text class="type" x="1278.0" y="6533" text-anchor="end">QStringList</text>
+<path class="rowline" d="M718.0 6558H1280.0"/>
+<text class="field" x="719.0" y="6562">timescaleSize</text>
+<text class="type" x="1278.0" y="6562" text-anchor="end">int</text>
+<path class="rowline" d="M718.0 6587H1280.0"/>
+<text class="field" x="719.0" y="6591">tableWidth</text>
+<text class="type" x="1278.0" y="6591" text-anchor="end">int</text>
+</g>
+<g class="entity"><rect class="card" x="1324" y="6280" width="594" height="191" rx="18" stroke="#416d9c"/>
+<path d="M1342 6280H1900Q1918 6280 1918 6298V6362H1324V6298Q1324 6280 1342 6280Z" fill="#416d9c"/>
+<text class="card-title" x="1348" y="6314">UsageTableColumn</text>
+<text class="card-subtitle" x="1348" y="6341">Usage-view column</text>
+<rect class="badge-pk" x="1859.0" y="6344" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1880.5" y="6358" text-anchor="middle">PK*</text>
+<text class="field" x="1341.0" y="6359">fieldId</text>
+<text class="type" x="1837.0" y="6359" text-anchor="end">quint32</text>
+<path class="rowline" d="M1340.0 6384H1902.0"/>
+<text class="field" x="1341.0" y="6388">width</text>
+<text class="type" x="1900.0" y="6388" text-anchor="end">int</text>
+<path class="rowline" d="M1340.0 6413H1902.0"/>
+<text class="field" x="1341.0" y="6417">title</text>
+<text class="type" x="1900.0" y="6417" text-anchor="end">QString</text>
+</g>
+<g class="entity"><rect class="card" x="80" y="6669" width="594" height="597" rx="18" stroke="#416d9c"/>
+<path d="M98 6669H656Q674 6669 674 6687V6751H80V6687Q80 6669 98 6669Z" fill="#416d9c"/>
+<text class="card-title" x="104" y="6703">TimelineViewSettings</text>
+<text class="card-subtitle" x="104" y="6730">Timeline view state</text>
+<text class="field" x="97.0" y="6748">present</text>
+<text class="type" x="656.0" y="6748" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 6773H658.0"/>
+<text class="field" x="97.0" y="6777">modified</text>
+<text class="type" x="656.0" y="6777" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 6802H658.0"/>
+<text class="field" x="97.0" y="6806">viewUid</text>
+<text class="type" x="656.0" y="6806" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 6831H658.0"/>
+<text class="field" x="97.0" y="6835">viewName</text>
+<text class="type" x="656.0" y="6835" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 6860H658.0"/>
+<text class="field" x="97.0" y="6864">dfltTLView</text>
+<text class="type" x="656.0" y="6864" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 6889H658.0"/>
+<text class="field" x="97.0" y="6893">bars</text>
+<text class="type" x="656.0" y="6893" text-anchor="end">QList&lt;TimelineBar&gt;</text>
+<path class="rowline" d="M96.0 6918H658.0"/>
+<text class="field" x="97.0" y="6922">items</text>
+<text class="type" x="656.0" y="6922" text-anchor="end">QList&lt;TimelineItem&gt;</text>
+<path class="rowline" d="M96.0 6947H658.0"/>
+<text class="field" x="97.0" y="6951">textStyles</text>
+<text class="type" x="656.0" y="6951" text-anchor="end">QList&lt;TimelineTextStyle&gt;</text>
+<path class="rowline" d="M96.0 6976H658.0"/>
+<text class="field" x="97.0" y="6980">dateFormat</text>
+<text class="type" x="656.0" y="6980" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 7005H658.0"/>
+<text class="field" x="97.0" y="7009">numTextLines</text>
+<text class="type" x="656.0" y="7009" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 7034H658.0"/>
+<text class="field" x="97.0" y="7038">showTodayLine</text>
+<text class="type" x="656.0" y="7038" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 7063H658.0"/>
+<text class="field" x="97.0" y="7067">showTimescale</text>
+<text class="type" x="656.0" y="7067" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 7092H658.0"/>
+<text class="field" x="97.0" y="7096">showPanZoom</text>
+<text class="type" x="656.0" y="7096" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 7121H658.0"/>
+<text class="field" x="97.0" y="7125">showDates</text>
+<text class="type" x="656.0" y="7125" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 7150H658.0"/>
+<text class="field" x="97.0" y="7154">showTaskProgress</text>
+<text class="type" x="656.0" y="7154" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 7179H658.0"/>
+<text class="field" x="97.0" y="7183">showOverlaps</text>
+<text class="type" x="656.0" y="7183" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 7208H658.0"/>
+<text class="field" x="97.0" y="7212">rawXml</text>
+<text class="type" x="656.0" y="7212" text-anchor="end">QByteArray</text>
+</g>
+<g class="entity"><rect class="card" x="702" y="6669" width="594" height="249" rx="18" stroke="#416d9c"/>
+<path d="M720 6669H1278Q1296 6669 1296 6687V6751H702V6687Q702 6669 720 6669Z" fill="#416d9c"/>
+<text class="card-title" x="726" y="6703">TimelineBar</text>
+<text class="card-subtitle" x="726" y="6730">Timeline bar definition</text>
+<rect class="badge-pk" x="1237.0" y="6733" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1258.5" y="6747" text-anchor="middle">PK*</text>
+<text class="field" x="719.0" y="6748">id</text>
+<text class="type" x="1215.0" y="6748" text-anchor="end">int</text>
+<path class="rowline" d="M718.0 6773H1280.0"/>
+<text class="field" x="719.0" y="6777">label</text>
+<text class="type" x="1278.0" y="6777" text-anchor="end">QString</text>
+<path class="rowline" d="M718.0 6802H1280.0"/>
+<text class="field" x="719.0" y="6806">useCustomDates</text>
+<text class="type" x="1278.0" y="6806" text-anchor="end">bool</text>
+<path class="rowline" d="M718.0 6831H1280.0"/>
+<text class="field" x="719.0" y="6835">customStart</text>
+<text class="type" x="1278.0" y="6835" text-anchor="end">QDate</text>
+<path class="rowline" d="M718.0 6860H1280.0"/>
+<text class="field" x="719.0" y="6864">customFinish</text>
+<text class="type" x="1278.0" y="6864" text-anchor="end">QDate</text>
+</g>
+<g class="entity"><rect class="card" x="1324" y="6669" width="594" height="278" rx="18" stroke="#416d9c"/>
+<path d="M1342 6669H1900Q1918 6669 1918 6687V6751H1324V6687Q1324 6669 1342 6669Z" fill="#416d9c"/>
+<text class="card-title" x="1348" y="6703">TimelineItem</text>
+<text class="card-subtitle" x="1348" y="6730">Task or milestone on timeline</text>
+<rect class="badge-pk" x="1859.0" y="6733" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1880.5" y="6747" text-anchor="middle">PK*</text>
+<text class="field" x="1341.0" y="6748">guid</text>
+<text class="type" x="1837.0" y="6748" text-anchor="end">QString</text>
+<path class="rowline" d="M1340.0 6773H1902.0"/>
+<rect class="badge-fk" x="1859.0" y="6762" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1880.5" y="6776" text-anchor="middle">FK</text>
+<text class="field" x="1341.0" y="6777">taskUid</text>
+<text class="type" x="1837.0" y="6777" text-anchor="end">int</text>
+<path class="rowline" d="M1340.0 6802H1902.0"/>
+<rect class="badge-fk" x="1859.0" y="6791" width="43" height="20" rx="7"/>
+<text class="badge-text" x="1880.5" y="6805" text-anchor="middle">FK</text>
+<text class="field" x="1341.0" y="6806">barId</text>
+<text class="type" x="1837.0" y="6806" text-anchor="end">int</text>
+<path class="rowline" d="M1340.0 6831H1902.0"/>
+<text class="field" x="1341.0" y="6835">onTimeline</text>
+<text class="type" x="1900.0" y="6835" text-anchor="end">bool</text>
+<path class="rowline" d="M1340.0 6860H1902.0"/>
+<text class="field" x="1341.0" y="6864">milestone</text>
+<text class="type" x="1900.0" y="6864" text-anchor="end">bool</text>
+<path class="rowline" d="M1340.0 6889H1902.0"/>
+<text class="field" x="1341.0" y="6893">display</text>
+<text class="type" x="1900.0" y="6893" text-anchor="end">TimelineItemDisplay</text>
+</g>
+<g class="entity"><rect class="card" x="80" y="7290" width="594" height="365" rx="18" stroke="#416d9c"/>
+<path d="M98 7290H656Q674 7290 674 7308V7372H80V7308Q80 7290 98 7290Z" fill="#416d9c"/>
+<text class="card-title" x="104" y="7324">TimelineTextStyle</text>
+<text class="card-subtitle" x="104" y="7351">Timeline text format</text>
+<rect class="badge-pk" x="615.0" y="7354" width="43" height="20" rx="7"/>
+<text class="badge-text" x="636.5" y="7368" text-anchor="middle">PK*</text>
+<text class="field" x="97.0" y="7369">id</text>
+<text class="type" x="593.0" y="7369" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 7394H658.0"/>
+<text class="field" x="97.0" y="7398">type</text>
+<text class="type" x="656.0" y="7398" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 7423H658.0"/>
+<text class="field" x="97.0" y="7427">color</text>
+<text class="type" x="656.0" y="7427" text-anchor="end">qint32</text>
+<path class="rowline" d="M96.0 7452H658.0"/>
+<text class="field" x="97.0" y="7456">fontName</text>
+<text class="type" x="656.0" y="7456" text-anchor="end">QString</text>
+<path class="rowline" d="M96.0 7481H658.0"/>
+<text class="field" x="97.0" y="7485">fontSize</text>
+<text class="type" x="656.0" y="7485" text-anchor="end">int</text>
+<path class="rowline" d="M96.0 7510H658.0"/>
+<text class="field" x="97.0" y="7514">bold</text>
+<text class="type" x="656.0" y="7514" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 7539H658.0"/>
+<text class="field" x="97.0" y="7543">italic</text>
+<text class="type" x="656.0" y="7543" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 7568H658.0"/>
+<text class="field" x="97.0" y="7572">underline</text>
+<text class="type" x="656.0" y="7572" text-anchor="end">bool</text>
+<path class="rowline" d="M96.0 7597H658.0"/>
+<text class="field" x="97.0" y="7601">strikethrough</text>
+<text class="type" x="656.0" y="7601" text-anchor="end">bool</text>
+</g>
+<text class="footer" x="80" y="7750">Primary and foreign key labels describe ScheduleIO model identity and references. Owned-value keys shown in the notes are conceptual ER projections, not declared SQL constraints.</text>
+</svg>

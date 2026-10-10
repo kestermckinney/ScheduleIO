@@ -1,0 +1,18 @@
+.erd-frame {
+  margin: 1.5rem 0 2rem;
+}
+
+.erd-scroll {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  background: #f4f8fc;
+}
+
+.erd-scroll img {
+  display: block;
+  width: 2000px;
+  max-width: none;
+  height: auto;
+}
