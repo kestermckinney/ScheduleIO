@@ -84,10 +84,11 @@
 <text class="rel-detail" x="1000.0" y="737" text-anchor="middle">CostRate · AvailabilityPeriod · TimephasedValue · CalendarException · TimeRange</text></g>
 <text class="section" x="80" y="820">Core entities and every public attribute</text>
 <text class="section-note" x="80" y="850">PK = stable uniqueId; FK = UID reference. Project is the root document and has no standalone UID.</text>
-<g class="entity"><rect class="card" x="80" y="885" width="2240" height="713" rx="18" stroke="#183c63"/>
+<g class="entity"><rect class="card" x="80" y="885" width="2240" height="733" rx="18" stroke="#183c63"/>
 <path d="M98 885H2302Q2320 885 2320 903V967H80V903Q80 885 98 885Z" fill="#183c63"/>
 <text class="card-title" x="104" y="919">Project</text>
 <text class="card-subtitle" x="104" y="946">Root document · no standalone primary key · options, collections, opaque preservation, and view state</text>
+<g transform="translate(0 20)">
 <text class="field" x="97.0" y="964">formatVersion</text>
 <text class="type" x="808.6666666666666" y="964" text-anchor="end">FormatVersion</text>
 <path class="rowline" d="M96.0 989H810.6666666666666"/>
@@ -277,10 +278,12 @@
 <text class="field" x="1590.3333333333333" y="1544">showProjectSummaryTask</text>
 <text class="type" x="2302.0" y="1544" text-anchor="end">bool</text>
 </g>
-<g class="entity"><rect class="card" x="80" y="1626" width="2240" height="713" rx="18" stroke="#176d78"/>
+</g>
+<g class="entity"><rect class="card" x="80" y="1626" width="2240" height="733" rx="18" stroke="#176d78"/>
 <path d="M98 1626H2302Q2320 1626 2320 1644V1708H80V1644Q80 1626 98 1626Z" fill="#176d78"/>
 <text class="card-title" x="104" y="1660">Task</text>
 <text class="card-subtitle" x="104" y="1687">PK uniqueId · id is display order; outlineLevel and WBS describe hierarchy without a parent FK</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="767.6666666666666" y="1690" width="43" height="20" rx="7"/>
 <text class="badge-text" x="789.1666666666666" y="1704" text-anchor="middle">PK</text>
 <text class="field" x="97.0" y="1705">uniqueId</text>
@@ -469,10 +472,12 @@
 <text class="field" x="1590.3333333333333" y="2256">customFields</text>
 <text class="type" x="2302.0" y="2256" text-anchor="end">QList&lt;CustomField&gt;</text>
 </g>
-<g class="entity"><rect class="card" x="80" y="2367" width="2240" height="597" rx="18" stroke="#256b89"/>
+</g>
+<g class="entity"><rect class="card" x="80" y="2367" width="2240" height="617" rx="18" stroke="#256b89"/>
 <path d="M98 2367H2302Q2320 2367 2320 2385V2449H80V2385Q80 2367 98 2367Z" fill="#256b89"/>
 <text class="card-title" x="104" y="2401">Assignment</text>
 <text class="card-subtitle" x="104" y="2428">PK uniqueId · associative record connecting one task to one resource</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="1141.0" y="2431" width="43" height="20" rx="7"/>
 <text class="badge-text" x="1162.5" y="2445" text-anchor="middle">PK</text>
 <text class="field" x="97.0" y="2446">uniqueId</text>
@@ -577,10 +582,12 @@
 <text class="field" x="1217.0" y="2881">timephasedValues</text>
 <text class="type" x="2302.0" y="2881" text-anchor="end">QList&lt;TimephasedValue&gt;</text>
 </g>
-<g class="entity"><rect class="card" x="80" y="2992" width="1094" height="684" rx="18" stroke="#35745e"/>
+</g>
+<g class="entity"><rect class="card" x="80" y="2992" width="1094" height="704" rx="18" stroke="#35745e"/>
 <path d="M98 2992H1156Q1174 2992 1174 3010V3074H80V3010Q80 2992 98 2992Z" fill="#35745e"/>
 <text class="card-title" x="104" y="3026">Resource</text>
 <text class="card-subtitle" x="104" y="3053">PK uniqueId · cost, availability, baselines, and resource calendar</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="1115.0" y="3056" width="43" height="20" rx="7"/>
 <text class="badge-text" x="1136.5" y="3070" text-anchor="middle">PK</text>
 <text class="field" x="97.0" y="3071">uniqueId</text>
@@ -645,10 +652,12 @@
 <text class="field" x="97.0" y="3622">availabilityTable</text>
 <text class="type" x="1156.0" y="3622" text-anchor="end">QList&lt;AvailabilityPeriod&gt;</text>
 </g>
-<g class="entity"><rect class="card" x="1202" y="2992" width="1118" height="278" rx="18" stroke="#7661a7"/>
+</g>
+<g class="entity"><rect class="card" x="1202" y="2992" width="1118" height="298" rx="18" stroke="#7661a7"/>
 <path d="M1220 2992H2302Q2320 2992 2320 3010V3074H1202V3010Q1202 2992 1220 2992Z" fill="#7661a7"/>
 <text class="card-title" x="1226" y="3026">Calendar</text>
 <text class="card-subtitle" x="1226" y="3053">PK uniqueId · working week, exceptions, and optional base calendar</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="2261.0" y="3056" width="43" height="20" rx="7"/>
 <text class="badge-text" x="2282.5" y="3070" text-anchor="middle">PK</text>
 <text class="field" x="1219.0" y="3071">uniqueId</text>
@@ -671,10 +680,12 @@
 <text class="field" x="1219.0" y="3216">exceptions</text>
 <text class="type" x="2302.0" y="3216" text-anchor="end">QList&lt;CalendarException&gt;</text>
 </g>
-<g class="entity"><rect class="card" x="80" y="3704" width="700" height="278" rx="18" stroke="#b36b36"/>
+</g>
+<g class="entity"><rect class="card" x="80" y="3704" width="700" height="298" rx="18" stroke="#b36b36"/>
 <path d="M98 3704H762Q780 3704 780 3722V3786H80V3722Q80 3704 98 3704Z" fill="#b36b36"/>
 <text class="card-title" x="104" y="3738">Relation</text>
 <text class="card-subtitle" x="104" y="3765">PK uniqueId · task dependency</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="721.0" y="3768" width="43" height="20" rx="7"/>
 <text class="badge-text" x="742.5" y="3782" text-anchor="middle">PK</text>
 <text class="field" x="97.0" y="3783">uniqueId</text>
@@ -699,6 +710,7 @@
 <text class="field" x="97.0" y="3928">lagFormat</text>
 <text class="type" x="762.0" y="3928" text-anchor="end">int</text>
 </g>
+</g>
 <g><rect class="card" x="808" y="3704" width="1112" height="278" rx="18" stroke="#53728c"/><path d="M808 3722Q808 3704 826 3704H1094Q1112 3704 1112 3722V3770H808Z" fill="#53728c"/><text class="card-title" x="832" y="3738">Keys and ownership</text><text class="card-subtitle" x="832" y="3765">How to read the complete attribute catalog</text>
 <text class="note" x="832" y="3821">• Yellow PK marks a stable UID; PK* marks a scoped or composite key in a value collection.</text>
 <text class="note" x="832" y="3863">• Teal FK marks an explicit UID reference to another core entity.</text>
@@ -708,10 +720,11 @@
 </g>
 <text class="section" x="80" y="4022">Owned value records and their complete attributes</text>
 <text class="section-note" x="80" y="4050">Each record below is stored in an owner collection; no standalone PK is declared unless a member is marked.</text>
-<g class="entity"><rect class="card" x="80" y="4077" width="594" height="278" rx="18" stroke="#89702d"/>
+<g class="entity"><rect class="card" x="80" y="4077" width="594" height="298" rx="18" stroke="#89702d"/>
 <path d="M98 4077H656Q674 4077 674 4095V4159H80V4095Q80 4077 98 4077Z" fill="#89702d"/>
 <text class="card-title" x="104" y="4111">Baseline</text>
 <text class="card-subtitle" x="104" y="4138">Task · Resource · Assignment baselines</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="615.0" y="4141" width="43" height="20" rx="7"/>
 <text class="badge-text" x="636.5" y="4155" text-anchor="middle">PK*</text>
 <text class="field" x="97.0" y="4156">number</text>
@@ -732,10 +745,12 @@
 <text class="field" x="97.0" y="4301">durationMillis</text>
 <text class="type" x="656.0" y="4301" text-anchor="end">qint64</text>
 </g>
-<g class="entity"><rect class="card" x="702" y="4077" width="594" height="278" rx="18" stroke="#89702d"/>
+</g>
+<g class="entity"><rect class="card" x="702" y="4077" width="594" height="298" rx="18" stroke="#89702d"/>
 <path d="M720 4077H1278Q1296 4077 1296 4095V4159H702V4095Q702 4077 720 4077Z" fill="#89702d"/>
 <text class="card-title" x="726" y="4111">CustomField</text>
 <text class="card-subtitle" x="726" y="4138">Project definitions · Task · Resource · Assignment</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="1237.0" y="4141" width="43" height="20" rx="7"/>
 <text class="badge-text" x="1258.5" y="4155" text-anchor="middle">PK*</text>
 <text class="field" x="719.0" y="4156">fieldId</text>
@@ -756,10 +771,12 @@
 <text class="field" x="719.0" y="4301">graphicalIndicators</text>
 <text class="type" x="1278.0" y="4301" text-anchor="end">QList&lt;IndicatorRule&gt;</text>
 </g>
-<g class="entity"><rect class="card" x="1324" y="4077" width="594" height="191" rx="18" stroke="#89702d"/>
+</g>
+<g class="entity"><rect class="card" x="1324" y="4077" width="594" height="211" rx="18" stroke="#89702d"/>
 <path d="M1342 4077H1900Q1918 4077 1918 4095V4159H1324V4095Q1324 4077 1342 4077Z" fill="#89702d"/>
 <text class="card-title" x="1348" y="4111">IndicatorRule</text>
 <text class="card-subtitle" x="1348" y="4138">Nested in CustomField.graphicalIndicators</text>
+<g transform="translate(0 20)">
 <text class="field" x="1341.0" y="4156">comparison</text>
 <text class="type" x="1900.0" y="4156" text-anchor="end">QString</text>
 <path class="rowline" d="M1340.0 4181H1902.0"/>
@@ -769,10 +786,12 @@
 <text class="field" x="1341.0" y="4214">indicator</text>
 <text class="type" x="1900.0" y="4214" text-anchor="end">QString</text>
 </g>
-<g class="entity"><rect class="card" x="80" y="4379" width="594" height="336" rx="18" stroke="#89702d"/>
+</g>
+<g class="entity"><rect class="card" x="80" y="4379" width="594" height="356" rx="18" stroke="#89702d"/>
 <path d="M98 4379H656Q674 4379 674 4397V4461H80V4397Q80 4379 98 4379Z" fill="#89702d"/>
 <text class="card-title" x="104" y="4413">CostRate</text>
 <text class="card-subtitle" x="104" y="4440">Resource cost-rate table entries</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="615.0" y="4443" width="43" height="20" rx="7"/>
 <text class="badge-text" x="636.5" y="4457" text-anchor="middle">PK*</text>
 <text class="field" x="97.0" y="4458">table</text>
@@ -801,10 +820,12 @@
 <text class="field" x="97.0" y="4661">costPerUse</text>
 <text class="type" x="656.0" y="4661" text-anchor="end">double</text>
 </g>
-<g class="entity"><rect class="card" x="702" y="4379" width="594" height="191" rx="18" stroke="#89702d"/>
+</g>
+<g class="entity"><rect class="card" x="702" y="4379" width="594" height="211" rx="18" stroke="#89702d"/>
 <path d="M720 4379H1278Q1296 4379 1296 4397V4461H702V4397Q702 4379 720 4379Z" fill="#89702d"/>
 <text class="card-title" x="726" y="4413">AvailabilityPeriod</text>
 <text class="card-subtitle" x="726" y="4440">Resource availabilityTable rows</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="1237.0" y="4443" width="43" height="20" rx="7"/>
 <text class="badge-text" x="1258.5" y="4457" text-anchor="middle">PK*</text>
 <text class="field" x="719.0" y="4458">startDate</text>
@@ -816,10 +837,12 @@
 <text class="field" x="719.0" y="4516">units</text>
 <text class="type" x="1278.0" y="4516" text-anchor="end">double</text>
 </g>
-<g class="entity"><rect class="card" x="1324" y="4379" width="594" height="307" rx="18" stroke="#89702d"/>
+</g>
+<g class="entity"><rect class="card" x="1324" y="4379" width="594" height="327" rx="18" stroke="#89702d"/>
 <path d="M1342 4379H1900Q1918 4379 1918 4397V4461H1324V4397Q1324 4379 1342 4379Z" fill="#89702d"/>
 <text class="card-title" x="1348" y="4413">TimephasedValue</text>
 <text class="card-subtitle" x="1348" y="4440">Assignment timephasedValues buckets</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="1859.0" y="4443" width="43" height="20" rx="7"/>
 <text class="badge-text" x="1880.5" y="4457" text-anchor="middle">PK*</text>
 <text class="field" x="1341.0" y="4458">type</text>
@@ -849,10 +872,12 @@
 <text class="field" x="1341.0" y="4632">value</text>
 <text class="type" x="1900.0" y="4632" text-anchor="end">QString</text>
 </g>
-<g class="entity"><rect class="card" x="80" y="4739" width="594" height="452" rx="18" stroke="#89702d"/>
+</g>
+<g class="entity"><rect class="card" x="80" y="4739" width="594" height="472" rx="18" stroke="#89702d"/>
 <path d="M98 4739H656Q674 4739 674 4757V4821H80V4757Q80 4739 98 4739Z" fill="#89702d"/>
 <text class="card-title" x="104" y="4773">CalendarException</text>
 <text class="card-subtitle" x="104" y="4800">Calendar.exceptions date overrides</text>
+<g transform="translate(0 20)">
 <text class="field" x="97.0" y="4818">fromDate</text>
 <text class="type" x="656.0" y="4818" text-anchor="end">QDate</text>
 <path class="rowline" d="M96.0 4843H658.0"/>
@@ -889,30 +914,36 @@
 <text class="field" x="97.0" y="5137">occurrences</text>
 <text class="type" x="656.0" y="5137" text-anchor="end">int</text>
 </g>
-<g class="entity"><rect class="card" x="702" y="4739" width="594" height="162" rx="18" stroke="#89702d"/>
+</g>
+<g class="entity"><rect class="card" x="702" y="4739" width="594" height="182" rx="18" stroke="#89702d"/>
 <path d="M720 4739H1278Q1296 4739 1296 4757V4821H702V4757Q702 4739 720 4739Z" fill="#89702d"/>
 <text class="card-title" x="726" y="4773">TimeRange</text>
 <text class="card-subtitle" x="726" y="4800">Calendar working-time periods</text>
+<g transform="translate(0 20)">
 <text class="field" x="719.0" y="4818">start</text>
 <text class="type" x="1278.0" y="4818" text-anchor="end">QTime</text>
 <path class="rowline" d="M718.0 4843H1280.0"/>
 <text class="field" x="719.0" y="4847">end</text>
 <text class="type" x="1278.0" y="4847" text-anchor="end">QTime</text>
 </g>
-<g class="entity"><rect class="card" x="1324" y="4739" width="594" height="162" rx="18" stroke="#89702d"/>
+</g>
+<g class="entity"><rect class="card" x="1324" y="4739" width="594" height="182" rx="18" stroke="#89702d"/>
 <path d="M1342 4739H1900Q1918 4739 1918 4757V4821H1324V4757Q1324 4739 1342 4739Z" fill="#89702d"/>
 <text class="card-title" x="1348" y="4773">TaskSegment</text>
 <text class="card-subtitle" x="1348" y="4800">Task split segments</text>
+<g transform="translate(0 20)">
 <text class="field" x="1341.0" y="4818">start</text>
 <text class="type" x="1900.0" y="4818" text-anchor="end">QDateTime</text>
 <path class="rowline" d="M1340.0 4843H1902.0"/>
 <text class="field" x="1341.0" y="4847">finish</text>
 <text class="type" x="1900.0" y="4847" text-anchor="end">QDateTime</text>
 </g>
-<g class="entity"><rect class="card" x="80" y="5215" width="594" height="365" rx="18" stroke="#89702d"/>
+</g>
+<g class="entity"><rect class="card" x="80" y="5215" width="594" height="385" rx="18" stroke="#89702d"/>
 <path d="M98 5215H656Q674 5215 674 5233V5297H80V5233Q80 5215 98 5215Z" fill="#89702d"/>
 <text class="card-title" x="104" y="5249">EarnedValue</text>
 <text class="card-subtitle" x="104" y="5276">Task.evm metrics</text>
+<g transform="translate(0 20)">
 <text class="field" x="97.0" y="5294">pv</text>
 <text class="type" x="656.0" y="5294" text-anchor="end">double</text>
 <path class="rowline" d="M96.0 5319H658.0"/>
@@ -940,12 +971,14 @@
 <text class="field" x="97.0" y="5526">tcpi</text>
 <text class="type" x="656.0" y="5526" text-anchor="end">double</text>
 </g>
+</g>
 <text class="section" x="80" y="5604">View and presentation state</text>
 <text class="section-note" x="80" y="5632">These nested value objects are Project or Task attributes, shown here with every public member.</text>
-<g class="entity"><rect class="card" x="80" y="5659" width="594" height="394" rx="18" stroke="#416d9c"/>
+<g class="entity"><rect class="card" x="80" y="5659" width="594" height="414" rx="18" stroke="#416d9c"/>
 <path d="M98 5659H656Q674 5659 674 5677V5741H80V5677Q80 5659 98 5659Z" fill="#416d9c"/>
 <text class="card-title" x="104" y="5693">TextStyle</text>
 <text class="card-subtitle" x="104" y="5720">Text and cell text format</text>
+<g transform="translate(0 20)">
 <text class="field" x="97.0" y="5738">bold</text>
 <text class="type" x="656.0" y="5738" text-anchor="end">bool</text>
 <path class="rowline" d="M96.0 5763H658.0"/>
@@ -976,20 +1009,24 @@
 <text class="field" x="97.0" y="5999">fontBaseIndex</text>
 <text class="type" x="656.0" y="5999" text-anchor="end">int</text>
 </g>
-<g class="entity"><rect class="card" x="702" y="5659" width="594" height="162" rx="18" stroke="#416d9c"/>
+</g>
+<g class="entity"><rect class="card" x="702" y="5659" width="594" height="182" rx="18" stroke="#416d9c"/>
 <path d="M720 5659H1278Q1296 5659 1296 5677V5741H702V5677Q702 5659 720 5659Z" fill="#416d9c"/>
 <text class="card-title" x="726" y="5693">ViewLineStyle</text>
 <text class="card-subtitle" x="726" y="5720">Gantt line format</text>
+<g transform="translate(0 20)">
 <text class="field" x="719.0" y="5738">color</text>
 <text class="type" x="1278.0" y="5738" text-anchor="end">qint32</text>
 <path class="rowline" d="M718.0 5763H1280.0"/>
 <text class="field" x="719.0" y="5767">lineStyle</text>
 <text class="type" x="1278.0" y="5767" text-anchor="end">int</text>
 </g>
-<g class="entity"><rect class="card" x="1324" y="5659" width="594" height="597" rx="18" stroke="#416d9c"/>
+</g>
+<g class="entity"><rect class="card" x="1324" y="5659" width="594" height="617" rx="18" stroke="#416d9c"/>
 <path d="M1342 5659H1900Q1918 5659 1918 5677V5741H1324V5677Q1324 5659 1342 5659Z" fill="#416d9c"/>
 <text class="card-title" x="1348" y="5693">ViewBarStyle</text>
 <text class="card-subtitle" x="1348" y="5720">Default Gantt bar format</text>
+<g transform="translate(0 20)">
 <text class="field" x="1341.0" y="5738">middleColor</text>
 <text class="type" x="1900.0" y="5738" text-anchor="end">qint32</text>
 <path class="rowline" d="M1340.0 5763H1902.0"/>
@@ -1043,10 +1080,12 @@
 <text class="field" x="1341.0" y="6202">flag87</text>
 <text class="type" x="1900.0" y="6202" text-anchor="end">quint16</text>
 </g>
-<g class="entity"><rect class="card" x="80" y="6280" width="594" height="336" rx="18" stroke="#416d9c"/>
+</g>
+<g class="entity"><rect class="card" x="80" y="6280" width="594" height="356" rx="18" stroke="#416d9c"/>
 <path d="M98 6280H656Q674 6280 674 6298V6362H80V6298Q80 6280 98 6280Z" fill="#416d9c"/>
 <text class="card-title" x="104" y="6314">ViewStyles</text>
 <text class="card-subtitle" x="104" y="6341">Project-level style collection</text>
+<g transform="translate(0 20)">
 <text class="field" x="97.0" y="6359">present</text>
 <text class="type" x="656.0" y="6359" text-anchor="end">bool</text>
 <path class="rowline" d="M96.0 6384H658.0"/>
@@ -1071,10 +1110,12 @@
 <text class="field" x="97.0" y="6562">barStyles</text>
 <text class="type" x="656.0" y="6562" text-anchor="end">QVector&lt;ViewBarStyle&gt;</text>
 </g>
-<g class="entity"><rect class="card" x="702" y="6280" width="594" height="365" rx="18" stroke="#416d9c"/>
+</g>
+<g class="entity"><rect class="card" x="702" y="6280" width="594" height="385" rx="18" stroke="#416d9c"/>
 <path d="M720 6280H1278Q1296 6280 1296 6298V6362H702V6298Q702 6280 720 6280Z" fill="#416d9c"/>
 <text class="card-title" x="726" y="6314">UsageViewSettings</text>
 <text class="card-subtitle" x="726" y="6341">Gantt and Usage view state</text>
+<g transform="translate(0 20)">
 <text class="field" x="719.0" y="6359">present</text>
 <text class="type" x="1278.0" y="6359" text-anchor="end">bool</text>
 <path class="rowline" d="M718.0 6384H1280.0"/>
@@ -1102,10 +1143,12 @@
 <text class="field" x="719.0" y="6591">tableWidth</text>
 <text class="type" x="1278.0" y="6591" text-anchor="end">int</text>
 </g>
-<g class="entity"><rect class="card" x="1324" y="6280" width="594" height="191" rx="18" stroke="#416d9c"/>
+</g>
+<g class="entity"><rect class="card" x="1324" y="6280" width="594" height="211" rx="18" stroke="#416d9c"/>
 <path d="M1342 6280H1900Q1918 6280 1918 6298V6362H1324V6298Q1324 6280 1342 6280Z" fill="#416d9c"/>
 <text class="card-title" x="1348" y="6314">UsageTableColumn</text>
 <text class="card-subtitle" x="1348" y="6341">Usage-view column</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="1859.0" y="6344" width="43" height="20" rx="7"/>
 <text class="badge-text" x="1880.5" y="6358" text-anchor="middle">PK*</text>
 <text class="field" x="1341.0" y="6359">fieldId</text>
@@ -1117,10 +1160,12 @@
 <text class="field" x="1341.0" y="6417">title</text>
 <text class="type" x="1900.0" y="6417" text-anchor="end">QString</text>
 </g>
-<g class="entity"><rect class="card" x="80" y="6669" width="594" height="597" rx="18" stroke="#416d9c"/>
+</g>
+<g class="entity"><rect class="card" x="80" y="6669" width="594" height="617" rx="18" stroke="#416d9c"/>
 <path d="M98 6669H656Q674 6669 674 6687V6751H80V6687Q80 6669 98 6669Z" fill="#416d9c"/>
 <text class="card-title" x="104" y="6703">TimelineViewSettings</text>
 <text class="card-subtitle" x="104" y="6730">Timeline view state</text>
+<g transform="translate(0 20)">
 <text class="field" x="97.0" y="6748">present</text>
 <text class="type" x="656.0" y="6748" text-anchor="end">bool</text>
 <path class="rowline" d="M96.0 6773H658.0"/>
@@ -1172,10 +1217,12 @@
 <text class="field" x="97.0" y="7212">rawXml</text>
 <text class="type" x="656.0" y="7212" text-anchor="end">QByteArray</text>
 </g>
-<g class="entity"><rect class="card" x="702" y="6669" width="594" height="249" rx="18" stroke="#416d9c"/>
+</g>
+<g class="entity"><rect class="card" x="702" y="6669" width="594" height="269" rx="18" stroke="#416d9c"/>
 <path d="M720 6669H1278Q1296 6669 1296 6687V6751H702V6687Q702 6669 720 6669Z" fill="#416d9c"/>
 <text class="card-title" x="726" y="6703">TimelineBar</text>
 <text class="card-subtitle" x="726" y="6730">Timeline bar definition</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="1237.0" y="6733" width="43" height="20" rx="7"/>
 <text class="badge-text" x="1258.5" y="6747" text-anchor="middle">PK*</text>
 <text class="field" x="719.0" y="6748">id</text>
@@ -1193,10 +1240,12 @@
 <text class="field" x="719.0" y="6864">customFinish</text>
 <text class="type" x="1278.0" y="6864" text-anchor="end">QDate</text>
 </g>
-<g class="entity"><rect class="card" x="1324" y="6669" width="594" height="278" rx="18" stroke="#416d9c"/>
+</g>
+<g class="entity"><rect class="card" x="1324" y="6669" width="594" height="298" rx="18" stroke="#416d9c"/>
 <path d="M1342 6669H1900Q1918 6669 1918 6687V6751H1324V6687Q1324 6669 1342 6669Z" fill="#416d9c"/>
 <text class="card-title" x="1348" y="6703">TimelineItem</text>
 <text class="card-subtitle" x="1348" y="6730">Task or milestone on timeline</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="1859.0" y="6733" width="43" height="20" rx="7"/>
 <text class="badge-text" x="1880.5" y="6747" text-anchor="middle">PK*</text>
 <text class="field" x="1341.0" y="6748">guid</text>
@@ -1221,10 +1270,12 @@
 <text class="field" x="1341.0" y="6893">display</text>
 <text class="type" x="1900.0" y="6893" text-anchor="end">TimelineItemDisplay</text>
 </g>
-<g class="entity"><rect class="card" x="80" y="7290" width="594" height="365" rx="18" stroke="#416d9c"/>
+</g>
+<g class="entity"><rect class="card" x="80" y="7290" width="594" height="385" rx="18" stroke="#416d9c"/>
 <path d="M98 7290H656Q674 7290 674 7308V7372H80V7308Q80 7290 98 7290Z" fill="#416d9c"/>
 <text class="card-title" x="104" y="7324">TimelineTextStyle</text>
 <text class="card-subtitle" x="104" y="7351">Timeline text format</text>
+<g transform="translate(0 20)">
 <rect class="badge-pk" x="615.0" y="7354" width="43" height="20" rx="7"/>
 <text class="badge-text" x="636.5" y="7368" text-anchor="middle">PK*</text>
 <text class="field" x="97.0" y="7369">id</text>
@@ -1253,6 +1304,7 @@
 <path class="rowline" d="M96.0 7597H658.0"/>
 <text class="field" x="97.0" y="7601">strikethrough</text>
 <text class="type" x="656.0" y="7601" text-anchor="end">bool</text>
+</g>
 </g>
 <text class="footer" x="80" y="7750">Primary and foreign key labels describe ScheduleIO model identity and references. Owned-value keys shown in the notes are conceptual ER projections, not declared SQL constraints.</text>
 </svg>
