@@ -3,11 +3,15 @@
 
 # ScheduleIO
 
+[Project overview](https://kestermckinney.gitlab.io/#projects) · [GitLab repository](https://gitlab.com/kestermckinney/ScheduleIO) · [Documentation](https://scheduleio-gitlab.readthedocs.io/en/latest/)
+
 A cross-platform (Windows / macOS / Linux) Qt 6/C++17 library for Microsoft Project schedules.
 `MppIO` reads MPP12/MPP14 files and writes native template-based MPP14 files. `XmlIO` reads and
 writes Microsoft Project compatible MSPDI XML over the same `schedule::Project` value model. The
 library also provides working-calendar, dependency scheduling, critical-path, work/units, and
 resource-leveling utilities. Microsoft Project does not need to be installed.
+
+ScheduleIO is for developers building schedule viewers, editors, converters, and planning tools around Microsoft Project files.
 
 ## Status
 
@@ -63,3 +67,8 @@ structures are under **Data Model**, the I/O and scheduling APIs under **API Ref
 examples under **Getting Started**. The detailed binary layout, compound storage behavior, ownership,
 and writer pipeline are under **Reference → MPP File Format and Storage**; preservation details are
 under **Reference → Field Coverage**.
+
+## Related projects
+
+- [ProjectNotes](https://gitlab.com/kestermckinney/ProjectNotes) — a workspace for project notes, actions, and reporting.
+- [SqliteSyncPro](https://gitlab.com/kestermckinney/SqliteSyncPro) — a Qt library for synchronizing local SQLite data with remote PostgreSQL services.
