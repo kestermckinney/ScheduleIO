@@ -16,7 +16,9 @@
 //   entry  u32 fieldId, u32 entryLength (from the entry's start, through its
 //          strings and their u32 0), u32 PjAutoFilterType,
 //          criteria (below), then -- for an In filter -- its value list:
-//          u16 count, count x (u16 type 8, 8 zero bytes, UTF-16 z-string)
+//          u16 count, count x (u16 type, 8 payload bytes as a value block's
+//          @14, then a UTF-16 z-string for a text item). A listed date's
+//          time is 0xFFFF ("any time that day"); 0xFFFFFFFF is NA.
 //   criteria  B: u32 0xFFFFFFFF, u32 0, u32 ?, u16 0, u16 blockCount,
 //          u32 stringsOffset; blockCount 36-byte blocks from B+0x14, then
 //          the text values' UTF-16 z-strings in block order, then u32 0.
@@ -27,10 +29,12 @@
 //          field: u32@0 7, u32@4 3, u32@8 field id
 //          value: u32@0 1, u32@4 8, u16@12 type (8 text, 0x13 date or
 //          duration, 2 percent, 5 number / cost / work, 0x0B flag,
-//          0x4000 list), value from @14, u16@24 duration units
+//          0x4000 list), value from @14, u16@24 duration units (2 = work)
+//          Within / NotWithin (0x3E8 / 0x3F0) take two value children.
 //
 // Dates are u32 (days since 1984-01-01 << 16 | tenths of a minute); durations
-// u32 tenths of a minute; work a double of minutes x 1000.
+// u32 tenths of a minute; work a double of minutes x 1000; money a double in
+// hundredths of the currency unit.
 
 #include "model/viewautofilter.h"
 
@@ -49,7 +53,10 @@ QList<schedule::ColumnAutoFilter> decode(const QByteArray &item);
 // today, at the default start time).
 QByteArray encode(const QList<schedule::ColumnAutoFilter> &filters, const QDateTime &stamp);
 
-// MPP date-time <-> local QDateTime.
+// Whether a field holds money (stored in hundredths in filter values).
+bool isCurrencyField(quint32 fieldId);
+
+// MPP date-time <-> local QDateTime ("NA", 0xFFFFFFFF, <-> invalid).
 quint32 toMppDate(const QDateTime &dt);
 QDateTime fromMppDate(quint32 v);
 

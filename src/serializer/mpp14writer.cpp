@@ -413,6 +413,31 @@ void putBaselines(EntitySink &sink, const QList<schedule::Baseline> &baselines,
     }
 }
 
+// Set or clear the FixedMeta bits of an entity's flag fields. `tail` is the
+// meta item from byte `tailStart` on.
+void setMetaFlags(QByteArray &tail, int tailStart, const QList<schedule::CustomField> &fields,
+                  quint16 highWord, const QHash<quint16, EntityFieldLoc> &loc,
+                  const QVector<MppFieldIds::CustomFieldDef> &defs)
+{
+    for (const MppFieldIds::CustomFieldDef &d : defs) {
+        if (d.kind != MppFieldIds::FieldKind::Bool)
+            continue;
+        const auto it = loc.constFind(d.index);
+        if (it == loc.constEnd() || it->metaOffset < 0)
+            continue;
+        const int at = it->metaOffset - tailStart;
+        if (at < 0 || at + 4 > tail.size())
+            continue;
+        bool on = false;
+        for (const schedule::CustomField &c : fields)
+            if (quint32(c.fieldId) == ((quint32(highWord) << 16) | d.index))
+                on = c.value.toBool();
+        quint32 bits = qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(tail.constData() + at));
+        bits = on ? (bits | it->metaMask) : (bits & ~it->metaMask);
+        qToLittleEndian(bits, reinterpret_cast<uchar *>(tail.data() + at));
+    }
+}
+
 void putCustomFields(EntitySink &sink, const QList<schedule::CustomField> &fields,
                      quint16 highWord, const QVector<MppFieldIds::CustomFieldDef> &defs)
 {
@@ -445,6 +470,11 @@ void putCustomFields(EntitySink &sink, const QList<schedule::CustomField> &field
             sink.putDuration(idx, c.value.toLongLong());
             break;
         case MppFieldIds::FieldKind::Bool: {
+            // Meta-bit flags are set in the row's FixedMeta by the caller
+            // (setMetaFlags); Project ignores a var blob for them.
+            const auto meta = sink.loc->constFind(idx);
+            if (meta != sink.loc->constEnd() && meta->metaOffset >= 0)
+                break;
             QByteArray b;
             b.append(c.value.toBool() ? char(1) : char(0));
             sink.putVarBlob(idx, b);
@@ -1712,6 +1742,8 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // Project-authored task row.
             if (!t.notes.isEmpty())
                 metaTail[36] = char(quint8(metaTail[36]) | 0x10);
+            setMetaFlags(metaTail, 8, t.customFields, MppFieldIds::kTaskHigh, taskLoc,
+                         MppFieldIds::taskCustomFields());
             const quint32 metaHeader = quint32(qMin<qsizetype>(taskVarKeys.size(), 0xFF)) << 16;
             fixed.addItem(metaHeader, rec, metaTail);
 

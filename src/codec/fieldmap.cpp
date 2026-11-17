@@ -38,6 +38,17 @@ QHash<quint16, EntityFieldLoc> entityFieldLocations(const QByteArray &fm, quint1
             }
         } else if (!meta) {
             L.var = true;
+        } else if (category == 0x0B && L.metaOffset < 0) {
+            // Meta bits: u32 mask @0, offset @8 counted from item byte 2 (so
+            // MILESTONE's 8 is FixedMeta item byte 10, Flag1's 22 byte 24).
+            quint16 metaOffset = 0;
+            quint32 mask = 0;
+            readU16(fm, i + 8, &metaOffset);
+            readU32(fm, i, &mask);
+            if (mask != 0) {
+                L.metaOffset = int(metaOffset) + 2;
+                L.metaMask = mask;
+            }
         }
     }
     return out;

@@ -22,6 +22,10 @@ struct EntityFieldLoc {
     int block = -1;     // fixed block index (0 = FixedData, 1 = Fixed2Data), else -1
     int offset = -1;    // byte offset within that fixed block
     bool var = false;   // also/only present as variable-length data
+    // A bit in the row's FixedMeta item (Flag1..Flag20 and similar): the u32
+    // at item byte metaOffset, masked by metaMask. -1 when not a meta field.
+    int metaOffset = -1;
+    quint32 metaMask = 0;
 };
 
 // Parse a field map (28-byte entries) into per-index locations for one entity

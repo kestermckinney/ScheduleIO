@@ -31,12 +31,14 @@ struct SCHEDULEIO_EXPORT AutoFilterValue
     double number = 0.0;
     qint64 millis = 0;
     int durationUnit = 7;
-    QDateTime date;
+    QDateTime date;          // invalid = NA (no date)
+    bool anyTime = false;    // a listed date: the whole day, not one moment
 
     bool operator==(const AutoFilterValue &o) const
     {
         return type == o.type && text == o.text && qFuzzyCompare(number + 1.0, o.number + 1.0)
-            && millis == o.millis && durationUnit == o.durationUnit && date == o.date;
+            && millis == o.millis && durationUnit == o.durationUnit && date == o.date
+            && anyTime == o.anyTime;
     }
 };
 
@@ -68,7 +70,7 @@ struct SCHEDULEIO_EXPORT ColumnAutoFilter
     int filterType = Custom;  // PjAutoFilterType
     bool orJoin = false;      // two conditions: Or instead of And
     QList<AutoFilterCondition> conditions;   // 1 or 2 (not for In)
-    QStringList list;         // In: the ticked values
+    QList<AutoFilterValue> list;   // In: the ticked values
 
     bool operator==(const ColumnAutoFilter &o) const
     {

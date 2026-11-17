@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "codec/autofiltercodec.h"
+#include "codec/mppfieldids.h"
 
 #include <QtEndian>
 #include <QVector>
@@ -23,6 +24,7 @@ constexpr quint32 kOperandField = 7, kOperandValue = 1;
 constexpr quint16 kTypeText = 8, kTypeDateOrDuration = 0x13, kTypePercent = 2,
                   kTypeDouble = 5, kTypeFlag = 0x0B, kTypeList = 0x4000;
 constexpr quint16 kWorkUnits = 2;      // what Project writes with a work value
+constexpr quint32 kNaDate = 0xFFFFFFFFu; // "NA" -- no date
 
 quint16 rd16(const QByteArray &b, int o)
 {
@@ -92,18 +94,20 @@ int blockIndex(quint16 offset, int count)
     return i < count ? i : -1;
 }
 
-AutoFilterValue decodeValue(const QByteArray &blk, const QString &text)
+// A typed value: `type` and the 8 payload bytes at `at` of `b` (a value
+// block's u16@12 / @14, or a list item's u16@0 / @2); `units` the value
+// block's u16@24.
+AutoFilterValue decodePayload(const QByteArray &b, int at, quint16 type, quint16 units,
+                              quint32 fieldId, const QString &text)
 {
     AutoFilterValue v;
-    const quint16 type = rd16(blk, 12);
     switch (type) {
     case kTypeText:
         v.type = AutoFilterValue::Type::Text;
         v.text = text;
         break;
     case kTypeDateOrDuration: {
-        const quint32 raw = rd32(blk, 14);
-        const quint16 units = rd16(blk, 24);
+        const quint32 raw = rd32(b, at);
         if (units != 0) {
             v.type = AutoFilterValue::Type::Duration;
             v.millis = qint64(raw) * 6000;
@@ -111,25 +115,29 @@ AutoFilterValue decodeValue(const QByteArray &blk, const QString &text)
         } else {
             v.type = AutoFilterValue::Type::Date;
             v.date = AutoFilterCodec::fromMppDate(raw);
+            v.anyTime = raw != kNaDate && (raw & 0xFFFF) == 0xFFFF;
         }
         break;
     }
     case kTypePercent:
         v.type = AutoFilterValue::Type::Percent;
-        v.number = rd16(blk, 14);
+        v.number = rd16(b, at);
         break;
     case kTypeDouble:
-        if (rd16(blk, 24) == kWorkUnits) {
+        if (units == kWorkUnits) {
             v.type = AutoFilterValue::Type::Work;
-            v.millis = qRound64(rdDouble(blk, 14) * 60.0);
+            v.millis = qRound64(rdDouble(b, at) * 60.0);
+        } else if (AutoFilterCodec::isCurrencyField(fieldId)) {
+            v.type = AutoFilterValue::Type::Cost;
+            v.number = rdDouble(b, at) / 100.0;   // stored in hundredths
         } else {
             v.type = AutoFilterValue::Type::Number;
-            v.number = rdDouble(blk, 14);
+            v.number = rdDouble(b, at);
         }
         break;
     case kTypeFlag:
         v.type = AutoFilterValue::Type::Flag;
-        v.number = rd16(blk, 14) ? 1 : 0;
+        v.number = rd16(b, at) ? 1 : 0;
         break;
     default:
         v.type = AutoFilterValue::Type::Text;
@@ -137,6 +145,45 @@ AutoFilterValue decodeValue(const QByteArray &blk, const QString &text)
         break;
     }
     return v;
+}
+
+// The type code and 8 payload bytes of a value (shared by value blocks and
+// list items); *units receives the units a value block records.
+quint16 encodePayload(const AutoFilterValue &v, QByteArray &b, int at, quint16 *units)
+{
+    *units = 0;
+    switch (v.type) {
+    case AutoFilterValue::Type::Text:
+        return kTypeText;
+    case AutoFilterValue::Type::Date: {
+        quint32 raw = AutoFilterCodec::toMppDate(v.date);
+        if (v.anyTime && raw != kNaDate)
+            raw |= 0xFFFF;
+        wr32(b, at, raw);
+        return kTypeDateOrDuration;
+    }
+    case AutoFilterValue::Type::Duration:
+        wr32(b, at, quint32(qMax<qint64>(0, v.millis / 6000)));
+        *units = quint16(v.durationUnit > 0 ? v.durationUnit : 7);
+        return kTypeDateOrDuration;
+    case AutoFilterValue::Type::Work:
+        wrDouble(b, at, double(v.millis) / 60.0);
+        *units = kWorkUnits;
+        return kTypeDouble;
+    case AutoFilterValue::Type::Percent:
+        wr16(b, at, quint16(qBound(0, qRound(v.number), 65535)));
+        return kTypePercent;
+    case AutoFilterValue::Type::Flag:
+        wr16(b, at, v.number != 0.0 ? 1 : 0);
+        return kTypeFlag;
+    case AutoFilterValue::Type::Cost:
+        wrDouble(b, at, v.number * 100.0);   // hundredths of the currency unit
+        return kTypeDouble;
+    case AutoFilterValue::Type::Number:
+        wrDouble(b, at, v.number);
+        return kTypeDouble;
+    }
+    return kTypeText;
 }
 
 // A test block (and its field + value children) as a condition.
@@ -152,7 +199,8 @@ bool decodeCondition(const Parsed &p, int index, const QHash<int, QString> &text
         if (rd32(blk, 0) == kOperandField)
             *fieldId = rd32(blk, 8);
         else if (rd32(blk, 0) == kOperandValue && rd16(blk, 12) != kTypeList)
-            out->values.append(decodeValue(blk, textOf.value(c)));
+            out->values.append(decodePayload(blk, 14, rd16(blk, 12), rd16(blk, 24), *fieldId,
+                                             textOf.value(c)));
         if (out->values.size() > 4)
             break;
     }
@@ -166,7 +214,7 @@ namespace AutoFilterCodec {
 quint32 toMppDate(const QDateTime &dt)
 {
     if (!dt.isValid())
-        return 0;
+        return kNaDate;
     const qint64 days = kEpoch.daysTo(dt.date());
     const int tenths = (dt.time().hour() * 60 + dt.time().minute()) * 10;
     return (quint32(qMax<qint64>(0, days)) << 16) | quint32(tenths & 0xFFFF);
@@ -174,9 +222,44 @@ quint32 toMppDate(const QDateTime &dt)
 
 QDateTime fromMppDate(quint32 v)
 {
+    if (v == kNaDate)
+        return {};
     const QDate d = kEpoch.addDays(v >> 16);
-    const int minutes = int(v & 0xFFFF) / 10;
+    const int minutes = (v & 0xFFFF) == 0xFFFF ? 0 : int(v & 0xFFFF) / 10;
     return QDateTime(d, QTime(0, 0).addSecs(minutes * 60));
+}
+
+bool isCurrencyField(quint32 fieldId)
+{
+    using namespace MppFieldIds;
+    const quint16 high = quint16(fieldId >> 16), idx = quint16(fieldId & 0xFFFF);
+    auto inCost = [idx](const CostFields &c) {
+        return idx == c.cost || idx == c.fixedCost || idx == c.actualCost
+            || idx == c.remainingCost || idx == c.costVariance;
+    };
+    auto inBaselines = [idx](const BaselineSet *sets) {
+        for (int i = 0; i < kBaselineCount; ++i)
+            if (sets[i].cost != kAbsent && sets[i].cost == idx)
+                return true;
+        return false;
+    };
+    auto inCustom = [idx](const QVector<CustomFieldDef> &defs) {
+        for (const CustomFieldDef &d : defs)
+            if (d.index == idx)
+                return d.kind == FieldKind::Currency;
+        return false;
+    };
+    if (high == kTaskHigh)
+        return inCost(taskCost) || inBaselines(taskBaselines) || inCustom(taskCustomFields())
+            || idx == taskEvm.bcwp || idx == taskEvm.bcws || idx == taskEvm.acwp
+            || idx == taskEvm.cv || idx == taskEvm.sv || idx == taskEvm.eac;
+    if (high == kResourceHigh)   // + Std. Rate, Ovt. Rate, Cost/Use
+        return inCost(resourceCost) || inBaselines(resourceBaselines)
+            || inCustom(resourceCustomFields()) || idx == 6 || idx == 7 || idx == 18;
+    if (high == kAssignmentHigh)
+        return inCost(assignmentCost) || inBaselines(assignmentBaselines)
+            || inCustom(assignmentCustomFields());
+    return false;
 }
 
 QList<ColumnAutoFilter> decode(const QByteArray &item)
@@ -233,12 +316,22 @@ QList<ColumnAutoFilter> decode(const QByteArray &item)
         // values last ticked first; keep the order they were given in).
         if (f.filterType == ColumnAutoFilter::In
             || (!p.blocks.isEmpty() && rd16(p.blocks[0], 0) == AutoFilterCondition::InList)) {
+            // Each item: u16 type, 8 payload bytes, and a z-string for text.
+            quint16 units = 0;
+            for (const QByteArray &blk : std::as_const(p.blocks))
+                if (rd32(blk, 0) == kOperandValue && rd16(blk, 12) == kTypeList)
+                    units = rd16(blk, 24);
             const int n = rd16(item, o);
             int at = o + 2;
-            QStringList values;
-            for (int i = 0; i < n && at + 10 <= item.size(); ++i)
-                values.prepend(rdString(item, at + 10, &at));
-            f.list = values;
+            for (int i = 0; i < n && at + 10 <= item.size(); ++i) {
+                const quint16 type = rd16(item, at);
+                QString text;
+                int next = at + 10;
+                if (type == kTypeText)
+                    text = rdString(item, at + 10, &next);
+                f.list.append(decodePayload(item, at + 2, type, units, f.fieldId, text));
+                at = next;
+            }
             f.filterType = ColumnAutoFilter::In;
             o = at;
         }
@@ -276,40 +369,14 @@ QByteArray encode(const QList<ColumnAutoFilter> &filters, const QDateTime &stamp
             QByteArray &blk = blocks[i];
             wr32(blk, 0, kOperandValue);
             wr32(blk, 4, 8);
-            switch (v.type) {
-            case AutoFilterValue::Type::Text:
-                wr16(blk, 12, kTypeText);
+            quint16 units = 0;
+            wr16(blk, 12, encodePayload(v, blk, 14, &units));
+            if (v.type == AutoFilterValue::Type::Text) {
                 wr16(blk, 26, quint16(textBytes));   // the string's offset in the strings
                 texts.append(v.text);
                 textBytes += int(v.text.size() + 1) * 2;
-                break;
-            case AutoFilterValue::Type::Date:
-                wr16(blk, 12, kTypeDateOrDuration);
-                wr32(blk, 14, toMppDate(v.date));
-                break;
-            case AutoFilterValue::Type::Duration:
-                wr16(blk, 12, kTypeDateOrDuration);
-                wr32(blk, 14, quint32(qMax<qint64>(0, v.millis / 6000)));
-                wr16(blk, 24, quint16(v.durationUnit > 0 ? v.durationUnit : 7));
-                break;
-            case AutoFilterValue::Type::Work:
-                wr16(blk, 12, kTypeDouble);
-                wrDouble(blk, 14, double(v.millis) / 60.0);
-                wr16(blk, 24, kWorkUnits);
-                break;
-            case AutoFilterValue::Type::Percent:
-                wr16(blk, 12, kTypePercent);
-                wr16(blk, 14, quint16(qBound(0, qRound(v.number), 65535)));
-                break;
-            case AutoFilterValue::Type::Flag:
-                wr16(blk, 12, kTypeFlag);
-                wr16(blk, 14, v.number != 0.0 ? 1 : 0);
-                break;
-            case AutoFilterValue::Type::Number:
-            case AutoFilterValue::Type::Cost:
-                wr16(blk, 12, kTypeDouble);
-                wrDouble(blk, 14, v.number);
-                break;
+            } else if (units) {
+                wr16(blk, 24, units);
             }
             return i;
         };
@@ -331,6 +398,15 @@ QByteArray encode(const QList<ColumnAutoFilter> &filters, const QDateTime &stamp
                 wr32(blocks[v], 0, kOperandValue);
                 wr32(blocks[v], 4, 8);
                 wr16(blocks[v], 12, kTypeList);
+                for (const AutoFilterValue &item : f.list) {
+                    QByteArray scratch(8, '\0');
+                    quint16 units = 0;
+                    encodePayload(item, scratch, 0, &units);
+                    if (units) {
+                        wr16(blocks[v], 24, units);
+                        break;
+                    }
+                }
                 link(prev, 34, v);
             }
             for (const AutoFilterValue &value : values) {
@@ -367,8 +443,8 @@ QByteArray encode(const QList<ColumnAutoFilter> &filters, const QDateTime &stamp
         app32(entry, quint32(f.filterType));
         app32(entry, 0xFFFFFFFFu);             // B
         app32(entry, 0);
-        // Project writes 0x14 for one condition and strings + 12 for two.
-        app32(entry, blocks.size() <= 3 ? quint32(kBlocksStart) : quint32(stringsOffset + 12));
+        // Project writes 0x14 for one test and strings + 12 for an And / Or.
+        app32(entry, f.conditions.size() > 1 ? quint32(stringsOffset + 12) : quint32(kBlocksStart));
         app16(entry, 0);
         app16(entry, quint16(blocks.size()));
         app32(entry, quint32(stringsOffset));
@@ -380,10 +456,13 @@ QByteArray encode(const QList<ColumnAutoFilter> &filters, const QDateTime &stamp
         wr32(entry, 4, quint32(entry.size()));
         if (isList) {
             app16(entry, quint16(qMin<qsizetype>(f.list.size(), 65535)));
-            for (int i = f.list.size() - 1; i >= 0; --i) {
-                app16(entry, kTypeText);
-                entry += QByteArray(8, '\0');
-                appString(entry, f.list.at(i));
+            for (const AutoFilterValue &item : f.list) {
+                QByteArray payload(8, '\0');
+                quint16 units = 0;
+                app16(entry, encodePayload(item, payload, 0, &units));
+                entry += payload;
+                if (item.type == AutoFilterValue::Type::Text)
+                    appString(entry, item.text);
             }
         }
         entries += entry;

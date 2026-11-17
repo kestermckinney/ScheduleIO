@@ -93,6 +93,8 @@ private slots:
     void decodesOrAndValueList();
     void decodesNumbersDatesAndDurations();
     void decodesTwoColumnsAndOtherViews();
+    void decodesTypedValueLists();
+    void flagsSurviveASave();
     void reencodesProjectsLayout_data();
     void reencodesProjectsLayout();
     void writtenFiltersReadBackWithTheSwitchOn();
@@ -140,7 +142,9 @@ void TstAutoFilterCodec::decodesOrAndValueList()
     const auto in = open(QStringLiteral("af-name-in.mpp")).ganttView.autoFilters;
     QCOMPARE(in.size(), 1);
     QCOMPARE(in[0].filterType, int(ColumnAutoFilter::In));
-    QCOMPARE(in[0].list, (QStringList{ QStringLiteral("Build"), QStringLiteral("Test") }));
+    // Project lists the values in its own order.
+    QCOMPARE(in[0].list, (QList<AutoFilterValue>{ text(QStringLiteral("Test")),
+                                                  text(QStringLiteral("Build")) }));
 }
 
 void TstAutoFilterCodec::decodesNumbersDatesAndDurations()
@@ -196,8 +200,24 @@ void TstAutoFilterCodec::decodesNumbersDatesAndDurations()
     d = one("af-cost-gt0.mpp");
     QCOMPARE(d.fieldId, kCost);
     QCOMPARE(d.filterType, 37);
-    QCOMPARE(d.conditions[0].values[0].type, AutoFilterValue::Type::Number);
+    QCOMPARE(d.conditions[0].values[0].type, AutoFilterValue::Type::Cost);
     QCOMPARE(d.conditions[0].values[0].number, 0.0);
+
+    // Money is stored in hundredths: "is greater than 50" holds 5000.
+    d = one("af-cost-greater.mpp");
+    QCOMPARE(d.conditions[0].values[0].type, AutoFilterValue::Type::Cost);
+    QCOMPARE(d.conditions[0].values[0].number, 50.0);
+
+    // "is within" / "is not within" are one test with two values.
+    d = one("af-dur-within.mpp");
+    QCOMPARE(d.conditions.size(), 1);
+    QCOMPARE(d.conditions[0].test, quint16(AutoFilterCondition::Within));
+    QCOMPARE(d.conditions[0].values.size(), 2);
+    QCOMPARE(d.conditions[0].values[0].millis, kDay);
+    QCOMPARE(d.conditions[0].values[1].millis, 5 * kDay);
+    QCOMPARE(d.conditions[0].values[1].durationUnit, 9);   // weeks
+    QCOMPARE(one("af-dur-notwithin.mpp").conditions[0].test,
+             quint16(AutoFilterCondition::NotWithin));
 
     d = one("af-flag1-yes.mpp");
     QCOMPARE(d.fieldId, kFlag1);
@@ -223,6 +243,66 @@ void TstAutoFilterCodec::decodesTwoColumnsAndOtherViews()
     QCOMPARE(sheet.resourceSheetView.autoFilters[0].fieldId, kResourceName);
 }
 
+void TstAutoFilterCodec::decodesTypedValueLists()
+{
+    auto list = [](const char *file) {
+        const auto f = open(QString::fromLatin1(file)).ganttView.autoFilters;
+        return f.isEmpty() ? QList<AutoFilterValue>() : f.first().list;
+    };
+    QList<AutoFilterValue> l = list("af-dur-in.mpp");
+    QCOMPARE(l.size(), 2);
+    QCOMPARE(l[0].type, AutoFilterValue::Type::Duration);
+    QCOMPARE(l[0].millis, kDay);
+    QCOMPARE(l[1].millis, 5 * kDay);
+
+    l = list("af-pct-in.mpp");
+    QCOMPARE(l.size(), 2);
+    QCOMPARE(l[1].type, AutoFilterValue::Type::Percent);
+    QCOMPARE(l[1].number, 50.0);
+
+    l = list("af-cost-in.mpp");
+    QCOMPARE(l.size(), 1);
+    QCOMPARE(l[0].type, AutoFilterValue::Type::Cost);
+    QCOMPARE(l[0].number, 99.0);
+
+    l = list("af-flag1-in.mpp");
+    QCOMPARE(l[0].type, AutoFilterValue::Type::Flag);
+    QCOMPARE(l[0].number, 1.0);
+
+    l = list("af-start-in.mpp");
+    QCOMPARE(l[0].type, AutoFilterValue::Type::Date);
+    QVERIFY(l[0].anyTime);
+    QVERIFY(l[0].date.isValid());
+
+    // A Deadline list holding "NA": the no-date value.
+    l = list("af-deadline-in-na.mpp");
+    QCOMPARE(l.size(), 1);
+    QCOMPARE(l[0].type, AutoFilterValue::Type::Date);
+    QVERIFY(!l[0].date.isValid());
+}
+
+void TstAutoFilterCodec::flagsSurviveASave()
+{
+    MppIO io;
+    QVERIFY(io.openFromData(fixture(QStringLiteral("af-off.mpp"))));
+    auto flagged = [](const schedule::Project &p) {
+        QStringList names;
+        for (const schedule::Task &t : p.tasks)
+            for (const schedule::CustomField &c : t.customFields)
+                if (c.fieldId == int(kFlag1) && c.value.toBool())
+                    names.append(t.name);
+        return names;
+    };
+    const QStringList expected{ QStringLiteral("Design review"), QStringLiteral("Test") };
+    QCOMPARE(flagged(io.project()), expected);
+    schedule::Project p = io.project();
+    p.title = QStringLiteral("changed");   // force a real write
+    io.setProject(p);
+    MppIO back;
+    QVERIFY(back.openFromData(io.saveToData()));
+    QCOMPARE(flagged(back.project()), expected);
+}
+
 void TstAutoFilterCodec::reencodesProjectsLayout_data()
 {
     QTest::addColumn<QString>("file");
@@ -230,7 +310,10 @@ void TstAutoFilterCodec::reencodesProjectsLayout_data()
                            "af-name-or.mpp", "af-name-in.mpp", "af-start-within.mpp",
                            "af-start-thisweek.mpp", "af-dur-1day.mpp", "af-dur-none.mpp",
                            "af-work-8h.mpp", "af-pct-inprogress.mpp", "af-cost-gt0.mpp",
-                           "af-flag1-yes.mpp", "af-two-columns.mpp" })
+                           "af-flag1-yes.mpp", "af-two-columns.mpp", "af-cost-greater.mpp",
+                           "af-dur-within.mpp", "af-dur-notwithin.mpp", "af-dur-in.mpp",
+                           "af-pct-in.mpp", "af-cost-in.mpp", "af-flag1-in.mpp",
+                           "af-start-in.mpp", "af-deadline-in-na.mpp" })
         QTest::newRow(f) << QString::fromLatin1(f);
 }
 
@@ -307,7 +390,7 @@ void TstAutoFilterCodec::writtenFiltersReadBackWithTheSwitchOn()
     ColumnAutoFilter list;
     list.fieldId = kName;
     list.filterType = ColumnAutoFilter::In;
-    list.list = { QStringLiteral("Build"), QStringLiteral("Test") };
+    list.list = { text(QStringLiteral("Build")), text(QStringLiteral("Test")) };
 
     p.ganttView.setAutoFilters({ name, dur });
     p.resourceUsageView.setAutoFilters({});

@@ -1089,7 +1089,8 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
                             const CostOut &costOut,
                             QList<schedule::Baseline> *baselines,
                             QList<schedule::CustomField> *customFields,
-                            const TaskExtraOut &extra = TaskExtraOut())
+                            const TaskExtraOut &extra = TaskExtraOut(),
+                            const QByteArray &metaItem = QByteArray())
 {
     using namespace FieldDecoders;
     using namespace MppFieldIds;
@@ -1226,6 +1227,21 @@ void fillCostBaselineCustom(const QHash<quint16, EntityFieldLoc> &loc,
 
     if (customFields) {
         for (const CustomFieldDef &d : customDefs) {
+            // Project keeps flags as bits in the row's FixedMeta item; a set
+            // bit is Yes and a clear one the default No (not listed).
+            if (d.kind == FieldKind::Bool && !metaItem.isEmpty()) {
+                const auto it = loc.constFind(d.index);
+                if (it != loc.constEnd() && it->metaOffset >= 0) {
+                    quint32 bits = 0;
+                    if (readU32(metaItem, it->metaOffset, &bits) && (bits & it->metaMask)) {
+                        customFields->append({ int((quint32(highWord) << 16) | d.index),
+                                               QString::fromLatin1(d.name), true });
+                        continue;
+                    }
+                    // Clear: files written before flags went to FixedMeta kept
+                    // them as a var blob, read below.
+                }
+            }
             QByteArray src; int off = 0;
             if (!locate(d.index, src, off))
                 continue;
@@ -2095,7 +2111,8 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
             fillCostBaselineCustom(taskLoc, b0, b1, taskVars, uid32, MppFieldIds::kTaskHigh,
                                    MppFieldIds::taskCost, MppFieldIds::taskBaselines,
                                    MppFieldIds::taskCustomFields(), co,
-                                   &t.baselines, &t.customFields, ex);
+                                   &t.baselines, &t.customFields, ex,
+                                   fixedMeta.mid(16 + loop * 47, 47));
             t.notes = readNotesRtf(taskVars, uid32, kTaskNotesKey);
             readTaskHyperlink(taskVars, uid32, &t);
         }
