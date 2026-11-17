@@ -4,5 +4,8 @@
     <!-- SPDX-License-Identifier: GPL-3.0-only -->
     <qresource prefix="/scheduleio">
         <file alias="mpp14template.mpp">src/serializer/mpp14template.mpp</file>
+        <!-- Project 2016 file that has shown every modelled view (Network Diagram
+             included): the source of a view the template lacks. -->
+        <file alias="mpp14views.mpp">src/serializer/mpp14views.mpp</file>
     </qresource>
 </RCC>

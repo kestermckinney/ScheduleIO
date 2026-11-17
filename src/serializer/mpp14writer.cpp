@@ -1136,11 +1136,16 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     });
 
     if (viewTemplate == &sourcePresentation) {
-        // Overlay the native view and table rowsets. Keeping the backend
-        // template's other 214 children avoids importing unrelated rowsets
-        // whose manifest keys may not exist in every Project generation.
+        // Overlay the native view, table, filter and group rowsets (a view
+        // names its filter and group, so the file's own definitions go with
+        // its views).
+        // Keeping the backend template's other 214 children avoids importing
+        // unrelated rowsets whose manifest keys may not exist in every Project
+        // generation; reconcile() below restates each rowset's manifest entry.
         for (const QString &rowset : { QStringLiteral("CV_iew"),
-                                      QStringLiteral("CTable") }) {
+                                      QStringLiteral("CTable"),
+                                      QStringLiteral("CFilter"),
+                                      QStringLiteral("CGrouping") }) {
             const QStringList sourcePath = { viewStorage, rowset };
             if (!sourcePresentation.hasStorage(sourcePath))
                 continue;
@@ -1150,19 +1155,35 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
         }
     }
 
-    // A view that holds column filters but that the source file never showed
-    // (so has no record of) comes in from the embedded template, with its
-    // table, as Project adds a view the first time it is shown. The rest of
-    // the view work then runs on the augmented rowsets.
+    // A view that holds column filters, a filter or a group but that the file
+    // never showed (so has no record of) comes in from the embedded template --
+    // or, for a view the template lacks (Network Diagram), a stock file Project
+    // wrote with every view shown -- with its table, as Project adds a view the
+    // first time it is shown. The rest of the view work then runs on the
+    // augmented rowsets.
+    CompoundFile viewStock;
+    {
+        QFile sf(QStringLiteral(":/scheduleio/mpp14views.mpp"));
+        if (sf.open(QIODevice::ReadOnly))
+            viewStock.openFromData(sf.readAll());
+    }
     CompoundFile withViews;
-    if (viewTemplate == &sourcePresentation) {
-        withViews = sourcePresentation;
-        if (ViewFormat::importViews(withViews, tpl, viewProject)) {
+    {
+        withViews = *viewTemplate;
+        if (ViewFormat::importViews(withViews, { &tpl, &viewStock }, viewProject)) {
             for (const QString &rowset : { QStringLiteral("CV_iew"), QStringLiteral("CTable") })
                 for (const QString &stream : { QStringLiteral("FixedMeta"), QStringLiteral("FixedData"),
                                                QStringLiteral("VarMeta"), QStringLiteral("Var2Data") })
                     cf.addStream({ viewStorage, rowset, stream },
                                  withViews.readStream({ viewStorage, rowset, stream }));
+            viewTemplate = &withViews;
+        }
+        // Each applied group's record, which a custom group needs to show.
+        if (ViewFormat::importGroups(withViews, { &tpl, &viewStock }, &viewProject)) {
+            for (const QString &stream : { QStringLiteral("FixedMeta"), QStringLiteral("FixedData"),
+                                           QStringLiteral("VarMeta"), QStringLiteral("Var2Data") })
+                cf.addStream({ viewStorage, QStringLiteral("CGrouping"), stream },
+                             withViews.readStream({ viewStorage, QStringLiteral("CGrouping"), stream }));
             viewTemplate = &withViews;
         }
     }

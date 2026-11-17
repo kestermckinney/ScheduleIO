@@ -811,3 +811,45 @@ ID, Indicators, Task Mode (1280), Name ("Task Name"), Duration **1287**, Start
 manual-aware ids rather than 29/35/36. The "Add New Column" slot isn't a record.
 Decoded by diffing the stock table against one edited through
 `TaskTables("Entry").TableFields.Add/Delete`.
+
+## Applied view filter and group (FILTER_NAME / group items, 2026-11-17)
+
+Every view keeps its own filter and group, in its CV_iew properties blob (var
+type 6). View types (u16@112 of the 138-byte record) seen: Gantt 1, Network
+Diagram 2, Resource Sheet 7, Team Planner 9, Calendar 13, Task Usage 14,
+Resource Usage 15, Timeline 16.
+
+**Filter**: Props9 item **0x2240000B** (574619659, MPXJ FILTER_NAME), right
+after TABLE_NAME (0x2240000A): null-terminated UTF-16, flags 1. A view never
+filtered holds the hotkey spelling ("&All Tasks", "&All Resources"); after
+`FilterApply` Project writes the plain name ("Critical", "Milestones",
+"Overallocated Resources", "Resources - Material", ...). The split "Gantt with
+Timeline" record's item holds its other pane's view name ("Time&line").
+Applying a filter also copies its definition into `   214/CFilter` (230-byte
+FixedData record: uid, UTF-16 name with hotkey "&Critical", u16@108 1 for a
+resource filter; criteria in the var data). Project doesn't need it: a file
+naming a built-in filter the file lacks opens with that filter applied,
+resolved from the global template.
+
+**Group**: Props9 item **0x22400018** holds the group's name (UTF-16, flags 1,
+"No Group" when none) and **0x2240001D** an 83-byte copy of its definition:
+u32@0 the group's uid in `   214/CGrouping`, u8@5 1 for the Status group,
+u8@10 1 when grouped (u8@9 1 for No Group), u32@12 the field (0x0B400013
+Critical, 0x0B40021F Status, 0x0B400020 % Complete, 0x0B400500 Task Mode,
+0x0B400055 Outline Level, 0x0C40012C Resource Type), u8@16 1 for a task field,
+u8@21 1, the group header's cell colour 0xC1F6FF at @34, u8@46 0x81, u8@51 the
+interval (2 = Project's 0% / 1-99% / 100% bands). `GroupApply` copies the group
+into CGrouping (same 230-byte record shape as CTable/CFilter, u16@108 1 for a
+resource group; its type-6 var record is the same 83 bytes). A built-in group
+shows by name alone, but a **custom group (Outline Level) shows only with its
+CGrouping record** -- without it Project falls back to No Group (checked on
+dpr2hw3). The writer copies the source file's CFilter and CGrouping with its
+views, brings a missing group's record in from `src/serializer/mpp14views.mpp`
+(a Project file that has shown every modelled view and applied every group
+ScheduleIO writes), and points the view's definition at its uid
+(`ViewFormat::importGroups`). A view the file lacks (Network Diagram isn't in
+the template) is copied in from the same stock when it needs a filter or group.
+
+Samples: `tests/fixtures/mpp_samples/viewfilter` and `viewgroup` (ScheduleVault's
+`tools/viewfilter-samples-remote.vbs`, `viewgroup-samples-remote.vbs`); test
+`tst_viewfilter`.

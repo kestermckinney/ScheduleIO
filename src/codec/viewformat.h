@@ -5,6 +5,7 @@
 #define VIEWFORMAT_H
 
 #include <QByteArray>
+#include <QList>
 
 class CompoundFile;
 namespace schedule { class Project; }
@@ -69,13 +70,25 @@ bool wantsTablePatch(const schedule::Project &in);
 // template's streams verbatim.
 bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in);
 
-// A file only carries the views it has shown. For each of the Gantt, Task
-// Usage, Resource Usage and Resource Sheet views that holds column filters but
-// is missing from `doc`'s CV_iew rowset, copy the view (record, meta item and
-// var records, as the next view uid) from `stock` -- with its table, when
-// `doc`'s CTable lacks it -- as Project does when a view is first shown.
+// A file only carries the views it has shown. For each modelled view (Gantt,
+// Task Usage, Resource Usage, Resource Sheet, Team Planner, Calendar, Network
+// Diagram) that holds column filters, a filter other than All Tasks / All
+// Resources or a group other than No Group, but is missing from `doc`'s CV_iew
+// rowset, copy the view (record, meta item and var records, as the next view
+// uid) from the first of `stocks` that has it -- with its table, when `doc`'s
+// CTable lacks it -- as Project does when a view is first shown.
 // Returns whether a view was added.
-bool importViews(CompoundFile &doc, const CompoundFile &stock, const schedule::Project &in);
+bool importViews(CompoundFile &doc, const QList<const CompoundFile *> &stocks,
+                 const schedule::Project &in);
+
+// Project copies each group a view applies into the file's CGrouping rowset,
+// and the view's copy of the definition starts with that record's uid. For
+// each modelled view with a group, make sure `doc`'s CGrouping holds the group
+// (copying it from the first of `stocks` that has it, as the next uid) and
+// point the view's definition at its uid. A custom group (Outline Level) only
+// shows in Project with its record. Returns whether the rowset changed.
+bool importGroups(CompoundFile &doc, const QList<const CompoundFile *> &stocks,
+                  schedule::Project *in);
 
 // Patch the Task/Resource Usage table column widths in `   214/CTable` while
 // retaining every other native table byte. A table whose column list is being
