@@ -35,7 +35,25 @@ public:
     QVariant value;       // decoded value in its natural type
     QString formula;      // Schedule Vault/Project-style expression, e.g. [Cost] / [Duration]
     QStringList lookupValues;
+    // Value list options, as Project's Edit Lookup Table dialog has them:
+    // a description per value (parallel to lookupValues, may be shorter),
+    // whether only listed values may be entered, whether a new value typed
+    // into the field joins the list, the order the list is shown in
+    // (PjListOrder: 0 as entered, 1 ascending, 2 descending) and the value new
+    // tasks get (empty for none).
+    QStringList lookupDescriptions;
+    bool restrictToList = true;
+    bool appendNewValues = false;
+    int listOrder = 0;
+    QString defaultValue;
+    // Indicator rules compare with a value, or with another field when the
+    // value is a [Field Name] reference.
     QList<IndicatorRule> graphicalIndicators;
+    // Calculation for task and group summary rows, Project's PjSummaryCalc:
+    // 0 maximum (Or for a flag), 1 minimum (And), 2 count all, 3 sum,
+    // 4 average, 5 average first sublevel, 6 count first sublevel,
+    // 7 count non-summaries, 10 none, 11 use the formula.
+    int summaryCalc = 10;
 
     bool operator==(const CustomField &o) const;
     bool operator!=(const CustomField &o) const { return !(*this == o); }

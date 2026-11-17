@@ -280,12 +280,17 @@ void parseExtendedAttribute(QXmlStreamReader &r, QList<schedule::CustomField> &o
 schedule::CustomField parseExtendedAttributeDefinition(QXmlStreamReader &r)
 {
     schedule::CustomField field;
+    // CalculationType 1 rolls summary rows up by RollupType (PjSummaryCalc),
+    // 2 uses the formula; absent is none.
+    int rollupType = 0, calculationType = 0;
     while (r.readNextStartElement()) {
         const QStringView n = r.name();
         if (n == u"FieldID") field.fieldId = r.readElementText().toInt();
         else if (n == u"FieldName") { if (field.name.isEmpty()) field.name = r.readElementText(); else r.skipCurrentElement(); }
         else if (n == u"Alias") { const QString alias = r.readElementText(); if (!alias.isEmpty()) field.name = alias; }
         else if (n == u"Formula") field.formula = r.readElementText();
+        else if (n == u"RollupType") rollupType = r.readElementText().toInt();
+        else if (n == u"CalculationType") calculationType = r.readElementText().toInt();
         else if (n == u"ValueList") {
             while (r.readNextStartElement()) {
                 if (r.name() == u"Value") field.lookupValues.append(r.readElementText());
@@ -305,6 +310,7 @@ schedule::CustomField parseExtendedAttributeDefinition(QXmlStreamReader &r)
             }
         } else r.skipCurrentElement();
     }
+    field.summaryCalc = calculationType == 2 ? 11 : calculationType == 1 ? rollupType : 10;
     return field;
 }
 
@@ -1254,6 +1260,12 @@ void writeExtendedAttributeDefs(QXmlStreamWriter &w, const schedule::Project &p)
         else if (!def.name.isEmpty()) writeText(w, "FieldName", def.name);
         if (!slotName.isEmpty() && !def.name.isEmpty() && def.name != slotName)
             writeText(w, "Alias", def.name);
+        if (def.summaryCalc >= 0 && def.summaryCalc <= 7) {
+            writeText(w, "RollupType", QString::number(def.summaryCalc));
+            writeText(w, "CalculationType", QStringLiteral("1"));
+        } else if (def.summaryCalc == 11) {
+            writeText(w, "CalculationType", QStringLiteral("2"));
+        }
         if (!def.formula.isEmpty())
             writeText(w, "Formula", schedule::CustomFieldLogic::toProjectFormula(p, def.formula));
         if (!def.lookupValues.isEmpty()) {
@@ -1460,7 +1472,7 @@ bool read(const QByteArray &xml, schedule::Project &out, QString *error)
                 const bool aliased = slot && !field.name.isEmpty()
                                      && field.name != QString::fromLatin1(slot->name);
                 return field.formula.isEmpty() && field.lookupValues.isEmpty()
-                    && field.graphicalIndicators.isEmpty() && !aliased;
+                    && field.graphicalIndicators.isEmpty() && !aliased && field.summaryCalc == 10;
             }), out.customFieldDefinitions.end());
     schedule::CustomFieldLogic::recalculate(out);
     return true;

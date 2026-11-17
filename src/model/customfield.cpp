@@ -12,7 +12,13 @@ bool CustomField::operator==(const CustomField &o) const
         && value == o.value
         && formula == o.formula
         && lookupValues == o.lookupValues
-        && graphicalIndicators == o.graphicalIndicators;
+        && lookupDescriptions == o.lookupDescriptions
+        && restrictToList == o.restrictToList
+        && appendNewValues == o.appendNewValues
+        && listOrder == o.listOrder
+        && defaultValue == o.defaultValue
+        && graphicalIndicators == o.graphicalIndicators
+        && summaryCalc == o.summaryCalc;
 }
 
 } // namespace schedule

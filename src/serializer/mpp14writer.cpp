@@ -1076,12 +1076,21 @@ void writeTaskFieldDefinitions(const schedule::Project &in, QByteArray &props, Q
             record.text = schedule::CustomFieldLogic::toProjectFormula(in, d.formula.trimmed());
         // A field's custom attribute is its formula or its value list, not both.
         CustomFieldDefs::LookupTable table;
+        QByteArray defaultGuid;
         if (!formula && CustomFieldDefs::listType(id) != 0) {
-            for (const QString &value : d.lookupValues) {
-                const QByteArray encoded = CustomFieldDefs::encodeListValue(id, value);
-                if (!encoded.isEmpty())
-                    table.values.append({ encoded, QString() });
+            for (int i = 0; i < d.lookupValues.size(); ++i) {
+                const QByteArray encoded = CustomFieldDefs::encodeListValue(id, d.lookupValues.at(i));
+                if (encoded.isEmpty())
+                    continue;
+                CustomFieldDefs::LookupValue value{ encoded, d.lookupDescriptions.value(i),
+                                                    CustomFieldDefs::newGuid() };
+                if (!d.defaultValue.isEmpty()
+                    && d.lookupValues.at(i).compare(d.defaultValue, Qt::CaseInsensitive) == 0)
+                    defaultGuid = value.guid;
+                table.values.append(value);
             }
+            table.restrict = d.restrictToList;
+            table.order = d.listOrder;
         }
         if (!table.values.isEmpty()) {
             table.guid = CustomFieldDefs::newGuid();
@@ -1095,16 +1104,25 @@ void writeTaskFieldDefinitions(const schedule::Project &in, QByteArray &props, Q
             indicator.image = CustomFieldDefs::imageCode(rule.indicator);
             if (indicator.comparison < 0 || indicator.image == 0)
                 continue;   // nothing Project can show
-            if (indicator.comparison != 11) {
-                indicator.value = CustomFieldDefs::encodeRuleValue(id, rule.value.toString());
+            const QString text = rule.value.toString().trimmed();
+            if (indicator.comparison != 11 && text.startsWith(QLatin1Char('['))
+                && text.endsWith(QLatin1Char(']'))) {
+                // Compared with another field.
+                indicator.field = schedule::CustomFieldLogic::taskFieldId(in, text.mid(1, text.size() - 2));
+                if (indicator.field == 0)
+                    continue;
+            } else if (indicator.comparison != 11) {
+                indicator.value = CustomFieldDefs::encodeRuleValue(id, text);
                 if (indicator.value.isEmpty())
                     continue;
             }
             record.indicators.append(indicator);
         }
-        if (formula || record.valueList || !record.indicators.isEmpty()) {
+        record.summaryCalc = d.summaryCalc;
+        if (formula || record.valueList || !record.indicators.isEmpty() || d.summaryCalc != 10) {
             formulas.append(record);
-            attributes.append({ id, formula, record.valueList ? table.guid : QByteArray() });
+            attributes.append({ id, formula, record.valueList ? table.guid : QByteArray(),
+                                record.valueList ? defaultGuid : QByteArray() });
         }
     }
     // A field renamed only on the tasks (no definition) keeps its alias too.
@@ -1128,6 +1146,11 @@ void writeTaskFieldDefinitions(const schedule::Project &in, QByteArray &props, Q
                         existing.value(CustomFieldDefs::kTaskDefinitionsKey), aliases, attributes));
 
     if (!tables.isEmpty()) {
+        PropsReader projectProps;
+        projectProps.parse(props);
+        patchPropsBytes(props, CustomFieldDefs::kLookupDirectoryKey,
+                        CustomFieldDefs::writeLookupDirectory(
+                            projectProps.value(CustomFieldDefs::kLookupDirectoryKey), tables));
         const QString storage = QStringLiteral("   114");
         const QString outl = QStringLiteral("TBkndOutlCode");
         auto read = [&](const char *name) { return tpl.readStream({ storage, outl, QLatin1String(name) }); };

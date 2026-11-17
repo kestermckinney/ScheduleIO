@@ -18,7 +18,9 @@ constexpr int kAliasSlotBytes = 104;
 constexpr int kAttributeRecordBytes = 88;
 constexpr quint32 kFormulaBit = 0x10u;
 constexpr quint32 kValueListBit = 0x20u;
-constexpr quint32 kIndicatorBits = 0x42u;
+constexpr quint32 kIndicatorBit = 0x02u;
+constexpr quint32 kRollupBit = 0x40u;
+constexpr quint32 kSummaryFormulaBit = 0x80u;
 constexpr quint32 kInheritBits = 0x0Cu;       // summary + project summary rows inherit
 constexpr quint32 kToolTipBit = 0x01u;
 constexpr quint32 kValueListExtra = 0x10000u;
@@ -176,6 +178,12 @@ int readRule(const QByteArray &b, int o, int end, Indicator *rule)
         return o + 8;
     }
     rule->comparison = int(test) - 1000;
+    quint32 kind = 0;
+    u32At(b, o + 8, &kind);
+    if (kind == 7) {
+        if (!u32At(b, o + 12, &rule->field) || o + 16 > end) return -1;
+        return o + 16;
+    }
     int p = o + 12;
     const quint16 type = u16At(b, p);
     int size = 0;
@@ -201,11 +209,16 @@ QByteArray ruleBytes(const Indicator &r)
 {
     QByteArray b;
     put32(b, r.image);
-    if (r.comparison == 11 || r.value.isEmpty()) {
+    if (r.comparison == 11 || (r.value.isEmpty() && r.field == 0)) {
         put32(b, 0);
         return b;
     }
     put32(b, quint32(1000 + r.comparison));
+    if (r.field) {
+        put32(b, 7);
+        put32(b, r.field);
+        return b;
+    }
     put32(b, 1);
     b += r.value;
     return b;
@@ -257,6 +270,8 @@ QList<AttributeField> readAttributeFields(const QByteArray &b)
         u32At(b, r + 84, &tail);
         f.formula = tail == 0;
         if (hasList) f.valueListGuid = b.mid(r + 36, 16);
+        const QByteArray def = b.mid(r + 52, 16);
+        if (def.count('\0') != 16) f.defaultGuid = def;
         out.append(f);
     }
     return out;
@@ -278,7 +293,8 @@ QList<Formula> readFormulas(const QByteArray &b)
         if (ends[0] > 36) f.text = utf16z(b.left(int(at) + int(ends[0])), int(at) + 36);
         f.active = (attr & kFormulaBit) != 0 && !f.text.isEmpty();
         f.valueList = (attr & kValueListBit) != 0;
-        if (attr & 0x40u) {
+        f.summaryCalc = (attr & kSummaryFormulaBit) ? 11 : (attr & kRollupBit) ? int((attr >> 12) & 0xF) : 10;
+        if (attr & kIndicatorBit) {
             const int end = int(at) + int(ends[4]);
             for (int o = int(at) + int(ends[3]); o < end; ) {
                 Indicator r;
@@ -288,7 +304,8 @@ QList<Formula> readFormulas(const QByteArray &b)
                 o = next;
             }
         }
-        if (!f.text.isEmpty() || f.valueList || !f.indicators.isEmpty()) out.append(f);
+        if (!f.text.isEmpty() || f.valueList || !f.indicators.isEmpty() || f.summaryCalc != 10)
+            out.append(f);
     }
     return out;
 }
@@ -298,6 +315,7 @@ QHash<QByteArray, LookupTable> readLookupTables(const OutlCodeStreams &s)
     QHash<QByteArray, LookupTable> tables;
     QHash<quint32, QByteArray> tableOf;     // value uid -> list GUID
     QHash<quint32, quint16> typeOf;
+    QHash<quint32, QByteArray> valueGuid;
     quint32 n2 = 0;
     u32At(s.fixed2Meta, 8, &n2);
     // Fixed2 rows pair with Fixed rows; a value row's Fixed record starts with its uid.
@@ -316,6 +334,7 @@ QHash<QByteArray, LookupTable> readLookupTables(const OutlCodeStreams &s)
         if (guid.count('\0') == 16) continue;
         tableOf.insert(uid, guid);
         typeOf.insert(uid, type);
+        valueGuid.insert(uid, s.fixed2Data.mid(int(off2), 16));
     }
     struct Raw { double position = 0; LookupValue v; };
     QHash<quint32, Raw> raw;
@@ -341,7 +360,9 @@ QHash<QByteArray, LookupTable> readLookupTables(const OutlCodeStreams &s)
         LookupTable &t = tables[tableOf.value(uid)];
         t.guid = tableOf.value(uid);
         t.type = typeOf.value(uid);
-        t.values.append(raw[uid].v);
+        LookupValue v = raw[uid].v;
+        v.guid = valueGuid.value(uid);
+        t.values.append(v);
     }
     return tables;
 }
@@ -402,6 +423,7 @@ QByteArray writeTaskDefinitions(const QByteArray &existing, QList<Alias> aliases
         qToBigEndian(f.fieldId, id);
         r.append(reinterpret_cast<const char *>(id), 4);
         r += f.valueListGuid.size() == 16 ? f.valueListGuid : QByteArray(16, '\0');
+        r += f.defaultGuid.size() == 16 ? f.defaultGuid : QByteArray(16, '\0');
         r.append(kAttributeRecordBytes - 4 - r.size(), '\0');
         put32(r, f.formula ? 0 : 0x80);
         d += r;
@@ -420,7 +442,9 @@ QByteArray writeFormulas(QList<Formula> formulas)
         if (formula) attr |= kFormulaBit;
         else if (f.valueList) attr |= kValueListBit | kValueListExtra;
         if (f.indicators.isEmpty()) attr |= kInheritBits | kToolTipBit;
-        else attr |= kIndicatorBits | kInheritBits;
+        else attr |= kIndicatorBit | kInheritBits;
+        if (f.summaryCalc == 11) attr |= kSummaryFormulaBit;
+        else if (f.summaryCalc >= 0 && f.summaryCalc <= 7) attr |= kRollupBit | (quint32(f.summaryCalc) << 12);
         // A formula Project keeps but does not calculate.
         if (!f.active && !f.text.isEmpty()) attr &= ~kFormulaBit;
 
@@ -507,7 +531,7 @@ OutlCodeStreams writeLookupTables(const OutlCodeStreams &t, const QList<LookupTa
             put32(item2, quint32(d2.size()));
             put16(item2, 0x001F);
             m2 += item2;
-            d2 += newGuid();
+            d2 += value.guid.size() == 16 ? value.guid : newGuid();
             put16(d2, table.type);
             d2 += table.guid;
             ++items2;
@@ -542,6 +566,52 @@ OutlCodeStreams writeLookupTables(const OutlCodeStreams &t, const QList<LookupTa
     put32(head, quint32(pool.size()));
     out.varMeta = head + meta;
     out.var2Data = pool;
+    return out;
+}
+
+namespace {
+constexpr int kDirectoryRoot = 20, kDirectoryEntry = 38;
+quint32 directoryKind(quint16 listType)
+{
+    switch (listType) {
+    case 15: return 7;   // number
+    case 9: return 5;    // cost
+    case 4: return 4;    // date
+    default: return 3;   // text
+    }
+}
+} // namespace
+
+void readLookupDirectory(const QByteArray &d, QHash<QByteArray, LookupTable> *tables)
+{
+    quint32 n = 0;
+    if (!u32At(d, 0, &n) || n == 0) return;
+    for (int o = 4 + kDirectoryRoot; o + kDirectoryEntry <= d.size(); o += kDirectoryEntry) {
+        auto it = tables->find(d.mid(o, 16));
+        if (it == tables->end()) continue;
+        it->restrict = (quint8(d.at(o + 32)) & 0x01) != 0;
+        it->order = u16At(d, o + 36);
+    }
+}
+
+QByteArray writeLookupDirectory(const QByteArray &existing, const QList<LookupTable> &tables)
+{
+    QByteArray root = existing.size() >= 4 + kDirectoryRoot ? existing.mid(4, kDirectoryRoot)
+                                                            : QByteArray(kDirectoryRoot, '\0');
+    QByteArray out;
+    put32(out, quint32(1 + tables.size()));
+    out += root;
+    for (const LookupTable &t : tables) {
+        out += t.guid;
+        put32(out, 1);
+        put32(out, directoryKind(t.type));
+        put32(out, 0x2E);
+        put32(out, 0);
+        out.append(char(t.restrict ? 0x05 : 0x04));
+        out.append(char(0x01));
+        put16(out, 0);
+        put16(out, quint16(t.order));
+    }
     return out;
 }
 

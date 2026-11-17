@@ -14,6 +14,7 @@
 #include <QRegularExpression>
 #include <QTimeZone>
 #include <QtMath>
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <memory>
@@ -1537,6 +1538,69 @@ QString CustomFieldLogic::validate(const Project &project, const QString &formul
     return c.root ? QString() : c.parser.message;
 }
 
+namespace {
+// A task's copy of its field's definition: everything but the value.
+void copyDefinition(CustomField &f, const CustomField &d)
+{
+    const QVariant value = f.value;
+    const int id = f.fieldId ? f.fieldId : d.fieldId;
+    f = d;
+    f.fieldId = id;
+    f.value = value;
+}
+
+// Project's summary-row calculation (PjSummaryCalc) over a summary task's
+// children: maximum / minimum / sum over the children's (rolled-up) values,
+// average over every non-summary task below it, average of the first
+// sublevel, and the three counts. A flag rolls up with Or (0) or And (1); a
+// date takes the latest (0) or earliest (1).
+QVariant rollup(int calc, MppFieldIds::FieldKind kind, const QList<QVariant> &children,
+                const QList<QVariant> &leaves, int allBelow)
+{
+    using MppFieldIds::FieldKind;
+    if (kind == FieldKind::Bool) {
+        if (calc == 0) return std::any_of(children.cbegin(), children.cend(), [](const QVariant &v) { return v.toBool(); });
+        if (calc == 1) return !children.isEmpty()
+                              && std::all_of(children.cbegin(), children.cend(), [](const QVariant &v) { return v.toBool(); });
+        return QVariant();
+    }
+    if (kind == FieldKind::DateTime) {
+        QDateTime best;
+        for (const QVariant &v : children) {
+            const QDateTime d = v.toDateTime();
+            if (d.isValid() && (!best.isValid() || (calc == 0 ? d > best : d < best))) best = d;
+        }
+        return (calc == 0 || calc == 1) && best.isValid() ? QVariant(best) : QVariant();
+    }
+    if (kind == FieldKind::String) return QVariant();
+    auto num = [](const QVariant &v) { return v.isValid() ? v.toDouble() : 0.0; };
+    double r = 0.0;
+    switch (calc) {
+    case 0:
+    case 1:
+        if (children.isEmpty()) return QVariant();
+        r = num(children.first());
+        for (const QVariant &v : children) r = calc == 0 ? qMax(r, num(v)) : qMin(r, num(v));
+        break;
+    case 2: r = allBelow; break;
+    case 3: for (const QVariant &v : children) r += num(v); break;
+    case 4:
+        for (const QVariant &v : leaves) r += num(v);
+        r = leaves.isEmpty() ? 0.0 : r / leaves.size();
+        break;
+    case 5:
+        for (const QVariant &v : children) r += num(v);
+        r = children.isEmpty() ? 0.0 : r / children.size();
+        break;
+    case 6: r = children.size(); break;
+    case 7: r = leaves.size(); break;
+    default: return QVariant();
+    }
+    if (kind == FieldKind::Duration) return QVariant::fromValue<qint64>(qint64(std::llround(r)));
+    return r;
+}
+} // namespace
+
 void CustomFieldLogic::recalculate(Project &project)
 {
     // Older documents kept the formula only on each task's copy of the field.
@@ -1563,12 +1627,21 @@ void CustomFieldLogic::recalculate(Project &project)
                 return &f;
         return nullptr;
     };
-    // Formula-less definitions: their task copies lose any formula they had.
+    auto fieldOn = [&](Task &t, const CustomField &d) -> CustomField * {
+        CustomField *f = findField(t, d);
+        if (!f) {
+            CustomField copy = d;
+            copy.value = QVariant();
+            t.customFields.append(copy);
+            f = &t.customFields.last();
+        }
+        return f;
+    };
+    // Every task's copy follows its definition (a formula-less one loses any
+    // formula it had).
     for (Task &t : project.tasks)
         for (const CustomField &d : std::as_const(project.customFieldDefinitions))
-            if (d.formula.trimmed().isEmpty())
-                if (CustomField *f = findField(t, d)) f->formula.clear();
-    if (items.empty()) return;
+            if (CustomField *f = findField(t, d)) copyDefinition(*f, d);
 
     // Evaluate a field after the formula fields it reads (one pass suffices
     // unless the formulas refer to each other in a cycle).
@@ -1586,27 +1659,19 @@ void CustomFieldLogic::recalculate(Project &project)
     };
     for (int i = 0; i < int(items.size()); ++i) visit(i);
 
-    for (Task &t : project.tasks) {
+    for (Task &t : project.tasks)
         for (const Item &item : items) {
-            CustomField *f = findField(t, *item.def);
-            if (!f) {
-                CustomField copy = *item.def;
-                copy.value = QVariant();
-                t.customFields.append(copy);
-                f = &t.customFields.last();
-            }
-            f->name = item.def->name;
-            f->formula = item.def->formula;
-            f->lookupValues = item.def->lookupValues;
-            f->graphicalIndicators = item.def->graphicalIndicators;
-            if (t.summary) f->value = QVariant();
+            CustomField *f = fieldOn(t, *item.def);
+            copyDefinition(*f, *item.def);
+            // Summary calculation "None": a summary row has no value.
+            if (t.summary && item.def->summaryCalc == 10) f->value = QVariant();
         }
-    }
     for (int pass = 0; pass < 2; ++pass) {
         for (Task &t : project.tasks) {
-            if (t.summary) continue;
             for (int i : order) {
                 const Item &item = items[i];
+                // Summary rows use the formula only when told to (11).
+                if (t.summary && item.def->summaryCalc != 11) continue;
                 CustomField *f = findField(t, *item.def);
                 if (!f) continue;
                 f->value = item.code->root
@@ -1614,6 +1679,32 @@ void CustomFieldLogic::recalculate(Project &project)
                                    item.def->fieldId == 0)
                     : QVariant();
             }
+        }
+    }
+
+    // Summary rows that roll up their subtasks, deepest first.
+    QList<int> byId;
+    for (int i = 0; i < project.tasks.size(); ++i) byId.append(i);
+    std::stable_sort(byId.begin(), byId.end(),
+                     [&](int a, int b) { return project.tasks[a].id < project.tasks[b].id; });
+    for (const CustomField &d : std::as_const(project.customFieldDefinitions)) {
+        if (d.summaryCalc < 0 || d.summaryCalc > 7) continue;
+        const MppFieldIds::FieldKind kind = d.fieldId ? kindOf(quint32(d.fieldId)) : MppFieldIds::FieldKind::Number;
+        for (int k = byId.size() - 1; k >= 0; --k) {
+            Task &summary = project.tasks[byId[k]];
+            if (!summary.summary) continue;
+            QList<QVariant> children, leaves;
+            int allBelow = 0;
+            for (int j = k + 1; j < byId.size(); ++j) {
+                Task &below = project.tasks[byId[j]];
+                if (below.outlineLevel <= summary.outlineLevel) break;
+                ++allBelow;
+                CustomField *f = findField(below, d);
+                const QVariant v = f ? f->value : QVariant();
+                if (below.outlineLevel == summary.outlineLevel + 1) children.append(v);
+                if (!below.summary) leaves.append(v);
+            }
+            fieldOn(summary, d)->value = rollup(d.summaryCalc, kind, children, leaves, allBelow);
         }
     }
 }
@@ -1676,7 +1767,25 @@ QStringList CustomFieldLogic::taskFieldNames()
 }
 
 bool CustomFieldLogic::acceptsLookupValue(const CustomField &field, const QVariant &value)
-{ return field.lookupValues.isEmpty() || field.lookupValues.contains(value.toString(), Qt::CaseInsensitive); }
+{
+    return field.lookupValues.isEmpty() || !field.restrictToList
+           || field.lookupValues.contains(value.toString(), Qt::CaseInsensitive);
+}
+
+QString CustomFieldLogic::indicatorFor(const Project &project, const Task &task, const CustomField &field)
+{
+    for (CustomField::IndicatorRule rule : field.graphicalIndicators) {
+        const QString text = rule.value.toString().trimmed();
+        if (text.startsWith(QLatin1Char('[')) && text.endsWith(QLatin1Char(']'))) {
+            // Compared with another field: its value on this task.
+            const QVariant other = evaluate(project, task, text);
+            rule.value = other.typeId() == QMetaType::QDateTime
+                ? other.toDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm")) : other.toString();
+        }
+        if (compareRule(field.value, rule)) return rule.indicator;
+    }
+    return {};
+}
 
 QString CustomFieldLogic::indicatorFor(const CustomField &field)
 { for (const auto &rule : field.graphicalIndicators) if (compareRule(field.value,rule)) return rule.indicator; return {}; }

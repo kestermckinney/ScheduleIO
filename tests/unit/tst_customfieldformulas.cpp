@@ -12,6 +12,12 @@
 //   cf-kinds       an active formula on one field of every kind
 //   cf-base        the same project with no custom fields
 //   lk-*           value lists on Text1 ("Risk"), Number1, Cost1, Date1; two lists
+//   sc-*           Phase summarising Design 2 / Build 5 / Test 7 in Number1 (Cost1,
+//                  Flag1, Date1) under each PjSummaryCalc; Project's summary
+//                  values are its "SUMMARY" log lines
+//   vl-*           value list options: not restricted, default value, order
+//   gf-*           indicator rules comparing with another field
+//   fl-*, nb-1-fl-11  Flag1 / Flag11 / Flag20 set on Design (and Number1 = 5)
 //   gx-*           graphical indicators on Number1, Cost1, Date1, Flag1, with a
 //                  formula, two rules, "any value", summary rows inheriting
 
@@ -26,6 +32,8 @@
 #include "xmlio.h"
 
 #include <QFile>
+#include <QtEndian>
+#include <QRegularExpression>
 #include <QtTest>
 
 using namespace schedule;
@@ -131,6 +139,14 @@ private slots:
     void readsProjectsIndicators();
     void writesProjectsIndicatorBytes();
     void valueListsAndIndicatorsRoundTripThroughMpp();
+    void summaryRowsRollUpAsProjectDoes_data();
+    void summaryRowsRollUpAsProjectDoes();
+    void readsValueListOptions();
+    void writesProjectsLookupDirectory();
+    void indicatorsCompareWithAnotherField();
+    void optionsRoundTripThroughMpp();
+    void mspdiSummaryCalculation();
+    void flagsAndNumberPresenceSitWhereProjectPutsThem();
 };
 
 void TstCustomFieldFormulas::textComparesAsText()
@@ -530,6 +546,260 @@ void TstCustomFieldFormulas::valueListsAndIndicatorsRoundTripThroughMpp()
     QCOMPARE(definition(back, 0x0B400058)->graphicalIndicators.at(1).indicator, QStringLiteral("check-mark"));
     QCOMPARE(definition(back, 0x0B40006A)->lookupValues, budget.lookupValues);
     QCOMPARE(definition(back, 0x0B400109)->graphicalIndicators.at(0).value.toString(), QStringLiteral("2026-12-01"));
+}
+
+void TstCustomFieldFormulas::summaryRowsRollUpAsProjectDoes_data()
+{
+    QTest::addColumn<QString>("file");
+    QTest::addColumn<quint32>("field");
+    QTest::addColumn<int>("calc");
+    QTest::addColumn<QString>("phase");   // what Project shows on the summary
+    QTest::newRow("maximum") << "sc-0.mpp" << 0x0B400057u << 0 << "7";
+    QTest::newRow("minimum") << "sc-1.mpp" << 0x0B400057u << 1 << "2";
+    QTest::newRow("count all") << "sc-2.mpp" << 0x0B400057u << 2 << "3";
+    QTest::newRow("sum") << "sc-3.mpp" << 0x0B400057u << 3 << "14";
+    QTest::newRow("average") << "sc-4.mpp" << 0x0B400057u << 4 << "4.67";
+    QTest::newRow("average first sublevel") << "sc-5.mpp" << 0x0B400057u << 5 << "4.67";
+    QTest::newRow("count first sublevel") << "sc-6.mpp" << 0x0B400057u << 6 << "3";
+    QTest::newRow("count non-summaries") << "sc-7.mpp" << 0x0B400057u << 7 << "3";
+    QTest::newRow("use formula") << "sc-11.mpp" << 0x0B400057u << 11 << "5";
+    QTest::newRow("cost sum") << "sc-cost-3.mpp" << 0x0B40006Au << 3 << "14";
+    QTest::newRow("flag or") << "sc-flag-or.mpp" << 0x0B400048u << 0 << "true";
+    QTest::newRow("flag and") << "sc-flag-and.mpp" << 0x0B400048u << 1 << "false";
+    QTest::newRow("date latest") << "sc-date-max.mpp" << 0x0B400109u << 0 << "Test";
+}
+
+void TstCustomFieldFormulas::summaryRowsRollUpAsProjectDoes()
+{
+    QFETCH(QString, file);
+    QFETCH(quint32, field);
+    QFETCH(int, calc);
+    QFETCH(QString, phase);
+    const QByteArray bytes = fixture(file);
+    if (bytes.isEmpty()) QSKIP("fixture unavailable");
+    Project p = open(bytes);
+    const CustomField *d = definition(p, field);
+    QVERIFY(d);
+    QCOMPARE(d->summaryCalc, calc);
+    // Recalculate from scratch: the summary's stored value is cleared first.
+    for (Task &t : p.tasks)
+        if (t.summary)
+            for (CustomField &f : t.customFields) f.value = QVariant();
+    Scheduler::computeSlack(p);
+    CustomFieldLogic::recalculate(p);
+    const Task *summary = taskNamed(p, QStringLiteral("Phase"));
+    QVERIFY(summary);
+    QVariant v;
+    for (const CustomField &f : summary->customFields)
+        if (quint32(f.fieldId) == field) v = f.value;
+    if (phase == QLatin1String("Test")) {   // the latest date is the Test task's
+        QVariant test;
+        for (const CustomField &f : taskNamed(p, QStringLiteral("Test"))->customFields)
+            if (quint32(f.fieldId) == field) test = f.value;
+        QCOMPARE(v.toDateTime(), test.toDateTime());
+    } else if (v.typeId() == QMetaType::Bool) {
+        QCOMPARE(v.toBool() ? QStringLiteral("true") : QStringLiteral("false"), phase);
+    } else {
+        QCOMPARE(QString::number(v.toDouble(), 'f', 2).remove(QRegularExpression(QStringLiteral("\\.?0+$"))),
+                 phase);
+    }
+}
+
+void TstCustomFieldFormulas::readsValueListOptions()
+{
+    const Project plain = open(fixture(QStringLiteral("lk-text2.mpp")));
+    if (plain.tasks.isEmpty()) QSKIP("fixtures unavailable");
+    const CustomField *d = definition(plain, 0x0B400033);
+    QCOMPARE(d->lookupDescriptions, QStringList({ "Low risk", "High risk" }));
+    QVERIFY(d->restrictToList);
+    QCOMPARE(d->listOrder, 0);
+    QVERIFY(d->defaultValue.isEmpty());
+
+    QVERIFY(!definition(open(fixture(QStringLiteral("vl-free.mpp"))), 0x0B400033)->restrictToList);
+    QCOMPARE(definition(open(fixture(QStringLiteral("vl-default.mpp"))), 0x0B400033)->defaultValue,
+             QStringLiteral("High"));
+    QCOMPARE(definition(open(fixture(QStringLiteral("vl-asc.mpp"))), 0x0B400033)->listOrder, 1);
+    QCOMPARE(definition(open(fixture(QStringLiteral("vl-desc.mpp"))), 0x0B400033)->listOrder, 2);
+    QCOMPARE(definition(open(fixture(QStringLiteral("vl-free.mpp"))), 0x0B400033)->lookupDescriptions,
+             QStringList({ "Low risk" }));
+}
+
+void TstCustomFieldFormulas::writesProjectsLookupDirectory()
+{
+    for (const QString &name : { QStringLiteral("vl-free.mpp"), QStringLiteral("vl-asc.mpp"),
+                                 QStringLiteral("vl-desc.mpp"), QStringLiteral("lk-two.mpp") }) {
+        const QByteArray file = fixture(name);
+        if (file.isEmpty()) QSKIP("fixtures unavailable");
+        CompoundFile cf;
+        QVERIFY(cf.openFromData(file));
+        auto read = [&](const char *n) { return cf.readStream({ kStorage, QStringLiteral("TBkndOutlCode"), QLatin1String(n) }); };
+        QHash<QByteArray, CustomFieldDefs::LookupTable> tables = CustomFieldDefs::readLookupTables(
+            { read("FixedMeta"), read("FixedData"), read("Fixed2Meta"), read("Fixed2Data"),
+              read("VarMeta"), read("Var2Data") });
+        const QByteArray directory = propsItem(file, { kStorage, QStringLiteral("Props") },
+                                               CustomFieldDefs::kLookupDirectoryKey);
+        CustomFieldDefs::readLookupDirectory(directory, &tables);
+        // In the directory's own order.
+        QList<CustomFieldDefs::LookupTable> ordered;
+        for (int o = 24; o + 38 <= directory.size(); o += 38) ordered.append(tables.value(directory.mid(o, 16)));
+        QCOMPARE(CustomFieldDefs::writeLookupDirectory(directory, ordered).toHex(' '), directory.toHex(' '));
+    }
+}
+
+void TstCustomFieldFormulas::indicatorsCompareWithAnotherField()
+{
+    struct Case { const char *file; quint32 field; QString value; };
+    const Case cases[] = {
+        { "gf-number.mpp", 0x0B400057, "[Number2]" },
+        { "gf-date.mpp", 0x0B400109, "[Finish]" },
+        { "gf-text.mpp", 0x0B400033, "[Name]" },
+    };
+    for (const Case &c : cases) {
+        const QByteArray file = fixture(QLatin1String(c.file));
+        if (file.isEmpty()) QSKIP("fixtures unavailable");
+        const Project p = open(file);
+        const CustomField *d = definition(p, c.field);
+        QVERIFY2(d && d->graphicalIndicators.size() == 1, c.file);
+        QCOMPARE(d->graphicalIndicators.first().value.toString(), c.value);
+        // Project's bytes back (gf-date and gf-text also carry an empty record the
+        // oracle left on Number1, which is not written back).
+        if (QLatin1String(c.file) != QLatin1String("gf-number.mpp")) continue;
+        const QByteArray formulas = propsItem(file, { kStorage, QStringLiteral("Props") },
+                                              CustomFieldDefs::kFormulasKey);
+        QCOMPARE(CustomFieldDefs::writeFormulas(CustomFieldDefs::readFormulas(formulas)).toHex(' '),
+                 formulas.toHex(' '));
+    }
+    // Evaluated against the other field on the task.
+    Project p;
+    Task t = sampleTask();
+    CustomField score; score.fieldId = 0x0B400057; score.name = QStringLiteral("Score"); score.value = 10.0;
+    CustomField target; target.fieldId = 0x0B400058; target.name = QStringLiteral("Target"); target.value = 8.0;
+    score.graphicalIndicators = { { "gt", QStringLiteral("[Target]"), "sphere-red" },
+                                  { "any", QString(), "sphere-lime" } };
+    t.customFields = { score, target };
+    p.customFieldDefinitions = { score, target };
+    p.tasks = { t };
+    QCOMPARE(CustomFieldLogic::indicatorFor(p, p.tasks.first(), score), QStringLiteral("sphere-red"));
+    p.tasks.first().customFields[1].value = 12.0;
+    QCOMPARE(CustomFieldLogic::indicatorFor(p, p.tasks.first(), score), QStringLiteral("sphere-lime"));
+}
+
+void TstCustomFieldFormulas::optionsRoundTripThroughMpp()
+{
+    const QByteArray base = fixture(QStringLiteral("cf-base.mpp"));
+    if (base.isEmpty()) QSKIP("cf-base.mpp fixture unavailable");
+    Project p = open(base);
+    CustomField risk; risk.fieldId = 0x0B400033; risk.name = QStringLiteral("Risk");
+    risk.lookupValues = { "Low", "Medium", "High" };
+    risk.lookupDescriptions = { "Low risk", "", "High risk" };
+    risk.restrictToList = false;
+    risk.listOrder = 2;
+    risk.defaultValue = QStringLiteral("Medium");
+    risk.graphicalIndicators = { { "eq", QStringLiteral("[Text2]"), "sphere-red" } };
+    CustomField size; size.fieldId = 0x0B400057; size.summaryCalc = 3;
+    size.graphicalIndicators = { { "gt", QStringLiteral("[Number2]"), "flag-red" } };
+    CustomField days; days.fieldId = 0x0B400058; days.formula = QStringLiteral("[Duration]/480");
+    days.summaryCalc = 11;
+    CustomField late; late.fieldId = 0x0B400048; late.summaryCalc = 0;
+    CustomField due; due.fieldId = 0x0B400109; due.summaryCalc = 1;
+    p.customFieldDefinitions = { risk, size, days, late, due };
+    MppIO io;
+    io.setProject(p);
+    const Project back = open(io.saveToData());
+    const CustomField *r = definition(back, 0x0B400033);
+    QCOMPARE(r->lookupValues, risk.lookupValues);
+    QCOMPARE(r->lookupDescriptions, risk.lookupDescriptions);
+    QCOMPARE(r->restrictToList, false);
+    QCOMPARE(r->listOrder, 2);
+    QCOMPARE(r->defaultValue, QStringLiteral("Medium"));
+    QCOMPARE(r->graphicalIndicators.first().value.toString(), QStringLiteral("[Text2]"));
+    QCOMPARE(definition(back, 0x0B400057)->summaryCalc, 3);
+    QCOMPARE(definition(back, 0x0B400057)->graphicalIndicators.first().value.toString(),
+             QStringLiteral("[Number2]"));
+    QCOMPARE(definition(back, 0x0B400058)->summaryCalc, 11);
+    QCOMPARE(definition(back, 0x0B400058)->formula, days.formula);
+    QCOMPARE(definition(back, 0x0B400048)->summaryCalc, 0);
+    QCOMPARE(definition(back, 0x0B400109)->summaryCalc, 1);
+}
+
+void TstCustomFieldFormulas::mspdiSummaryCalculation()
+{
+    for (const auto &c : { qMakePair(QStringLiteral("sc-3.xml"), 3), qMakePair(QStringLiteral("sc-11.xml"), 11) }) {
+        QFile f(kDir + c.first);
+        if (!f.open(QIODevice::ReadOnly)) QSKIP("fixtures unavailable");
+        XmlIO io;
+        QVERIFY(io.openFromData(f.readAll()));
+        QCOMPARE(definition(io.project(), 0x0B400057)->summaryCalc, c.second);
+        const QString xml = QString::fromUtf8(io.saveToData());
+        if (c.second == 3) {
+            QVERIFY(xml.contains(QStringLiteral("<RollupType>3</RollupType>")));
+            QVERIFY(xml.contains(QStringLiteral("<CalculationType>1</CalculationType>")));
+        } else {
+            QVERIFY(xml.contains(QStringLiteral("<CalculationType>2</CalculationType>")));
+        }
+        XmlIO back;
+        QVERIFY(back.openFromData(xml.toUtf8()));
+        QCOMPARE(definition(back.project(), 0x0B400057)->summaryCalc, c.second);
+    }
+}
+
+void TstCustomFieldFormulas::flagsAndNumberPresenceSitWhereProjectPutsThem()
+{
+    // Read: each flag on Design only; Number1's presence bit is not Flag11.
+    struct Case { const char *file; quint32 flag; };
+    for (const Case &c : { Case{ "fl-1.mpp", 0x0B400048 }, Case{ "fl-11.mpp", 0x0B400124 },
+                           Case{ "fl-20.mpp", 0x0B40012D }, Case{ "nb-1-fl-11.mpp", 0x0B400124 } }) {
+        const QByteArray bytes = fixture(QLatin1String(c.file));
+        if (bytes.isEmpty()) QSKIP("fixtures unavailable");
+        const Project p = open(bytes);
+        for (const Task &t : p.tasks) {
+            bool set = false, other = false;
+            for (const CustomField &f : t.customFields) {
+                if (quint32(f.fieldId) == c.flag) set = f.value.toBool();
+                else if (f.value.typeId() == QMetaType::Bool && f.value.toBool()) other = true;
+            }
+            QVERIFY2(set == (t.name == QLatin1String("Design")), qPrintable(QLatin1String(c.file) + t.name));
+            QVERIFY2(!other, qPrintable(QLatin1String(c.file) + t.name + " has another flag"));
+        }
+    }
+    // Write: the bits Project itself sets (nb-1-fl-11: Number1 presence item
+    // byte 25 bit 3, Flag11 item byte 33 bit 1).
+    Project p = open(fixture(QStringLiteral("cf-base.mpp")));
+    for (Task &t : p.tasks) {
+        CustomField n; n.fieldId = 0x0B400057; n.name = QStringLiteral("Number1"); n.value = 5.0;
+        t.customFields.append(n);
+        if (t.name == QLatin1String("Design")) {
+            CustomField f; f.fieldId = 0x0B400124; f.name = QStringLiteral("Flag11"); f.value = true;
+            t.customFields.append(f);
+        }
+    }
+    MppIO io;
+    io.setProject(p);
+    const QByteArray saved = io.saveToData();
+    CompoundFile cf;
+    QVERIFY(cf.openFromData(saved));
+    const QByteArray meta = cf.readStream({ kStorage, QStringLiteral("TBkndTask"), QStringLiteral("FixedMeta") });
+    const QByteArray data = cf.readStream({ kStorage, QStringLiteral("TBkndTask"), QStringLiteral("FixedData") });
+    const int rows = int(qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(meta.constData() + 8)));
+    int checked = 0;
+    for (int r = 3; r < rows; ++r) {
+        const QByteArray item = meta.mid(16 + 47 * r, 47);
+        QVERIFY2(quint8(item.at(25)) & 0x08, "Number1 presence bit");
+        ++checked;
+    }
+    QVERIFY(checked >= 3);
+    const Project back = open(saved);
+    for (const Task &t : back.tasks) {
+        bool flag = false;
+        double number = 0;
+        for (const CustomField &f : t.customFields) {
+            if (quint32(f.fieldId) == 0x0B400124) flag = f.value.toBool();
+            if (quint32(f.fieldId) == 0x0B400057) number = f.value.toDouble();
+        }
+        QCOMPARE(flag, t.name == QLatin1String("Design"));
+        QCOMPARE(number, 5.0);
+    }
+    Q_UNUSED(data);
 }
 
 QTEST_GUILESS_MAIN(TstCustomFieldFormulas)

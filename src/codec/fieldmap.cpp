@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "codec/fieldmap.h"
+#include "codec/mppfieldids.h"
 
 #include "codec/fielddecoders.h"
 #include "codec/propsreader.h"
@@ -49,6 +50,23 @@ QHash<quint16, EntityFieldLoc> entityFieldLocations(const QByteArray &fm, quint1
                 L.metaOffset = int(metaOffset) + 2;
                 L.metaMask = mask;
             }
+        }
+    }
+    // A task custom flag (Flag1-20) is the FixedMeta bit at its field-map
+    // position, the same bitmap that marks which var fields a row carries
+    // (Project 2016, 2026-11-17: Flag1 item byte 24 bit 1 = position 129,
+    // Flag11 byte 33 bit 1 = 201, Flag20 byte 34 bit 2 = 210). The masks the
+    // map gives Flag11-20 point into Flag1-10's word instead -- Flag11's 0x800
+    // is Number1's presence bit -- so they are not used.
+    if (highWord == MppFieldIds::kTaskHigh) {
+        const QHash<quint16, int> ordinals = presenceBitOrdinals(fm, highWord);
+        for (const MppFieldIds::CustomFieldDef &d : MppFieldIds::taskCustomFields()) {
+            if (d.kind != MppFieldIds::FieldKind::Bool || !ordinals.contains(d.index))
+                continue;
+            const int ordinal = ordinals.value(d.index);
+            EntityFieldLoc &L = out[d.index];
+            L.metaOffset = 8 + ordinal / 8;
+            L.metaMask = 1u << (ordinal % 8);
         }
     }
     return out;

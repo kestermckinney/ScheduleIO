@@ -38,9 +38,10 @@ public:
     static QString validate(const Project &project, const QString &formula);
 
     // Give every task the project's formula fields (customFieldDefinitions with
-    // a formula) and recompute their values. As in Project (summary
-    // calculation "None"), summary tasks get no value. A failing formula
-    // leaves the task's value empty.
+    // a formula) and recompute their values, then the summary rows by each
+    // field's summaryCalc: none (a formula field's summary has no value), a
+    // rollup of the subtasks, or the formula. A failing formula leaves the
+    // task's value empty.
     static void recalculate(Project &project);
 
     // Project's stored spelling, field references as [MSPJ<field id>]. Names
@@ -60,5 +61,8 @@ public:
 
     static bool acceptsLookupValue(const CustomField &field, const QVariant &value);
     static QString indicatorFor(const CustomField &field);
+    // As above, resolving a rule that compares with another field ([Finish])
+    // on `task`.
+    static QString indicatorFor(const Project &project, const Task &task, const CustomField &field);
 };
 }

@@ -1977,9 +1977,10 @@ void readTaskFieldDefinitions(const CompoundFile &cf, const PropsReader &props,
         CustomFieldDefs::readFormulas(props.value(CustomFieldDefs::kFormulasKey));
     const QString outl = QStringLiteral("TBkndOutlCode");
     auto read = [&](const char *name) { return cf.readStream({ kDataStorage, outl, QLatin1String(name) }); };
-    const QHash<QByteArray, CustomFieldDefs::LookupTable> tables = CustomFieldDefs::readLookupTables(
+    QHash<QByteArray, CustomFieldDefs::LookupTable> tables = CustomFieldDefs::readLookupTables(
         { read("FixedMeta"), read("FixedData"), read("Fixed2Meta"), read("Fixed2Data"),
           read("VarMeta"), read("Var2Data") });
+    CustomFieldDefs::readLookupDirectory(props.value(CustomFieldDefs::kLookupDirectoryKey), &tables);
 
     auto definition = [&out](quint32 fieldId) -> schedule::CustomField * {
         const QString slot = schedule::CustomFieldLogic::slotName(fieldId);
@@ -1998,19 +1999,34 @@ void readTaskFieldDefinitions(const CompoundFile &cf, const PropsReader &props,
         schedule::CustomField *d = definition(f.fieldId);
         if (!d) continue;
         if (f.active) d->formula = f.text;
+        d->summaryCalc = f.summaryCalc;
         for (const CustomFieldDefs::Indicator &i : f.indicators) {
             schedule::CustomField::IndicatorRule rule;
             rule.comparison = CustomFieldDefs::comparisonName(i.comparison);
             rule.indicator = CustomFieldDefs::imageName(i.image);
-            rule.value = CustomFieldDefs::decodeRuleValue(f.fieldId, i.value);
+            rule.value = i.field
+                ? schedule::CustomFieldLogic::fromProjectFormula(out, QStringLiteral("[MSPJ%1]").arg(i.field))
+                : CustomFieldDefs::decodeRuleValue(f.fieldId, i.value);
             if (!rule.comparison.isEmpty() && !rule.indicator.isEmpty())
                 d->graphicalIndicators.append(rule);
         }
         if (f.valueList)
-            for (const CustomFieldDefs::AttributeField &a : attributes)
-                if (a.fieldId == f.fieldId && tables.contains(a.valueListGuid))
-                    for (const CustomFieldDefs::LookupValue &v : tables.value(a.valueListGuid).values)
-                        d->lookupValues.append(CustomFieldDefs::decodeListValue(f.fieldId, v.value));
+            for (const CustomFieldDefs::AttributeField &a : attributes) {
+                if (a.fieldId != f.fieldId || !tables.contains(a.valueListGuid))
+                    continue;
+                const CustomFieldDefs::LookupTable table = tables.value(a.valueListGuid);
+                for (const CustomFieldDefs::LookupValue &v : table.values) {
+                    const QString text = CustomFieldDefs::decodeListValue(f.fieldId, v.value);
+                    d->lookupValues.append(text);
+                    d->lookupDescriptions.append(v.description);
+                    if (!a.defaultGuid.isEmpty() && v.guid == a.defaultGuid)
+                        d->defaultValue = text;
+                }
+                while (!d->lookupDescriptions.isEmpty() && d->lookupDescriptions.last().isEmpty())
+                    d->lookupDescriptions.removeLast();
+                d->restrictToList = table.restrict;
+                d->listOrder = table.order;
+            }
     }
     // Translate once every alias is known: a formula may name another field.
     for (schedule::CustomField &d : out.customFieldDefinitions)
@@ -2023,6 +2039,7 @@ void readTaskFieldDefinitions(const CompoundFile &cf, const PropsReader &props,
                     f.formula = d.formula;
                     f.lookupValues = d.lookupValues;
                     f.graphicalIndicators = d.graphicalIndicators;
+                    f.summaryCalc = d.summaryCalc;
                 }
 }
 

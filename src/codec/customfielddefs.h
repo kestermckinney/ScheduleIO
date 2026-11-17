@@ -40,6 +40,14 @@
 //     0x0B flag (u16), 3 duration (u32 tenths of a minute, u16 unit).
 //   Field references in a formula are [MSPJ<field id>].
 //   Item 0x02401392 (u16) is 1 once the file has any custom field definition.
+// "   114/Props" item 0x0240138C lists the lookup tables: [u32 n][a 20-byte root
+//   entry][per table: GUID, u32 1, u32 kind (3 text, 7 number, 5 cost, 4 date),
+//   u32 0x2E, u32 0, u8 flags (0x05 restricted to the list, 0x04 not), u8 1,
+//   u16 0, u16 PjListOrder]. A list's default value is its GUID at byte 52 of
+//   the field's section-D record. "Append new values" is not kept in the file.
+// Summary rows (attr): 0x40 | rollup << 12 for a rollup (PjSummaryCalc 0-7),
+//   0x80 to use the formula; neither for none. Graphical indicators: 0x02.
+//   A rule comparing with another field is [image][1000 + test][7][field id].
 // "   114/TBkndOutlCode" (a stream quartet) holds the value lists: after the
 //   template's rows, one row per value. Fixed: [u32 uid][u32 uid][u32 1][u16 0];
 //   Fixed2: [value GUID][u16 list type][list GUID] (list type 21 text, 15
@@ -50,6 +58,7 @@ namespace CustomFieldDefs {
 inline constexpr quint32 kTaskDefinitionsKey = 0x04400001u;   // TBkndTask/Props
 inline constexpr quint32 kFormulasKey = 0x02401390u;          // 114/Props
 inline constexpr quint32 kDefinedKey = 0x02401392u;           // 114/Props, u16
+inline constexpr quint32 kLookupDirectoryKey = 0x0240138Cu;   // 114/Props
 inline constexpr int kMaxAliasLength = 50;
 
 struct Alias {
@@ -61,6 +70,7 @@ struct Indicator {
     quint32 image = 1;          // PjIndicator (1 = pjIndicatorSphereLime)
     int comparison = 11;        // PjComparison; 11 = is any value
     QByteArray value;           // [u16 type][value bytes], empty for "any value"
+    quint32 field = 0;          // compare with this field instead (kind 7)
 };
 
 struct Formula {
@@ -69,6 +79,7 @@ struct Formula {
     bool active = true;         // calculated (attr & 0x10)
     bool valueList = false;     // the field's attribute is its value list
     QList<Indicator> indicators;
+    int summaryCalc = 10;       // PjSummaryCalc (10 none, 11 formula, 0-7 rollups)
 };
 
 // One section-D record.
@@ -76,16 +87,20 @@ struct AttributeField {
     quint32 fieldId = 0;
     bool formula = false;
     QByteArray valueListGuid;   // 16 bytes when the field has a value list
+    QByteArray defaultGuid;     // the list value new tasks get, when there is one
 };
 
 struct LookupValue {
     QByteArray value;           // encoded as the field's kind (see above)
     QString description;
+    QByteArray guid;            // 16 bytes; a new one is made when empty
 };
 struct LookupTable {
     QByteArray guid;            // 16 bytes
     quint16 type = 21;
     QList<LookupValue> values;
+    bool restrict = true;       // only listed values may be entered
+    int order = 0;              // PjListOrder
 };
 
 struct OutlCodeStreams {
@@ -96,6 +111,9 @@ QList<Alias> readAliases(const QByteArray &taskDefinitions);
 QList<AttributeField> readAttributeFields(const QByteArray &taskDefinitions);
 QList<Formula> readFormulas(const QByteArray &formulas);
 QHash<QByteArray, LookupTable> readLookupTables(const OutlCodeStreams &streams);
+// Restrict / order from item 0x0240138C onto tables read from TBkndOutlCode.
+void readLookupDirectory(const QByteArray &directory, QHash<QByteArray, LookupTable> *tables);
+QByteArray writeLookupDirectory(const QByteArray &existing, const QList<LookupTable> &tables);
 
 // Rebuild item 0x04400001 from `existing` (the template's or the source
 // file's), replacing section A with `aliases` and section D with `fields`;
