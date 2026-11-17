@@ -10,7 +10,9 @@
 #include "codec/propskeys.h"
 #include "codec/propsreader.h"
 #include "codec/autofiltercodec.h"
+#include "codec/customfielddefs.h"
 #include "codec/viewformat.h"
+#include "model/customfieldlogic.h"
 #include "ole/compoundfile.h"
 #include "serializer/mpp14manifest.h"
 
@@ -991,9 +993,8 @@ bool patchPropsU16(QByteArray &props, quint32 key, quint16 value)
 // a different length (or a key the template lacks) rebuilds the item and
 // fixes up the two header "byteSize" fields by the size delta -- everything
 // else in the stream (other items, the field maps) is untouched.
-void patchPropsString(QByteArray &props, quint32 key, const QString &value)
+void patchPropsBytes(QByteArray &props, quint32 key, const QByteArray &newData)
 {
-    const QByteArray newData = utf16zBytes(value);
     int o = 16;
     while (o + 12 <= props.size()) {
         const int itemStart = o;
@@ -1039,6 +1040,107 @@ void patchPropsString(QByteArray &props, quint32 key, const QString &value)
     readU32(props, 4, &sz1);
     pokeU32(props, 0, quint32(int(sz0) + newItem.size()));
     pokeU32(props, 4, quint32(int(sz1) + newItem.size()));
+}
+
+void patchPropsString(QByteArray &props, quint32 key, const QString &value)
+{
+    patchPropsBytes(props, key, utf16zBytes(value));
+}
+
+// Task custom field definitions (codec/customfielddefs.h): aliases, formulas,
+// value lists and graphical indicators. The formulas and indicator rules go in
+// "   114/Props", the aliases and attribute records in "   114/TBkndTask/Props"
+// (`taskProps`, patched in place), the value lists in "   114/TBkndOutlCode",
+// which replaces the template's copy in `cf` when there are any.
+void writeTaskFieldDefinitions(const schedule::Project &in, QByteArray &props, QByteArray &taskProps,
+                               const CompoundFile &tpl, CompoundFile &cf)
+{
+    QList<CustomFieldDefs::Alias> aliases;
+    QList<CustomFieldDefs::Formula> formulas;
+    QList<CustomFieldDefs::AttributeField> attributes;
+    QList<CustomFieldDefs::LookupTable> tables;
+    QSet<quint32> seen;
+    for (const schedule::CustomField &d : in.customFieldDefinitions) {
+        const quint32 id = quint32(d.fieldId);
+        const QString slot = schedule::CustomFieldLogic::slotName(id);
+        if (slot.isEmpty() || seen.contains(id))
+            continue;
+        seen.insert(id);
+        if (!d.name.isEmpty() && d.name != slot)
+            aliases.append({ id, d.name.left(CustomFieldDefs::kMaxAliasLength) });
+
+        CustomFieldDefs::Formula record;
+        record.fieldId = id;
+        const bool formula = !d.formula.trimmed().isEmpty();
+        if (formula)
+            record.text = schedule::CustomFieldLogic::toProjectFormula(in, d.formula.trimmed());
+        // A field's custom attribute is its formula or its value list, not both.
+        CustomFieldDefs::LookupTable table;
+        if (!formula && CustomFieldDefs::listType(id) != 0) {
+            for (const QString &value : d.lookupValues) {
+                const QByteArray encoded = CustomFieldDefs::encodeListValue(id, value);
+                if (!encoded.isEmpty())
+                    table.values.append({ encoded, QString() });
+            }
+        }
+        if (!table.values.isEmpty()) {
+            table.guid = CustomFieldDefs::newGuid();
+            table.type = CustomFieldDefs::listType(id);
+            tables.append(table);
+            record.valueList = true;
+        }
+        for (const schedule::CustomField::IndicatorRule &rule : d.graphicalIndicators) {
+            CustomFieldDefs::Indicator indicator;
+            indicator.comparison = CustomFieldDefs::comparisonCode(rule.comparison);
+            indicator.image = CustomFieldDefs::imageCode(rule.indicator);
+            if (indicator.comparison < 0 || indicator.image == 0)
+                continue;   // nothing Project can show
+            if (indicator.comparison != 11) {
+                indicator.value = CustomFieldDefs::encodeRuleValue(id, rule.value.toString());
+                if (indicator.value.isEmpty())
+                    continue;
+            }
+            record.indicators.append(indicator);
+        }
+        if (formula || record.valueList || !record.indicators.isEmpty()) {
+            formulas.append(record);
+            attributes.append({ id, formula, record.valueList ? table.guid : QByteArray() });
+        }
+    }
+    // A field renamed only on the tasks (no definition) keeps its alias too.
+    for (const schedule::Task &t : in.tasks)
+        for (const schedule::CustomField &f : t.customFields) {
+            const quint32 id = quint32(f.fieldId);
+            const QString slot = schedule::CustomFieldLogic::slotName(id);
+            if (slot.isEmpty() || seen.contains(id) || f.name.isEmpty() || f.name == slot)
+                continue;
+            seen.insert(id);
+            aliases.append({ id, f.name.left(CustomFieldDefs::kMaxAliasLength) });
+        }
+    patchPropsBytes(props, CustomFieldDefs::kFormulasKey, CustomFieldDefs::writeFormulas(formulas));
+    if (!aliases.isEmpty() || !formulas.isEmpty())
+        patchPropsU16(props, CustomFieldDefs::kDefinedKey, 1);
+
+    PropsReader existing;
+    existing.parse(taskProps);
+    patchPropsBytes(taskProps, CustomFieldDefs::kTaskDefinitionsKey,
+                    CustomFieldDefs::writeTaskDefinitions(
+                        existing.value(CustomFieldDefs::kTaskDefinitionsKey), aliases, attributes));
+
+    if (!tables.isEmpty()) {
+        const QString storage = QStringLiteral("   114");
+        const QString outl = QStringLiteral("TBkndOutlCode");
+        auto read = [&](const char *name) { return tpl.readStream({ storage, outl, QLatin1String(name) }); };
+        CustomFieldDefs::OutlCodeStreams base{ read("FixedMeta"), read("FixedData"), read("Fixed2Meta"),
+                                               read("Fixed2Data"), read("VarMeta"), read("Var2Data") };
+        const CustomFieldDefs::OutlCodeStreams out = CustomFieldDefs::writeLookupTables(base, tables);
+        cf.addStream({ storage, outl, QStringLiteral("FixedMeta") }, out.fixedMeta);
+        cf.addStream({ storage, outl, QStringLiteral("FixedData") }, out.fixedData);
+        cf.addStream({ storage, outl, QStringLiteral("Fixed2Meta") }, out.fixed2Meta);
+        cf.addStream({ storage, outl, QStringLiteral("Fixed2Data") }, out.fixed2Data);
+        cf.addStream({ storage, outl, QStringLiteral("VarMeta") }, out.varMeta);
+        cf.addStream({ storage, outl, QStringLiteral("Var2Data") }, out.var2Data);
+    }
 }
 
 // Slice `count` meta items (without the 16-byte header) out of a meta stream.
@@ -1339,6 +1441,11 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     putU16(PropsKey::BaselineForEarnedValue, in.baselineForEarnedValue + 1);
     putBool(PropsKey::ShowProjectSummaryTask, in.showProjectSummaryTask);
 
+    {
+        QByteArray taskProps = tpl.readStream({ kDataStorage, QStringLiteral("TBkndTask"), QStringLiteral("Props") });
+        writeTaskFieldDefinitions(in, props, taskProps, tpl, cf);
+        cf.addStream({ kDataStorage, QStringLiteral("TBkndTask"), QStringLiteral("Props") }, taskProps);
+    }
     cf.addStream({ kDataStorage, QStringLiteral("Props") }, props);
     cf.addStream({ summaryName }, summaryInformationStream(in.title, in.author));
 

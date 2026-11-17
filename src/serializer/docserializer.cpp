@@ -7,6 +7,7 @@
 #include "serializer/mpp14writer.h"
 
 #include "codec/bkndvardata.h"
+#include "codec/customfielddefs.h"
 #include "codec/fielddecoders.h"
 #include "codec/fieldmap.h"
 #include "codec/mppfieldids.h"
@@ -15,6 +16,7 @@
 #include "codec/propsreader.h"
 #include "codec/streamquartet.h"
 #include "codec/viewformat.h"
+#include "model/customfieldlogic.h"
 #include "model/duration.h"
 #include "ole/compoundfile.h"
 
@@ -1957,6 +1959,73 @@ void readSummaryInformation(const CompoundFile &cf, schedule::Project &out)
 // Reads what we have so far reverse-engineered from real files: task names from
 // "   114/TBkndTask" (VarMeta field code 6 -> Var2Data UTF-16 strings). Other
 // fields (UID, dates, duration, resources) are the next RE increments.
+// Task custom field definitions (codec/customfielddefs.h): aliases, formulas,
+// value lists and graphical indicators. Each field with any becomes a
+// definition named by its alias (else its slot name, "Text1"); task values take
+// that name, and a formula is kept in the readable spelling ([Cost] rather than
+// [MSPJ188743685]).
+void readTaskFieldDefinitions(const CompoundFile &cf, const PropsReader &props,
+                              schedule::Project &out)
+{
+    PropsReader taskProps;
+    taskProps.parse(cf.readStream({ kDataStorage, QStringLiteral("TBkndTask"), QStringLiteral("Props") }));
+    const QByteArray taskDefinitions = taskProps.value(CustomFieldDefs::kTaskDefinitionsKey);
+    const QList<CustomFieldDefs::Alias> aliases = CustomFieldDefs::readAliases(taskDefinitions);
+    const QList<CustomFieldDefs::AttributeField> attributes =
+        CustomFieldDefs::readAttributeFields(taskDefinitions);
+    const QList<CustomFieldDefs::Formula> formulas =
+        CustomFieldDefs::readFormulas(props.value(CustomFieldDefs::kFormulasKey));
+    const QString outl = QStringLiteral("TBkndOutlCode");
+    auto read = [&](const char *name) { return cf.readStream({ kDataStorage, outl, QLatin1String(name) }); };
+    const QHash<QByteArray, CustomFieldDefs::LookupTable> tables = CustomFieldDefs::readLookupTables(
+        { read("FixedMeta"), read("FixedData"), read("Fixed2Meta"), read("Fixed2Data"),
+          read("VarMeta"), read("Var2Data") });
+
+    auto definition = [&out](quint32 fieldId) -> schedule::CustomField * {
+        const QString slot = schedule::CustomFieldLogic::slotName(fieldId);
+        if (slot.isEmpty()) return nullptr;   // not a task custom field
+        for (schedule::CustomField &d : out.customFieldDefinitions)
+            if (quint32(d.fieldId) == fieldId) return &d;
+        schedule::CustomField d;
+        d.fieldId = int(fieldId);
+        d.name = slot;
+        out.customFieldDefinitions.append(d);
+        return &out.customFieldDefinitions.last();
+    };
+    for (const CustomFieldDefs::Alias &a : aliases)
+        if (schedule::CustomField *d = definition(a.fieldId)) d->name = a.alias;
+    for (const CustomFieldDefs::Formula &f : formulas) {
+        schedule::CustomField *d = definition(f.fieldId);
+        if (!d) continue;
+        if (f.active) d->formula = f.text;
+        for (const CustomFieldDefs::Indicator &i : f.indicators) {
+            schedule::CustomField::IndicatorRule rule;
+            rule.comparison = CustomFieldDefs::comparisonName(i.comparison);
+            rule.indicator = CustomFieldDefs::imageName(i.image);
+            rule.value = CustomFieldDefs::decodeRuleValue(f.fieldId, i.value);
+            if (!rule.comparison.isEmpty() && !rule.indicator.isEmpty())
+                d->graphicalIndicators.append(rule);
+        }
+        if (f.valueList)
+            for (const CustomFieldDefs::AttributeField &a : attributes)
+                if (a.fieldId == f.fieldId && tables.contains(a.valueListGuid))
+                    for (const CustomFieldDefs::LookupValue &v : tables.value(a.valueListGuid).values)
+                        d->lookupValues.append(CustomFieldDefs::decodeListValue(f.fieldId, v.value));
+    }
+    // Translate once every alias is known: a formula may name another field.
+    for (schedule::CustomField &d : out.customFieldDefinitions)
+        d.formula = schedule::CustomFieldLogic::fromProjectFormula(out, d.formula);
+    for (schedule::Task &t : out.tasks)
+        for (schedule::CustomField &f : t.customFields)
+            for (const schedule::CustomField &d : std::as_const(out.customFieldDefinitions))
+                if (d.fieldId == f.fieldId) {
+                    f.name = d.name;
+                    f.formula = d.formula;
+                    f.lookupValues = d.lookupValues;
+                    f.graphicalIndicators = d.graphicalIndicators;
+                }
+}
+
 bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Project::FormatVersion ver)
 {
     out = schedule::Project();
@@ -2353,6 +2422,8 @@ bool readRealMpp(const CompoundFile &cf, schedule::Project &out, schedule::Proje
             qMax(0, propU16(PropsKey::BaselineForEarnedValue, 1) - 1);
     out.showProjectSummaryTask =
         propBool(PropsKey::ShowProjectSummaryTask, out.showProjectSummaryTask);
+
+    readTaskFieldDefinitions(cf, props, out);
 
     // Gantt-view formatting: view-wide styles + per-task row formats (CV_iew).
     // Needs the task list loaded, so it runs last.

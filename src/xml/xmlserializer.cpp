@@ -283,7 +283,8 @@ schedule::CustomField parseExtendedAttributeDefinition(QXmlStreamReader &r)
     while (r.readNextStartElement()) {
         const QStringView n = r.name();
         if (n == u"FieldID") field.fieldId = r.readElementText().toInt();
-        else if (n == u"FieldName") field.name = r.readElementText();
+        else if (n == u"FieldName") { if (field.name.isEmpty()) field.name = r.readElementText(); else r.skipCurrentElement(); }
+        else if (n == u"Alias") { const QString alias = r.readElementText(); if (!alias.isEmpty()) field.name = alias; }
         else if (n == u"Formula") field.formula = r.readElementText();
         else if (n == u"ValueList") {
             while (r.readNextStartElement()) {
@@ -1230,13 +1231,14 @@ void writeExtendedAttributeDefs(QXmlStreamWriter &w, const schedule::Project &p)
             }
         }
     };
+    // The project's definitions first, in their order, so a file round-trips.
+    collect(p.customFieldDefinitions);
     for (const schedule::Task &t : p.tasks)
         collect(t.customFields);
     for (const schedule::Resource &r : p.resources)
         collect(r.customFields);
     for (const schedule::Assignment &a : p.assignments)
         collect(a.customFields);
-    collect(p.customFieldDefinitions);
     if (order.isEmpty())
         return;
     w.writeStartElement(QStringLiteral("ExtendedAttributes"));
@@ -1244,8 +1246,16 @@ void writeExtendedAttributeDefs(QXmlStreamWriter &w, const schedule::Project &p)
         w.writeStartElement(QStringLiteral("ExtendedAttribute"));
         writeText(w, "FieldID", QString::number(fieldId));
         const schedule::CustomField &def = defs[fieldId];
-        if (!def.name.isEmpty()) writeText(w, "FieldName", def.name);
-        if (!def.formula.isEmpty()) writeText(w, "Formula", def.formula);
+        // Project's schema: FieldName is the field's own name ("Text1"); a
+        // custom name is its Alias; formulas name fields as [MSPJ<id>].
+        const MppFieldIds::CustomFieldDef *slot = customFieldDef(fieldId);
+        const QString slotName = slot ? QString::fromLatin1(slot->name) : QString();
+        if (!slotName.isEmpty()) writeText(w, "FieldName", slotName);
+        else if (!def.name.isEmpty()) writeText(w, "FieldName", def.name);
+        if (!slotName.isEmpty() && !def.name.isEmpty() && def.name != slotName)
+            writeText(w, "Alias", def.name);
+        if (!def.formula.isEmpty())
+            writeText(w, "Formula", schedule::CustomFieldLogic::toProjectFormula(p, def.formula));
         if (!def.lookupValues.isEmpty()) {
             w.writeStartElement(QStringLiteral("ValueList"));
             for (const QString &value : def.lookupValues) writeText(w, "Value", value);
@@ -1426,6 +1436,8 @@ bool read(const QByteArray &xml, schedule::Project &out, QString *error)
                          .arg(r.lineNumber()).arg(r.errorString());
         return false;
     }
+    for (schedule::CustomField &definition : out.customFieldDefinitions)
+        definition.formula = schedule::CustomFieldLogic::fromProjectFormula(out, definition.formula);
     for (schedule::Task &task : out.tasks) {
         for (const schedule::CustomField &definition : out.customFieldDefinitions) {
             auto it = std::find_if(task.customFields.begin(), task.customFields.end(),
@@ -1443,8 +1455,12 @@ bool read(const QByteArray &xml, schedule::Project &out, QString *error)
     out.customFieldDefinitions.erase(
         std::remove_if(out.customFieldDefinitions.begin(), out.customFieldDefinitions.end(),
             [](const schedule::CustomField &field) {
+                // Kept: a formula, value list, indicators or an alias.
+                const MppFieldIds::CustomFieldDef *slot = customFieldDef(field.fieldId);
+                const bool aliased = slot && !field.name.isEmpty()
+                                     && field.name != QString::fromLatin1(slot->name);
                 return field.formula.isEmpty() && field.lookupValues.isEmpty()
-                    && field.graphicalIndicators.isEmpty();
+                    && field.graphicalIndicators.isEmpty() && !aliased;
             }), out.customFieldDefinitions.end());
     schedule::CustomFieldLogic::recalculate(out);
     return true;

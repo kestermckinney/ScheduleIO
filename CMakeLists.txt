@@ -33,6 +33,7 @@ set(SCHEDULEIO_SOURCES
     src/codec/barstylecodec.cpp
     src/codec/viewformat.cpp
     src/codec/autofiltercodec.cpp
+    src/codec/customfielddefs.cpp
     src/codec/viewgroups.cpp
     src/codec/mpp14timephased.cpp
     src/model/project.cpp
@@ -82,6 +83,7 @@ set(SCHEDULEIO_HEADERS
     src/codec/barstylecodec.h
     src/codec/viewformat.h
     src/codec/autofiltercodec.h
+    src/codec/customfielddefs.h
     src/model/project.h
     src/model/task.h
     src/model/resource.h
