@@ -1150,6 +1150,23 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
         }
     }
 
+    // A view that holds column filters but that the source file never showed
+    // (so has no record of) comes in from the embedded template, with its
+    // table, as Project adds a view the first time it is shown. The rest of
+    // the view work then runs on the augmented rowsets.
+    CompoundFile withViews;
+    if (viewTemplate == &sourcePresentation) {
+        withViews = sourcePresentation;
+        if (ViewFormat::importViews(withViews, tpl, viewProject)) {
+            for (const QString &rowset : { QStringLiteral("CV_iew"), QStringLiteral("CTable") })
+                for (const QString &stream : { QStringLiteral("FixedMeta"), QStringLiteral("FixedData"),
+                                               QStringLiteral("VarMeta"), QStringLiteral("Var2Data") })
+                    cf.addStream({ viewStorage, rowset, stream },
+                                 withViews.readStream({ viewStorage, rowset, stream }));
+            viewTemplate = &withViews;
+        }
+    }
+
     // The view STYLE_DATA and COLUMN_PROPERTIES records refer to this table by
     // byte-sized index. The embedded template has a different index layout
     // from many real Project files, so retain the source payload whenever its

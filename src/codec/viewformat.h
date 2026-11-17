@@ -69,6 +69,14 @@ bool wantsTablePatch(const schedule::Project &in);
 // template's streams verbatim.
 bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in);
 
+// A file only carries the views it has shown. For each of the Gantt, Task
+// Usage, Resource Usage and Resource Sheet views that holds column filters but
+// is missing from `doc`'s CV_iew rowset, copy the view (record, meta item and
+// var records, as the next view uid) from `stock` -- with its table, when
+// `doc`'s CTable lacks it -- as Project does when a view is first shown.
+// Returns whether a view was added.
+bool importViews(CompoundFile &doc, const CompoundFile &stock, const schedule::Project &in);
+
 // Patch the Task/Resource Usage table column widths in `   214/CTable` while
 // retaining every other native table byte. A table whose column list is being
 // rebuilt but that `tpl` lacks is first copied in from `stockTables` (the

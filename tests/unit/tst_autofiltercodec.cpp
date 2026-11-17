@@ -99,6 +99,7 @@ private slots:
     void reencodesProjectsLayout();
     void writtenFiltersReadBackWithTheSwitchOn();
     void clearingRemovesTheFilters();
+    void filtersAddViewsTheFileNeverShowed();
 };
 
 void TstAutoFilterCodec::initTestCase()
@@ -433,6 +434,53 @@ void TstAutoFilterCodec::clearingRemovesTheFilters()
     MppIO back;
     QVERIFY(back.openFromData(io.saveToData()));
     QVERIFY(back.project().ganttView.autoFilters.isEmpty());
+}
+
+// af-none.mpp has only the Gantt views and the timeline. Filters for Task
+// Usage, Resource Usage and the Resource Sheet bring those views (and their
+// tables) in from the embedded template, as Project adds a view when it is
+// first shown.
+void TstAutoFilterCodec::filtersAddViewsTheFileNeverShowed()
+{
+    MppIO io;
+    QVERIFY(io.openFromData(fixture(QStringLiteral("af-none.mpp"))));
+    schedule::Project p = io.project();
+    QVERIFY(!p.taskUsageView.present);
+    QVERIFY(!p.resourceSheetView.present);
+
+    auto contains = [](quint32 field, const QString &value) {
+        ColumnAutoFilter f;
+        f.fieldId = field;
+        AutoFilterCondition c;
+        c.test = AutoFilterCondition::Contains;
+        c.values = { text(value) };
+        f.conditions = { c };
+        return f;
+    };
+    const ColumnAutoFilter usage = contains(kName, QStringLiteral("De"));
+    const ColumnAutoFilter sheet = contains(kResourceName, QStringLiteral("B"));
+    const ColumnAutoFilter resources = contains(kResourceName, QStringLiteral("A"));
+    p.taskUsageView.setAutoFilters({ usage });
+    p.resourceSheetView.setAutoFilters({ sheet });
+    p.resourceUsageView.setAutoFilters({ resources });
+    io.setProject(p);
+    const QByteArray saved = io.saveToData();
+    QVERIFY2(!saved.isEmpty(), qPrintable(io.errorString()));
+
+    MppIO back;
+    QVERIFY(back.openFromData(saved));
+    const schedule::Project q = back.project();
+    QVERIFY(q.taskUsageView.present);
+    QCOMPARE(q.taskUsageView.tableName, QStringLiteral("Usa&ge"));
+    QCOMPARE(q.taskUsageView.autoFilters, QList<ColumnAutoFilter>{ usage });
+    QCOMPARE(q.resourceSheetView.autoFilters, QList<ColumnAutoFilter>{ sheet });
+    QCOMPARE(q.resourceUsageView.autoFilters, QList<ColumnAutoFilter>{ resources });
+    QVERIFY(q.ganttView.autoFilters.isEmpty());
+    QCOMPARE(q.ganttView.tableName, QStringLiteral("&Entry"));
+    // The original views keep their uids; the added ones follow.
+    const QHash<quint32, QByteArray> items = rawItems(saved);
+    QVERIFY(items.contains(2));
+    QVERIFY(items.contains(4) && items.contains(5) && items.contains(6));
 }
 
 QTEST_GUILESS_MAIN(TstAutoFilterCodec)

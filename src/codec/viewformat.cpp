@@ -2001,6 +2001,200 @@ static quint32 findTableUid(const QByteArray &fixedData, const QString &wanted, 
     return 0;
 }
 
+// Copy the stock template's table `wanted` (task or resource) into a CTable
+// rowset that lacks it, as the next table uid -- what Project does when a view
+// first shows a table from its global template. False when the rowset already
+// has the table or the stock template does not.
+static bool importStockTable(QByteArray &fixedMeta, QByteArray &fixedData, QByteArray &var2,
+                             QVector<VarRecord> &records, const QByteArray &stockMeta,
+                             const QByteArray &stockData, const QByteArray &stockVar2,
+                             const QVector<VarRecord> &stockRecords, const QString &wanted,
+                             bool resource)
+{
+    if (fixedMeta.size() < 16 || findTableUid(fixedData, wanted, resource) != 0)
+        return false;
+    int stockOffset = -1;
+    const quint32 stockUid = findTableUid(stockData, wanted, resource, &stockOffset);
+    if (stockUid == 0)
+        return false;
+    quint32 newUid = 0;
+    for (int offset = 0; offset + kTableRecordSize <= fixedData.size();
+         offset += kTableRecordSize)
+        newUid = qMax(newUid, rdU32(fixedData, offset));
+    ++newUid;
+
+    QByteArray rec = stockData.mid(stockOffset, kTableRecordSize);
+    wrU32(rec, 0, newUid);
+    // FixedMeta item: [u32 flags][u32 data offset][u16 tail], taken from
+    // the stock table's own item.
+    const int stockItem = 16 + (stockOffset / kTableRecordSize) * kTableMetaItemSize;
+    QByteArray item = stockMeta.mid(stockItem, kTableMetaItemSize);
+    if (item.size() != kTableMetaItemSize)
+        return false;
+    wrU32(item, 4, quint32(fixedData.size()));
+    fixedData += rec;
+    fixedMeta += item;
+    wrU32(fixedMeta, 8, rdU32(fixedMeta, 8) + 1);
+    wrU32(fixedMeta, 12, quint32(fixedData.size()));
+
+    for (const VarRecord &r : stockRecords) {
+        if (r.uid != stockUid)
+            continue;
+        const int len = int(rdU32(stockVar2, int(r.offset)));
+        if (len < 0 || int(r.offset) + 4 + len > stockVar2.size())
+            continue;
+        QByteArray blob = stockVar2.mid(int(r.offset) + 4, len);
+        if (blob.size() >= 4 && rdU32(blob, 0) == stockUid)
+            wrU32(blob, 0, newUid);
+        VarRecord copy = r;
+        copy.uid = newUid;
+        copy.offset = quint32(var2.size());
+        appU32(var2, quint32(blob.size()));
+        var2 += blob;
+        records.append(copy);
+    }
+    return true;
+}
+
+// VarMeta (24-byte header: u32@8 record count, u32@20 data size) for records.
+static QByteArray buildVarMeta(const QByteArray &headerFrom, const QVector<VarRecord> &records,
+                               int dataSize)
+{
+    QByteArray meta = headerFrom.left(24);
+    for (const VarRecord &r : records) {
+        appU32(meta, r.uid);
+        appU32(meta, r.offset);
+        appU16(meta, r.typeLow);
+        appU16(meta, r.typeHigh);
+    }
+    wrU32(meta, 8, quint32(records.size()));
+    wrU32(meta, 20, quint32(dataSize));
+    return meta;
+}
+
+bool importViews(CompoundFile &doc, const CompoundFile &stock, const schedule::Project &in)
+{
+    const QString fm = QStringLiteral("FixedMeta"), fd = QStringLiteral("FixedData"),
+                  vm = QStringLiteral("VarMeta"), v2 = QStringLiteral("Var2Data");
+    if (!doc.hasStorage({ kViewStorage, kCView }) || !stock.hasStorage({ kViewStorage, kCView }))
+        return false;
+    QByteArray fixedMeta = doc.readStream({ kViewStorage, kCView, fm });
+    QByteArray fixedData = doc.readStream({ kViewStorage, kCView, fd });
+    const QByteArray varMeta = doc.readStream({ kViewStorage, kCView, vm });
+    QByteArray var2 = doc.readStream({ kViewStorage, kCView, v2 });
+    QVector<VarRecord> records;
+    if (fixedMeta.size() < 16 || !parseVarMeta(varMeta, &records))
+        return false;
+
+    const QByteArray stockMeta = stock.readStream({ kViewStorage, kCView, fm });
+    const QByteArray stockData = stock.readStream({ kViewStorage, kCView, fd });
+    const QByteArray stockVar2 = stock.readStream({ kViewStorage, kCView, v2 });
+    QVector<VarRecord> stockRecords;
+    if (!parseVarMeta(stock.readStream({ kViewStorage, kCView, vm }), &stockRecords))
+        return false;
+
+    // The CTable rowset, for a view whose table the file lacks.
+    QByteArray tMeta = doc.readStream({ kViewStorage, kCTable, fm });
+    QByteArray tData = doc.readStream({ kViewStorage, kCTable, fd });
+    const QByteArray tVarMeta = doc.readStream({ kViewStorage, kCTable, vm });
+    QByteArray tVar2 = doc.readStream({ kViewStorage, kCTable, v2 });
+    QVector<VarRecord> tRecords;
+    const bool haveTables = parseVarMeta(tVarMeta, &tRecords);
+    QVector<VarRecord> stockTableRecords;
+    parseVarMeta(stock.readStream({ kViewStorage, kCTable, vm }), &stockTableRecords);
+    bool viewsAdded = false, tablesAdded = false;
+
+    const struct { quint16 type; bool resource; const schedule::UsageViewSettings *settings; } kViews[] = {
+        { kViewTypeGantt, false, &in.ganttView },
+        { kViewTypeTaskUsage, false, &in.taskUsageView },
+        { kViewTypeResourceUsage, true, &in.resourceUsageView },
+        { kViewTypeResourceSheet, true, &in.resourceSheetView },
+    };
+    for (const auto &v : kViews) {
+        // Only a view the document needs: one carrying column filters.
+        if (v.settings->autoFilters.isEmpty() || findViewUid(fixedMeta, fixedData, v.type) >= 0)
+            continue;
+        const int stockUid = findViewUid(stockMeta, stockData, v.type);
+        if (stockUid < 0)
+            continue;
+        int stockItem = -1, stockOffset = -1;
+        for (int i = 0; i < int(rdU32(stockMeta, 8)); ++i) {
+            const int off = int(rdU32(stockMeta, 16 + i * 10 + 4));
+            if (off + kViewRecordSize <= stockData.size()
+                && rdU32(stockData, off) == quint32(stockUid)) {
+                stockItem = 16 + i * 10;
+                stockOffset = off;
+                break;
+            }
+        }
+        if (stockItem < 0)
+            continue;
+
+        quint32 newUid = 0;
+        for (int i = 0; i < int(rdU32(fixedMeta, 8)); ++i)
+            newUid = qMax(newUid, rdU32(fixedData, int(rdU32(fixedMeta, 16 + i * 10 + 4))));
+        ++newUid;
+
+        // The 138-byte view record and its 10-byte meta item ([u16 0][u16 flags]
+        // [u32 data offset][u16 tail]), as Project appends a view it first shows.
+        QByteArray rec = stockData.mid(stockOffset, kViewRecordSize);
+        wrU32(rec, 0, newUid);
+        QByteArray item = stockMeta.mid(stockItem, 10);
+        wrU32(item, 4, quint32(fixedData.size()));
+        fixedData += rec;
+        fixedMeta += item;
+        wrU32(fixedMeta, 8, rdU32(fixedMeta, 8) + 1);
+        wrU32(fixedMeta, 12, quint32(fixedData.size()));
+
+        // Its properties (type 6) and other var records, re-keyed.
+        QString tableName;
+        for (const VarRecord &r : stockRecords) {
+            if (r.uid != quint32(stockUid))
+                continue;
+            const int len = int(rdU32(stockVar2, int(r.offset)));
+            if (len < 0 || int(r.offset) + 4 + len > stockVar2.size())
+                continue;
+            const QByteArray blob = stockVar2.mid(int(r.offset) + 4, len);
+            if (r.typeLow == kViewPropsType) {
+                Props9 props;
+                if (parseProps9(blob, &props))
+                    if (const PropsItem *name = props.find(kKeyTableName))
+                        tableName = rdUtf16(name->data, 0, name->data.size());
+            }
+            VarRecord copy = r;
+            copy.uid = newUid;
+            copy.offset = quint32(var2.size());
+            appU32(var2, quint32(blob.size()));
+            var2 += blob;
+            records.append(copy);
+        }
+        viewsAdded = true;
+
+        // The view's table, when the file has never shown it.
+        if (haveTables && !tableName.isEmpty()
+            && importStockTable(tMeta, tData, tVar2, tRecords,
+                                stock.readStream({ kViewStorage, kCTable, fm }),
+                                stock.readStream({ kViewStorage, kCTable, fd }),
+                                stock.readStream({ kViewStorage, kCTable, v2 }),
+                                stockTableRecords, normalizedPresentationName(tableName),
+                                v.resource))
+            tablesAdded = true;
+    }
+    if (!viewsAdded)
+        return false;
+    doc.addStream({ kViewStorage, kCView, fm }, fixedMeta);
+    doc.addStream({ kViewStorage, kCView, fd }, fixedData);
+    doc.addStream({ kViewStorage, kCView, vm }, buildVarMeta(varMeta, records, int(var2.size())));
+    doc.addStream({ kViewStorage, kCView, v2 }, var2);
+    if (tablesAdded) {
+        doc.addStream({ kViewStorage, kCTable, fm }, tMeta);
+        doc.addStream({ kViewStorage, kCTable, fd }, tData);
+        doc.addStream({ kViewStorage, kCTable, vm }, buildVarMeta(tVarMeta, tRecords, int(tVar2.size())));
+        doc.addStream({ kViewStorage, kCTable, v2 }, tVar2);
+    }
+    return true;
+}
+
 bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in,
                  const CompoundFile *stockTables)
 {
@@ -2047,51 +2241,11 @@ bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Pro
             if (!target.settings->modified || !target.settings->columnLayout
                 || target.settings->tableName.isEmpty())
                 continue;
-            const QString wanted = normalizedPresentationName(target.settings->tableName);
-            if (findTableUid(fixedData, wanted, target.resource) != 0)
-                continue;
-            int stockOffset = -1;
-            const quint32 stockUid = findTableUid(stockData, wanted, target.resource,
-                                                  &stockOffset);
-            if (stockUid == 0)
-                continue;
-            quint32 newUid = 0;
-            for (int offset = 0; offset + kTableRecordSize <= fixedData.size();
-                 offset += kTableRecordSize)
-                newUid = qMax(newUid, rdU32(fixedData, offset));
-            ++newUid;
-
-            QByteArray rec = stockData.mid(stockOffset, kTableRecordSize);
-            wrU32(rec, 0, newUid);
-            // FixedMeta item: [u32 flags][u32 data offset][u16 tail], taken from
-            // the stock table's own item.
-            const int stockItem = 16 + (stockOffset / kTableRecordSize) * kTableMetaItemSize;
-            QByteArray item = stockMeta.mid(stockItem, kTableMetaItemSize);
-            if (item.size() != kTableMetaItemSize)
-                continue;
-            wrU32(item, 4, quint32(fixedData.size()));
-            fixedData += rec;
-            fixedMeta += item;
-            wrU32(fixedMeta, 8, rdU32(fixedMeta, 8) + 1);
-            wrU32(fixedMeta, 12, quint32(fixedData.size()));
-
-            for (const VarRecord &r : stockRecords) {
-                if (r.uid != stockUid)
-                    continue;
-                const int len = int(rdU32(stockVar2, int(r.offset)));
-                if (len < 0 || int(r.offset) + 4 + len > stockVar2.size())
-                    continue;
-                QByteArray blob = stockVar2.mid(int(r.offset) + 4, len);
-                if (blob.size() >= 4 && rdU32(blob, 0) == stockUid)
-                    wrU32(blob, 0, newUid);
-                VarRecord copy = r;
-                copy.uid = newUid;
-                copy.offset = quint32(var2.size());
-                appU32(var2, quint32(blob.size()));
-                var2 += blob;
-                records.append(copy);
-            }
-            imported = true;
+            if (importStockTable(fixedMeta, fixedData, var2, records, stockMeta, stockData,
+                                 stockVar2, stockRecords,
+                                 normalizedPresentationName(target.settings->tableName),
+                                 target.resource))
+                imported = true;
         }
     }
 
