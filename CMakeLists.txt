@@ -32,6 +32,7 @@ set(SCHEDULEIO_SOURCES
     src/codec/mppfieldids.cpp
     src/codec/barstylecodec.cpp
     src/codec/viewformat.cpp
+    src/codec/autofiltercodec.cpp
     src/codec/mpp14timephased.cpp
     src/model/project.cpp
     src/model/task.cpp
@@ -79,6 +80,7 @@ set(SCHEDULEIO_HEADERS
     src/codec/mppfieldids.h
     src/codec/barstylecodec.h
     src/codec/viewformat.h
+    src/codec/autofiltercodec.h
     src/model/project.h
     src/model/task.h
     src/model/resource.h
@@ -90,6 +92,7 @@ set(SCHEDULEIO_HEADERS
     src/model/customfieldlogic.h
     src/model/viewstyles.h
     src/model/usageviewsettings.h
+    src/model/viewautofilter.h
     src/model/timelineviewsettings.h
     src/model/costrate.h
     src/model/availability.h

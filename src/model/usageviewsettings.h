@@ -5,6 +5,7 @@
 #define USAGEVIEWSETTINGS_H
 
 #include "scheduleio_export.h"
+#include "model/viewautofilter.h"
 
 #include <QList>
 #include <QString>
@@ -46,6 +47,16 @@ struct SCHEDULEIO_EXPORT UsageViewSettings
     QStringList detailSelection; // exact Task Usage selection (MPP extension)
     int timescaleSize = 100; // Project's Timescale "Size" / Enlarge percentage
     int tableWidth = 0;      // width of the table (left) pane in a split view
+    // The view's column AutoFilters (Project ANDs them). Written whenever the
+    // view is modified, so clearing the list clears the file's filters.
+    QList<ColumnAutoFilter> autoFilters;
+
+    void setAutoFilters(const QList<ColumnAutoFilter> &filters)
+    {
+        autoFilters = filters;
+        present = true;
+        modified = true;
+    }
 
     int columnWidth(quint32 fieldId, int fallback = 0) const
     {
@@ -135,7 +146,7 @@ struct SCHEDULEIO_EXPORT UsageViewSettings
             && tableName == o.tableName && columns == o.columns
             && detailFields == o.detailFields && detailSelection == o.detailSelection
             && timescaleSize == o.timescaleSize
-            && tableWidth == o.tableWidth;
+            && tableWidth == o.tableWidth && autoFilters == o.autoFilters;
     }
 };
 

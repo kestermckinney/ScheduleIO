@@ -9,6 +9,7 @@
 #include "codec/mpp14timephased.h"
 #include "codec/propskeys.h"
 #include "codec/propsreader.h"
+#include "codec/autofiltercodec.h"
 #include "codec/viewformat.h"
 #include "ole/compoundfile.h"
 #include "serializer/mpp14manifest.h"
@@ -1133,6 +1134,30 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             if (key == 0x03400000u && len == quint32(viewProject.mppFontBases.size())) {
                 pokeBytes(fontProps, o, viewProject.mppFontBases);
                 cf.addStream({ viewStorage, QStringLiteral("Props") }, fontProps);
+                break;
+            }
+            o += int(len);
+            if (len % 2 != 0)
+                ++o;
+        }
+    }
+
+    // A view with column AutoFilters needs Project's AutoFilter switch on, or
+    // Project keeps the criteria but shows every row.
+    const bool anyAutoFilter = !in.ganttView.autoFilters.isEmpty()
+        || !in.taskUsageView.autoFilters.isEmpty() || !in.resourceUsageView.autoFilters.isEmpty()
+        || !in.resourceSheetView.autoFilters.isEmpty();
+    if (anyAutoFilter) {
+        QByteArray viewProps = cf.readStream({ viewStorage, QStringLiteral("Props") });
+        for (int o = 16; o + 12 <= viewProps.size(); ) {
+            const quint32 len = readLeU32(viewProps, o);
+            const quint32 key = readLeU32(viewProps, o + 4);
+            o += 12;
+            if (len > quint32(viewProps.size() - o))
+                break;
+            if (key == AutoFilterCodec::kSwitchKey && len >= 2) {
+                pokeBytes(viewProps, o, QByteArray("\x01\x00", 2));
+                cf.addStream({ viewStorage, QStringLiteral("Props") }, viewProps);
                 break;
             }
             o += int(len);

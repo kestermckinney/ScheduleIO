@@ -92,6 +92,7 @@ public:
     UsageViewSettings resourceUsageView;
     UsageViewSettings taskUsageView;
     UsageViewSettings teamPlannerView;
+    UsageViewSettings resourceSheetView;   // read/written for its AutoFilters
 
     // Separate style template for the Team Planner view (text styles + bar
     // colours). Falls back to viewStyles when not present.

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "codec/viewformat.h"
+#include "codec/autofiltercodec.h"
 
 #include "codec/barstylecodec.h"
 #include "codec/bkndvardata.h"
@@ -50,6 +51,7 @@ constexpr quint16 kViewTypeTaskUsage = 14;
 constexpr quint16 kViewTypeTeamPlanner = 9;
 constexpr quint16 kViewTypeCalendar = 13;
 constexpr quint16 kViewTypeTimeline = 16;
+constexpr quint16 kViewTypeResourceSheet = 7;
 constexpr int kViewRecordSize = 138;    // CV_iew FixedData block size
 
 // The Timeline view is a self-describing UTF-16 "<TLViewData>" XML document held
@@ -680,6 +682,8 @@ void readUsageView(const CompoundFile &cf, const QByteArray &viewFixedMeta,
 
     out->viewName = rdUtf16(viewRecord, 4, 104);
     out->tableName = rdUtf16(tableNameItem->data, 0, tableNameItem->data.size());
+    if (const PropsItem *filters = props.find(AutoFilterCodec::kPropsKey))
+        out->autoFilters = AutoFilterCodec::decode(filters->data);
     if (const PropsItem *table = props.find(kKeyTableProperties)) {
         if (table->data.size() >= 37)
             out->tableWidth = rdU16(table->data, 35);
@@ -1539,6 +1543,8 @@ void read(const CompoundFile &cf, schedule::Project *out)
                    QStringLiteral("&Usage"));
     readUsageView(cf, fixedMeta, fixedData, vd, kViewTypeTeamPlanner,
                   &out->teamPlannerView);
+    readUsageView(cf, fixedMeta, fixedData, vd, kViewTypeResourceSheet,
+                  &out->resourceSheetView);
 
     const auto readSelection = [&cf](const QString &stream) {
         QStringList selection;
@@ -1629,7 +1635,7 @@ bool wantsPatch(const schedule::Project &in)
         || in.teamPlannerStyles.present || in.calendarStyles.present)
         return true;
     if (in.ganttView.modified || in.resourceUsageView.modified || in.taskUsageView.modified
-        || in.teamPlannerView.modified)
+        || in.teamPlannerView.modified || in.resourceSheetView.modified)
         return true;
     if (in.timelineView.present && in.timelineView.modified)
         return true;
@@ -1866,6 +1872,47 @@ bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &
         }
         if (changed)
             patched.insert(rec, buildProps9(props));
+    }
+
+    // Column AutoFilters: every modified view gets its list re-encoded, so a
+    // cleared list clears the filters the file had.
+    const struct { quint16 type; const schedule::UsageViewSettings *settings; } kFiltered[] = {
+        { kViewTypeGantt, &in.ganttView },
+        { kViewTypeTaskUsage, &in.taskUsageView },
+        { kViewTypeResourceUsage, &in.resourceUsageView },
+        { kViewTypeResourceSheet, &in.resourceSheetView },
+    };
+    const QDateTime stamp(in.statusDate.isValid() ? in.statusDate.date() : QDate::currentDate(),
+                          in.defaultStartTime.isValid() ? in.defaultStartTime : QTime(8, 0));
+    for (const auto &v : kFiltered) {
+        if (!v.settings->modified)
+            continue;
+        const int uid = findViewUid(fixedMeta, fixedData, v.type);
+        const int rec = uid >= 0 ? recordForView(uid) : -1;
+        if (rec < 0)
+            continue;
+        Props9 props;
+        const bool parsed = patched.contains(rec)
+            ? parseProps9(patched.value(rec), &props)
+            : parseRecordProps(rec, &props);
+        if (!parsed)
+            continue;
+        PropsItem *item = props.find(AutoFilterCodec::kPropsKey);
+        if (!item && v.settings->autoFilters.isEmpty())
+            continue;
+        const QByteArray data = AutoFilterCodec::encode(v.settings->autoFilters, stamp);
+        if (item && AutoFilterCodec::decode(item->data) == v.settings->autoFilters)
+            continue;   // unchanged: keep Project's own bytes
+        if (item) {
+            item->data = data;
+        } else {
+            PropsItem added;
+            added.key = AutoFilterCodec::kPropsKey;
+            added.flags = 1;
+            added.data = data;
+            props.items.append(added);
+        }
+        patched.insert(rec, buildProps9(props));
     }
 
     if (patched.isEmpty())
