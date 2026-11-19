@@ -116,5 +116,5 @@ QString MppIO::errorString() const { return d->error; }
 extern "C" {
 MppIO *scheduleio_create() { return new MppIO(); }
 void   scheduleio_destroy(MppIO *io) { delete io; }
-const char *scheduleio_version() { return "0.1.0"; }
+const char *scheduleio_version() { return "0.1.1"; }
 }

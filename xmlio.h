@@ -47,7 +47,7 @@ private:
 extern "C" {
 SCHEDULEIO_EXPORT XmlIO *xmlio_create();
 SCHEDULEIO_EXPORT void   xmlio_destroy(XmlIO *io);
-SCHEDULEIO_EXPORT const char *xmlio_version();   // library version string, e.g. "0.1.0"
+SCHEDULEIO_EXPORT const char *xmlio_version();   // library version string, e.g. "0.1.1"
 }
 
 #endif // XMLIO_H

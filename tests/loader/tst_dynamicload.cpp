@@ -37,7 +37,7 @@ void TstDynamicLoad::loadsAndResolvesFactory()
     QVERIFY(destroy);
     QVERIFY(version);
 
-    QCOMPARE(QString::fromLatin1(version()), QStringLiteral("0.1.0"));
+    QCOMPARE(QString::fromLatin1(version()), QStringLiteral("0.1.1"));
 
     MppIO *io = create();
     QVERIFY(io != nullptr);
