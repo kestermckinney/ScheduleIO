@@ -4,6 +4,8 @@
 #ifndef CUSTOMFIELDDEFS_H
 #define CUSTOMFIELDDEFS_H
 
+#include "scheduleio_export.h"
+
 #include <QByteArray>
 #include <QHash>
 #include <QList>
@@ -139,9 +141,9 @@ QByteArray newGuid();
 // PjComparison <-> the model's rule names ("gt", "eq", "contains", ...); -1 /
 // empty for none. PjIndicator <-> image names ("sphere-red", "flag-lime",
 // "check-mark"; also ok / warning / critical); 0 / empty for none.
-int comparisonCode(const QString &name);
+SCHEDULEIO_EXPORT int comparisonCode(const QString &name);
 QString comparisonName(int code);
-quint32 imageCode(const QString &name);
+SCHEDULEIO_EXPORT quint32 imageCode(const QString &name);
 QString imageName(quint32 code);
 QStringList imageNames();
 
