@@ -4,6 +4,7 @@
 #include "ole/compoundfile.h"
 
 #include <QTest>
+#include <QtEndian>
 
 class TstCompoundFile : public QObject
 {
@@ -13,6 +14,7 @@ private slots:
     void roundTripMiniStreams();
     void roundTripBigStreamCrossesMiniCutoff();
     void roundTripNestedStorages();
+    void roundTripLargeFileNeedsDifat();
     void garbageDoesNotCrash_data();
     void garbageDoesNotCrash();
 };
@@ -81,6 +83,36 @@ void TstCompoundFile::roundTripNestedStorages()
                             QStringLiteral("leaf") }), QByteArray("deep"));
     QCOMPARE(r.readStream({ QStringLiteral("A"), QStringLiteral("sibling") }), QByteArray("flat"));
     QVERIFY(r.childNames({ QStringLiteral("A") }).contains(QStringLiteral("B")));
+}
+
+void TstCompoundFile::roundTripLargeFileNeedsDifat()
+{
+    // Past 109 FAT sectors (~6.8 MB) the header can no longer list every FAT
+    // sector and the writer has to chain DIFAT sectors. A large schedule hit
+    // this: the writer used to return no data at all. 20 MB needs ~320 FAT
+    // sectors, so two DIFAT sectors -- covering the chain link as well.
+    QByteArray big(20 * 1024 * 1024, '\0');
+    for (int i = 0; i < big.size(); ++i)
+        big[i] = static_cast<char>((i * 31 + (i >> 9)) & 0xFF);
+    QByteArray other(300000, '\0');
+    for (int i = 0; i < other.size(); ++i)
+        other[i] = static_cast<char>((i * 7) & 0xFF);
+
+    CompoundFile w;
+    w.addStream({ QStringLiteral("Project"), QStringLiteral("big") }, big);
+    w.addStream({ QStringLiteral("Project"), QStringLiteral("other") }, other);
+    w.addStream({ QStringLiteral("Project"), QStringLiteral("small") }, QByteArray("tiny"));
+    const QByteArray bytes = w.toByteArray();
+    QVERIFY(!bytes.isEmpty());
+    QVERIFY(qFromLittleEndian<quint32>(
+                reinterpret_cast<const uchar *>(bytes.constData() + 0x48)) >= 2);
+
+    CompoundFile r;
+    QVERIFY2(r.openFromData(bytes), qPrintable(r.errorString()));
+    QVERIFY(r.readStream({ QStringLiteral("Project"), QStringLiteral("big") }) == big);
+    QVERIFY(r.readStream({ QStringLiteral("Project"), QStringLiteral("other") }) == other);
+    QCOMPARE(r.readStream({ QStringLiteral("Project"), QStringLiteral("small") }),
+             QByteArray("tiny"));
 }
 
 void TstCompoundFile::garbageDoesNotCrash_data()

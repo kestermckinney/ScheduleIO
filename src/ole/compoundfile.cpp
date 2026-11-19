@@ -13,6 +13,7 @@ namespace {
 constexpr quint32 kEndOfChain = 0xFFFFFFFE;
 constexpr quint32 kFreeSect   = 0xFFFFFFFF;
 constexpr quint32 kFatSect    = 0xFFFFFFFD;
+constexpr quint32 kDifSect    = 0xFFFFFFFC;
 constexpr quint32 kNoStream   = 0xFFFFFFFF;
 constexpr quint32 kMaxRegSect = 0xFFFFFFFA;
 
@@ -513,27 +514,51 @@ QByteArray CompoundFile::toByteArray() const
     }
     const quint32 dirStart = allocChain(dirBytes);
 
-    // ---- FAT sectors (fixpoint over their own count) -----------------------
+    // ---- FAT + DIFAT sectors (fixpoint over their own counts) ---------------
+    // The header lists the first 109 FAT sectors; a larger file (over ~6.8 MB)
+    // chains the rest through DIFAT sectors, each holding 127 FAT sector
+    // numbers plus the next DIFAT sector. FAT and DIFAT sectors follow the
+    // body, and the FAT must cover them too, so iterate until both settle.
     const int bodySectors = nextSector;
     const int entriesPerFat = kSectorSize / 4;
+    const int entriesPerDifat = entriesPerFat - 1;
     int fatCount = 0;
+    int difatCount = 0;
     while (true) {
-        const int total = bodySectors + fatCount;
-        const int needed = (total + entriesPerFat - 1) / entriesPerFat;
-        if (needed == fatCount)
+        const int total = bodySectors + fatCount + difatCount;
+        const int fatNeeded = (total + entriesPerFat - 1) / entriesPerFat;
+        const int difatNeeded = fatNeeded > kHeaderDifatCount
+            ? (fatNeeded - kHeaderDifatCount + entriesPerDifat - 1) / entriesPerDifat
+            : 0;
+        if (fatNeeded == fatCount && difatNeeded == difatCount)
             break;
-        fatCount = needed;
+        fatCount = fatNeeded;
+        difatCount = difatNeeded;
     }
-    if (fatCount > kHeaderDifatCount)
-        return QByteArray();   // would need DIFAT sectors; out of scope for the scaffold
+    const int fatStart = bodySectors;
+    const int difatStart = bodySectors + fatCount;
 
     fat.resize(fatCount * entriesPerFat, kFreeSect);
     for (int i = 0; i < fatCount; ++i)
-        fat[bodySectors + i] = kFatSect;
+        fat[fatStart + i] = kFatSect;
+    for (int i = 0; i < difatCount; ++i)
+        fat[difatStart + i] = kDifSect;
 
     QByteArray fatBytes(fatCount * kSectorSize, '\0');
     for (int i = 0; i < static_cast<int>(fat.size()); ++i)
         wrU32(fatBytes, i * 4, fat[i]);
+
+    QByteArray difatBytes(difatCount * kSectorSize, '\0');
+    for (int s = 0; s < difatCount; ++s) {
+        const int base = s * kSectorSize;
+        for (int j = 0; j < entriesPerDifat; ++j) {
+            const int fatIndex = kHeaderDifatCount + s * entriesPerDifat + j;
+            wrU32(difatBytes, base + j * 4,
+                  fatIndex < fatCount ? static_cast<quint32>(fatStart + fatIndex) : kFreeSect);
+        }
+        wrU32(difatBytes, base + entriesPerDifat * 4,
+              s + 1 < difatCount ? static_cast<quint32>(difatStart + s + 1) : kEndOfChain);
+    }
 
     // ---- header ------------------------------------------------------------
     QByteArray header(kSectorSize, '\0');
@@ -548,16 +573,18 @@ QByteArray CompoundFile::toByteArray() const
     wrU32(header, 0x38, kMiniCutoff);
     wrU32(header, 0x3C, miniFatStart);
     wrU32(header, 0x40, numMiniFatSectors);
-    wrU32(header, 0x44, kEndOfChain);   // first DIFAT sector (none)
-    wrU32(header, 0x48, 0);             // number of DIFAT sectors
+    wrU32(header, 0x44, difatCount > 0 ? static_cast<quint32>(difatStart)
+                                       : kEndOfChain);   // first DIFAT sector
+    wrU32(header, 0x48, static_cast<quint32>(difatCount)); // number of DIFAT sectors
     for (int i = 0; i < kHeaderDifatCount; ++i)
         wrU32(header, 0x4C + i * 4,
-              i < fatCount ? static_cast<quint32>(bodySectors + i) : kFreeSect);
+              i < fatCount ? static_cast<quint32>(fatStart + i) : kFreeSect);
 
     QByteArray out;
-    out.reserve(header.size() + bodyBuf.size() + fatBytes.size());
+    out.reserve(header.size() + bodyBuf.size() + fatBytes.size() + difatBytes.size());
     out.append(header);
     out.append(bodyBuf);
     out.append(fatBytes);
+    out.append(difatBytes);
     return out;
 }
