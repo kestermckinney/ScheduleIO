@@ -113,6 +113,47 @@ void appDouble(QByteArray &b, double v)
 { quint64 bits; memcpy(&bits, &v, 8); char t[8];
   qToLittleEndian<quint64>(bits, reinterpret_cast<uchar *>(t)); b.append(t, 8); }
 
+// "   214/CEdl" is Project's saved window state for the project. Its one blob is
+// [u32 size][u32 size-4][u32 size-4][u16 0][u16 1][u32 item count] followed by
+// items [u32 len][u32 key][u32 1][len bytes]. Two items cache the grid's rows:
+// 0x26400035, the displayed task UIDs in row order (ended by 1048000, 0, 0), and
+// 0x2640003d, a per-row record table. The template's copies are empty, and
+// Project trusts an empty row list over the task table: a file with a real
+// outline then opened with a blank grid until Show > All Subtasks. With the
+// two items absent Project rebuilds the rows from the tasks, as it does for
+// any file whose window state it has never seen.
+QByteArray stripCEdlRowCache(const QByteArray &blob)
+{
+    constexpr int kItemsAt = 20;
+    if (blob.size() < kItemsAt || readLeU32(blob, 0) != quint32(blob.size() - 4))
+        return blob;
+    QByteArray items;
+    quint32 count = 0;
+    int off = kItemsAt;
+    while (off + 12 <= blob.size()) {
+        const quint32 len = readLeU32(blob, off);
+        const quint32 key = readLeU32(blob, off + 4);
+        if (len > quint32(blob.size() - off - 12))
+            return blob;   // not the layout we know: leave it alone
+        if (key != 0x26400035u && key != 0x2640003Du) {
+            items.append(blob.constData() + off, int(12 + len));
+            ++count;
+        }
+        off += int(12 + len);
+    }
+    if (off != blob.size() || count == readLeU32(blob, 16))
+        return blob;
+    QByteArray out;
+    const quint32 size = quint32(kItemsAt + items.size());
+    appU32(out, size - 4);
+    appU32(out, size - 8);
+    appU32(out, size - 8);
+    out.append(blob.mid(12, 4));
+    appU32(out, count);
+    out.append(items);
+    return out;
+}
+
 // Tenths of a minute since 1983-12-31 00:00 (wall time; the same base as
 // decodeMppTimestamp), the timestamp form inside Project's time-phased blobs.
 quint32 tenthMinutesSinceEpoch(const QDateTime &dt)
@@ -1371,6 +1412,23 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
         ViewFormat::patchTables(*viewTemplate, cf, viewProject,
                                 viewTemplate == &tpl ? nullptr : &tpl);
     ViewFormat::writeExtensions(cf, viewProject);
+
+    // The window state's cached grid rows describe the template's (empty) task
+    // list; drop them so Project lays the rows out from the tasks we write.
+    // reconcile() below restates the CEdl manifest size in 214/Props.
+    {
+        const QStringList cedl = { viewStorage, QStringLiteral("CEdl") };
+        const QByteArray var2 = cf.readStream(cedl + QStringList{ QStringLiteral("Var2Data") });
+        QByteArray varMeta = cf.readStream(cedl + QStringList{ QStringLiteral("VarMeta") });
+        const QByteArray stripped = stripCEdlRowCache(var2);
+        if (stripped.size() != var2.size() && varMeta.size() >= 24
+            && readLeU32(varMeta, 20) == quint32(var2.size())) {
+            qToLittleEndian<quint32>(quint32(stripped.size()),
+                                     reinterpret_cast<uchar *>(varMeta.data() + 20));
+            cf.addStream(cedl + QStringList{ QStringLiteral("VarMeta") }, varMeta);
+            cf.addStream(cedl + QStringList{ QStringLiteral("Var2Data") }, stripped);
+        }
+    }
 
     // ---- project-level Props (dates) + SummaryInformation (title/author) ------
     QByteArray props = tpl.readStream({ kDataStorage, QStringLiteral("Props") });
