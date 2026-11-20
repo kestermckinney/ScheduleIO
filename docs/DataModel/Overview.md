@@ -1,5 +1,7 @@
 # Data Model Overview
 
+See the [Entity Relationship Diagram](EntityRelationship.md) for the full attribute catalog, primary and foreign keys, and collection relationships.
+
 Every successful `MppIO::open()` or `XmlIO::open()` produces one `schedule::Project`. The project
 owns all model data by value; there are no `QObject` parents, owning pointers, or hidden live file
 handles behind its child collections.

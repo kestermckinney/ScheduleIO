@@ -114,3 +114,8 @@ Bug reports, compatibility fixtures, focused code changes, tests, and documentat
 welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. When reporting a
 format problem, include the ScheduleIO revision, platform, file format/version, exact operation, and
 a minimized non-sensitive fixture when possible.
+
+## Related projects
+
+- [ProjectNotes](https://github.com/kestermckinney/ProjectNotes) — a workspace for project notes, actions, and reporting.
+- [SqliteSyncPro](https://github.com/kestermckinney/SqliteSyncPro) — a Qt library for synchronizing local SQLite data with remote PostgreSQL services.

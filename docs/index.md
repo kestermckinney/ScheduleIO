@@ -83,6 +83,7 @@ macOS, Windows, Qt Creator, test builds, CMake consumer integration, and shared-
 * [XML Interchange](GettingStarted/XmlInterchange.md) — read and write Microsoft Project XML.
 * [Dynamic Loading](GettingStarted/DynamicLoading.md) — load the library at run time.
 * [Data Model — Overview](DataModel/Overview.md) — how the object model is organised.
+* [Entity Relationship Diagram](DataModel/EntityRelationship.md) — every public model attribute, key, and relationship.
 * [API Reference — MppIO Class](API/MppIO.md) — the binary `.mpp` facade.
 * [API Reference — XmlIO Class](API/XmlIO.md) — the Microsoft Project XML facade.
 * [Scheduling Utilities](API/Scheduling.md) — duration, calendar, scheduling, slack, and leveling APIs.

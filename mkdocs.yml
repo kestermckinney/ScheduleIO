@@ -26,6 +26,7 @@ nav:
     - 'Scheduling Utilities': API/Scheduling.md
     - 'Project Reconciliation': API/Reconciliation.md
   - 'Data Model':
+    - 'Entity Relationship Diagram': DataModel/EntityRelationship.md
     - 'Overview': DataModel/Overview.md
     - 'Project': DataModel/Project.md
     - 'Task': DataModel/Task.md
@@ -45,6 +46,10 @@ nav:
     - 'Field Coverage': Reference/FieldCoverage.md
     - 'MPP File Format and Storage': Reference/FileFormat.md
   - 'Contributing': Contributing.md
+
+extra_css:
+  - stylesheets/layout.css
+  - stylesheets/erd.css
 
 markdown_extensions:
   - tables
