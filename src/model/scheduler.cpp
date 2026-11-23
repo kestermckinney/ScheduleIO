@@ -391,6 +391,9 @@ void Scheduler::reschedule(Project &project)
 {
     // The early pass provides anchors for explicit ASAP tasks and establishes
     // the project finish used by ALAP tasks in start-scheduled projects.
+    // Neither pass reshapes the assignment/resource/calendar lists, so one
+    // index serves both and spares a rescan of every assignment per task.
+    const SchedulingCalendar::IndexScope index(project);
     rescheduleForward(project);
     rescheduleBackward(project);
 }

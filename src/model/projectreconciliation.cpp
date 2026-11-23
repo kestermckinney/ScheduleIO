@@ -261,32 +261,34 @@ void reconcileTaskVariance(const Project &project, Task &task)
 
 } // namespace
 
-ProjectReconciliation::Totals ProjectReconciliation::taskTotals(
-    const Project &project, int taskUniqueId)
+namespace {
+
+// One task's share of taskTotals: add an assignment of the task.
+void addAssignmentTotals(ProjectReconciliation::Totals &totals, const Assignment &assignment,
+                         const Resource *resource, bool *hasWorkAssignment)
 {
-    Totals totals;
-    bool hasWorkAssignment = false;
-    for (const Assignment &assignment : project.assignments) {
-        if (assignment.taskUniqueId != taskUniqueId)
-            continue;
-        if (assignment.budget)
-            continue;
-        const Resource *resource = resourceByUid(project, assignment.resourceUniqueId);
-        if (resource && resource->type == Resource::Type::Work) {
-            hasWorkAssignment = true;
-            totals.workMillis += assignment.workMillis;
-            totals.actualWorkMillis += assignment.actualWorkMillis;
-            totals.remainingWorkMillis += assignment.remainingWorkMillis;
-            totals.overtimeWorkMillis += assignment.overtimeWorkMillis;
-            totals.actualOvertimeWorkMillis += assignment.actualOvertimeWorkMillis;
-            totals.remainingOvertimeWorkMillis += assignment.remainingOvertimeWorkMillis;
-        }
-        totals.cost += assignment.cost;
-        totals.actualCost += assignment.actualCost;
-        totals.remainingCost += assignment.remainingCost;
-        totals.overtimeCost += assignment.overtimeCost;
+    if (assignment.budget)
+        return;
+    if (resource && resource->type == Resource::Type::Work) {
+        *hasWorkAssignment = true;
+        totals.workMillis += assignment.workMillis;
+        totals.actualWorkMillis += assignment.actualWorkMillis;
+        totals.remainingWorkMillis += assignment.remainingWorkMillis;
+        totals.overtimeWorkMillis += assignment.overtimeWorkMillis;
+        totals.actualOvertimeWorkMillis += assignment.actualOvertimeWorkMillis;
+        totals.remainingOvertimeWorkMillis += assignment.remainingOvertimeWorkMillis;
     }
-    const Task *task = taskByUid(project, taskUniqueId);
+    totals.cost += assignment.cost;
+    totals.actualCost += assignment.actualCost;
+    totals.remainingCost += assignment.remainingCost;
+    totals.overtimeCost += assignment.overtimeCost;
+}
+
+// The rest of taskTotals once its assignments are added: the task's own work
+// when no work resource carries any, and its fixed cost.
+void addTaskOwnTotals(ProjectReconciliation::Totals &totals, const Task *task,
+                      bool hasWorkAssignment)
+{
     if (task) {
         if (!hasWorkAssignment) {
             totals.workMillis = qMax<qint64>(0, task->workMillis);
@@ -300,6 +302,22 @@ ProjectReconciliation::Totals ProjectReconciliation::taskTotals(
         else
             totals.remainingCost += task->fixedCost;
     }
+}
+
+} // namespace
+
+ProjectReconciliation::Totals ProjectReconciliation::taskTotals(
+    const Project &project, int taskUniqueId)
+{
+    Totals totals;
+    bool hasWorkAssignment = false;
+    for (const Assignment &assignment : project.assignments) {
+        if (assignment.taskUniqueId == taskUniqueId)
+            addAssignmentTotals(totals, assignment,
+                                resourceByUid(project, assignment.resourceUniqueId),
+                                &hasWorkAssignment);
+    }
+    addTaskOwnTotals(totals, taskByUid(project, taskUniqueId), hasWorkAssignment);
     return totals;
 }
 
@@ -403,10 +421,34 @@ void ProjectReconciliation::reconcile(Project &project)
 
     // Leaf tasks derive labor only from Work resources; Material and Cost resources
     // contribute cost but never task work or duration.
+    //
+    // Same result as taskTotals() per task, but with the assignments grouped by
+    // task (and resources by uid) once: calling taskTotals() for every task
+    // rescans every assignment and task each time, which on an 11k-task
+    // schedule made this pass the slowest part of every edit.
+    QHash<int, const Resource *> resourceOf;
+    resourceOf.reserve(project.resources.size());
+    for (const Resource &resource : std::as_const(project.resources))
+        if (!resourceOf.contains(resource.uniqueId))
+            resourceOf.insert(resource.uniqueId, &resource);
+    QHash<int, QVector<const Assignment *>> assignmentsOf;
+    for (const Assignment &assignment : std::as_const(project.assignments))
+        assignmentsOf[assignment.taskUniqueId].append(&assignment);
+    QHash<int, const Task *> firstTaskWithUid;   // taskByUid's first-match rule
+    firstTaskWithUid.reserve(project.tasks.size());
+    for (Task &task : project.tasks)
+        if (!firstTaskWithUid.contains(task.uniqueId))
+            firstTaskWithUid.insert(task.uniqueId, &task);
     for (Task &task : project.tasks) {
         if (task.summary || !task.active)
             continue;
-        const Totals totals = taskTotals(project, task.uniqueId);
+        Totals totals;
+        bool hasWorkAssignment = false;
+        for (const Assignment *assignment : assignmentsOf.value(task.uniqueId))
+            addAssignmentTotals(totals, *assignment,
+                                resourceOf.value(assignment->resourceUniqueId, nullptr),
+                                &hasWorkAssignment);
+        addTaskOwnTotals(totals, firstTaskWithUid.value(task.uniqueId), hasWorkAssignment);
         task.workMillis = totals.workMillis;
         task.actualWorkMillis = totals.actualWorkMillis;
         task.cost = totals.cost;
