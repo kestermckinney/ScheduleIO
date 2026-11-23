@@ -83,11 +83,24 @@ private:
 
     const QVector<Period> &periodsFor(const QDate &d) const;
 
+    // Working milliseconds per day as prefix sums over a date range, built on
+    // first use and grown as needed. workBetween and addWork use it to cross
+    // long spans in one step instead of walking day by day: scheduling asks
+    // for slack out to the project finish for every task, which on a large
+    // schedule is thousands of days per task. Shared by copies (the calendar
+    // never changes after construction), so a calendar passed around by value
+    // builds it once.
+    struct DayWorkTable;
+    bool ensureDayWork(const QDate &first, const QDate &last) const;
+    qint64 workBefore(const QDate &d) const;   // needs ensureDayWork() covering d
+    qint64 workOnDay(const QDate &d, qint64 fromMs, qint64 toMs) const;
+
     QVector<Period> m_week[7];        // resolved weekly periods, index 0=Monday
     QList<Exception> m_exceptions;    // leaf calendar's first (they win)
     QVector<Period> m_none;           // empty list for non-working days
     QList<QSharedPointer<WorkCalendar>> m_intersectionCalendars;
     mutable QVector<Period> m_intersectionScratch;
+    QSharedPointer<DayWorkTable> m_dayWork;
 };
 
 } // namespace schedule

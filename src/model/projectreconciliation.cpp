@@ -304,6 +304,35 @@ void addTaskOwnTotals(ProjectReconciliation::Totals &totals, const Task *task,
     }
 }
 
+// Which tasks' assignments count toward resource totals: active leaves.
+QHash<int, bool> activeLeafTasks(const Project &project)
+{
+    QHash<int, bool> activeTask;
+    activeTask.reserve(project.tasks.size());
+    for (const Task &task : project.tasks)
+        activeTask.insert(task.uniqueId, task.active && !task.summary);
+    return activeTask;
+}
+
+bool countsForResource(const Assignment &assignment, const QHash<int, bool> &activeTask)
+{
+    return !assignment.budget && activeTask.value(assignment.taskUniqueId, false);
+}
+
+void addResourceTotals(ProjectReconciliation::Totals &totals, const Assignment &assignment)
+{
+    totals.workMillis += assignment.workMillis;
+    totals.actualWorkMillis += assignment.actualWorkMillis;
+    totals.remainingWorkMillis += assignment.remainingWorkMillis;
+    totals.overtimeWorkMillis += assignment.overtimeWorkMillis;
+    totals.actualOvertimeWorkMillis += assignment.actualOvertimeWorkMillis;
+    totals.remainingOvertimeWorkMillis += assignment.remainingOvertimeWorkMillis;
+    totals.cost += assignment.cost;
+    totals.actualCost += assignment.actualCost;
+    totals.remainingCost += assignment.remainingCost;
+    totals.overtimeCost += assignment.overtimeCost;
+}
+
 } // namespace
 
 ProjectReconciliation::Totals ProjectReconciliation::taskTotals(
@@ -325,23 +354,11 @@ ProjectReconciliation::Totals ProjectReconciliation::resourceTotals(
     const Project &project, int resourceUniqueId)
 {
     Totals totals;
-    QHash<int, bool> activeTask;
-    for (const Task &task : project.tasks)
-        activeTask.insert(task.uniqueId, task.active && !task.summary);
+    const QHash<int, bool> activeTask = activeLeafTasks(project);
     for (const Assignment &assignment : project.assignments) {
-        if (assignment.resourceUniqueId != resourceUniqueId
-            || assignment.budget || !activeTask.value(assignment.taskUniqueId, false))
-            continue;
-        totals.workMillis += assignment.workMillis;
-        totals.actualWorkMillis += assignment.actualWorkMillis;
-        totals.remainingWorkMillis += assignment.remainingWorkMillis;
-        totals.overtimeWorkMillis += assignment.overtimeWorkMillis;
-        totals.actualOvertimeWorkMillis += assignment.actualOvertimeWorkMillis;
-        totals.remainingOvertimeWorkMillis += assignment.remainingOvertimeWorkMillis;
-        totals.cost += assignment.cost;
-        totals.actualCost += assignment.actualCost;
-        totals.remainingCost += assignment.remainingCost;
-        totals.overtimeCost += assignment.overtimeCost;
+        if (assignment.resourceUniqueId == resourceUniqueId
+            && countsForResource(assignment, activeTask))
+            addResourceTotals(totals, assignment);
     }
     return totals;
 }
@@ -493,8 +510,18 @@ void ProjectReconciliation::reconcile(Project &project)
         reconcileTaskVariance(project, summary);
     }
 
+    // resourceTotals() for every resource in one pass over the assignments,
+    // rather than rebuilding the active-task table and rescanning every
+    // assignment once per resource.
+    QHash<int, Totals> totalsByResource;
+    {
+        const QHash<int, bool> activeTask = activeLeafTasks(project);
+        for (const Assignment &assignment : std::as_const(project.assignments))
+            if (countsForResource(assignment, activeTask))
+                addResourceTotals(totalsByResource[assignment.resourceUniqueId], assignment);
+    }
     for (Resource &resource : project.resources) {
-        const Totals totals = resourceTotals(project, resource.uniqueId);
+        const Totals totals = totalsByResource.value(resource.uniqueId);
         resource.cost = totals.cost;
         resource.actualCost = totals.actualCost;
         resource.remainingCost = totals.remainingCost;

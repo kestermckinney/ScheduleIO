@@ -4,6 +4,7 @@
 #include "model/workcalendar.h"
 #include "model/project.h"
 
+#include <QRandomGenerator>
 #include <QTest>
 
 using schedule::Calendar;
@@ -55,6 +56,7 @@ private slots:
     void inheritsBaseChain();
     void intersectsCalendarsAndExceptions();
     void unknownIdFallsBack();
+    void longSpansMatchTheDayByDayWalk();
 };
 
 void TstWorkCalendar::defaultIsStandardWeek()
@@ -193,6 +195,151 @@ void TstWorkCalendar::unknownIdFallsBack()
     const WorkCalendar cal(p, 42);
     QCOMPARE(cal.workPerDay(), 8 * kHour);
     QVERIFY(cal.isWorkingDay(QDate(2026, 7, 6)));
+}
+
+namespace {
+
+// The day-by-day definitions of workBetween/addWork, from the per-day working
+// times alone. WorkCalendar crosses long spans with a cumulative day table;
+// these are what it has to agree with to the millisecond.
+qint64 msOf(const QTime &t) { return QTime(0, 0).msecsTo(t); }
+QList<QPair<qint64, qint64>> periodsOn(const WorkCalendar &cal, const QDate &d)
+{
+    QList<QPair<qint64, qint64>> out;
+    for (const TimeRange &r : cal.workingTimes(d))
+        out.append({ msOf(r.start), r.end == QTime(0, 0) ? 24 * kHour : msOf(r.end) });
+    return out;
+}
+QDateTime atMs(const QDate &d, qint64 ms)
+{
+    return QDateTime(d, QTime::fromMSecsSinceStartOfDay(int(ms)));
+}
+
+qint64 refWorkBetween(const WorkCalendar &cal, const QDateTime &from, const QDateTime &to)
+{
+    if (to <= from)
+        return 0;
+    qint64 total = 0;
+    for (QDate d = from.date(); d <= to.date(); d = d.addDays(1)) {
+        const qint64 lo = d == from.date() ? msOf(from.time()) : 0;
+        const qint64 hi = d == to.date() ? msOf(to.time()) : 24 * kHour;
+        for (const auto &p : periodsOn(cal, d)) {
+            const qint64 b = qMax(lo, p.first), e = qMin(hi, p.second);
+            if (e > b)
+                total += e - b;
+        }
+    }
+    return total;
+}
+
+QDateTime refAddWork(const WorkCalendar &cal, const QDateTime &from, qint64 millis)
+{
+    if (millis == 0)
+        return cal.nextWorkStart(from);
+    if (millis > 0) {
+        const QDateTime cur = cal.nextWorkStart(from);
+        QDate d = cur.date();
+        qint64 ms = msOf(cur.time());
+        qint64 remaining = millis;
+        for (;;) {
+            for (const auto &p : periodsOn(cal, d)) {
+                if (ms >= p.second)
+                    continue;
+                const qint64 begin = qMax(ms, p.first);
+                if (remaining <= p.second - begin)
+                    return atMs(d, begin + remaining);
+                remaining -= p.second - begin;
+            }
+            d = d.addDays(1);
+            ms = 0;
+        }
+    }
+    const QDateTime cur = cal.prevWorkEnd(from);
+    QDate d = cur.date();
+    qint64 ms = msOf(cur.time());
+    qint64 remaining = -millis;
+    for (;;) {
+        const auto periods = periodsOn(cal, d);
+        for (int i = periods.size() - 1; i >= 0; --i) {
+            const auto &p = periods.at(i);
+            if (ms <= p.first)
+                continue;
+            const qint64 end = qMin(ms, p.second);
+            if (remaining <= end - p.first)
+                return atMs(d, end - remaining);
+            remaining -= end - p.first;
+        }
+        d = d.addDays(-1);
+        ms = 24 * kHour;
+    }
+}
+
+} // namespace
+
+// Slack runs out to the project finish for every task, so scheduling asks for
+// work over spans of years. Those go through the day table; every answer has
+// to match walking the days one by one -- holidays, a recurring holiday, a
+// working Saturday, a resource calendar intersected in, exact whole-day
+// amounts that end on a period boundary, and backwards as well as forwards.
+void TstWorkCalendar::longSpansMatchTheDayByDayWalk()
+{
+    Project p;
+    Calendar standard;
+    standard.uniqueId = 1;
+    standard.workingDayMask = 0x1F;
+    standard.workingTimes.resize(7);
+    for (int i = 0; i < 5; ++i)
+        standard.workingTimes[i] = { range(8, 0, 12, 0), range(13, 0, 17, 0) };
+    CalendarException christmas;   // every 25 December
+    christmas.fromDate = QDate(2020, 12, 25);
+    christmas.toDate = QDate(2035, 12, 25);
+    christmas.recurrence = CalendarException::Recurrence::YearlyByDate;
+    christmas.month = 12;
+    christmas.dayOfMonth = 25;
+    standard.exceptions.append(christmas);
+    CalendarException shutdown;   // a two-week shutdown
+    shutdown.fromDate = QDate(2027, 8, 2);
+    shutdown.toDate = QDate(2027, 8, 13);
+    standard.exceptions.append(shutdown);
+    CalendarException crunch;   // a working Saturday
+    crunch.fromDate = QDate(2026, 10, 3);
+    crunch.toDate = QDate(2026, 10, 3);
+    crunch.working = true;
+    crunch.workingTimes = { range(9, 0, 15, 0) };
+    standard.exceptions.append(crunch);
+    p.calendars.append(standard);
+    Calendar resource = fourTens();
+    CalendarException vacation;
+    vacation.fromDate = QDate(2028, 3, 6);
+    vacation.toDate = QDate(2028, 3, 17);
+    resource.exceptions.append(vacation);
+    p.calendars.append(resource);
+
+    // One instance per calendar for the whole run, so each table grows
+    // forwards and backwards as the random dates wander.
+    const WorkCalendar calendars[] = {
+        WorkCalendar(p, 1),
+        WorkCalendar::intersection({ WorkCalendar(p, 1), WorkCalendar(p, 3) }),
+    };
+    QRandomGenerator rng(20261123);
+    const QDate base(2024, 1, 1);
+    for (const WorkCalendar &cal : calendars) {
+        for (int i = 0; i < 1500; ++i) {
+            const QDateTime from(base.addDays(rng.bounded(6 * 365)),
+                                 QTime(rng.bounded(24), rng.bounded(4) * 15));
+            const QDateTime to(from.date().addDays(rng.bounded(3 * 365)),
+                               QTime(rng.bounded(24), rng.bounded(4) * 15));
+            QCOMPARE(cal.workBetween(from, to), refWorkBetween(cal, from, to));
+            QCOMPARE(cal.workBetween(to, from), refWorkBetween(cal, to, from));
+
+            // Amounts up to ~2 working years, half of them whole 8h/10h days.
+            qint64 amount = qint64(rng.bounded(4000)) * kHour / 4;
+            if (i % 2)
+                amount = qint64(rng.bounded(500) + 1) * (cal.workPerDay());
+            QCOMPARE(cal.addWork(from, amount), refAddWork(cal, from, amount));
+            QCOMPARE(cal.addWork(from, -amount), refAddWork(cal, from, -amount));
+        }
+    }
 }
 
 QTEST_MAIN(TstWorkCalendar)
