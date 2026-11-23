@@ -7,6 +7,7 @@
 #include <QSet>
 
 #include <algorithm>
+#include <atomic>
 #include <unordered_map>
 
 namespace schedule {
@@ -22,6 +23,10 @@ inline qint64 msOfDay(const QDateTime &dt) { return QTime(0, 0).msecsTo(dt.time(
 // schedule only ever lands on a few thousand distinct (day, time) pairs. So
 // each pair is built once per thread and copied after that: the same value,
 // without paying for the conversion again.
+// Bumped by WorkCalendar::clearLocalTimeCache(); each thread compares it with
+// the generation its cache was filled under.
+std::atomic<int> g_localTimeGeneration{ 0 };
+
 QDateTime at(const QDate &d, qint64 ms)
 {
     struct Key {
@@ -36,6 +41,12 @@ QDateTime at(const QDate &d, qint64 ms)
         }
     };
     thread_local std::unordered_map<Key, QDateTime, KeyHash> cache;
+    thread_local int cacheGeneration = 0;
+    const int generation = g_localTimeGeneration.load(std::memory_order_relaxed);
+    if (generation != cacheGeneration) {
+        cache.clear();
+        cacheGeneration = generation;
+    }
     const Key key{ d.toJulianDay(), ms };
     const auto it = cache.find(key);
     if (it != cache.end())
@@ -510,6 +521,11 @@ qint64 WorkCalendar::workBetween(const QDateTime &from, const QDateTime &to) con
         }
     }
     return total;
+}
+
+void WorkCalendar::clearLocalTimeCache()
+{
+    g_localTimeGeneration.fetch_add(1, std::memory_order_relaxed);
 }
 
 qint64 WorkCalendar::workPerDay() const

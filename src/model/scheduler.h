@@ -47,6 +47,14 @@ public:
     // FROM T).
     static bool reachable(const Project &project, int fromUid, int toUid);
 
+    // True when one of the two tasks is an outline ancestor of the other (a
+    // summary and one of its own subtasks, at any depth), by display-ID order.
+    // Microsoft Project refuses to link such a pair ("You cannot link a summary
+    // task to its subtasks"); the scheduling passes ignore any such link that
+    // exists anyway -- e.g. after an indent -- since a summary's dates roll up
+    // from the very subtask the link would move.
+    static bool isOutlineRelated(const Project &project, int aUid, int bUid);
+
     // Recompute start/finish of every auto-scheduled, non-summary task from
     // dependencies and lag (FS/SS/FF/SF), then place ALAP/date-constrained
     // tasks from the project finish when the project schedules backward.

@@ -64,6 +64,13 @@ public:
     // for duration display in "days". The Standard week gives 8h.
     qint64 workPerDay() const;
 
+    // The calendar functions reuse the local date-times they build (building
+    // one runs the time-zone conversion, the main cost of scheduling a large
+    // project). Call this when the system time zone or its rules change, so
+    // later results are built under the new rules -- every thread's copies are
+    // dropped on its next use.
+    static void clearLocalTimeCache();
+
 public: // exposed for deterministic recurrence evaluation helpers
     // One date-range override, leaf-most calendar first in m_exceptions.
     struct Exception {
