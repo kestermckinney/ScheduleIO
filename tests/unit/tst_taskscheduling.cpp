@@ -83,6 +83,7 @@ private slots:
     void addToEmptyTask_bringsOwnWork();
     void workOnResourcelessTask_holdsOnTask();
     void assignAfterWork_inheritsTaskWork();
+    void enteredWorkHeldThroughStaffingThenReleased();
     void materialConsumptionDoesNotCreateLaborOrDuration();
     void resourceCalendarMovesAssignmentAndTask();
     void ignoreResourceCalendarUsesTaskCalendarOnly();
@@ -231,6 +232,37 @@ void TstTaskScheduling::assignAfterWork_inheritsTaskWork()
     QCOMPARE(assn(p, newUid)->workMillis, 16 * kHour);
     QCOMPARE(TaskScheduling::taskWork(p, 1), 16 * kHour);
     QCOMPARE(task(p).durationMillis, 16 * kHour);
+}
+
+void TstTaskScheduling::enteredWorkHeldThroughStaffingThenReleased()
+{
+    // Fixed Duration, NOT effort-driven: Work typed on a resourceless task is
+    // held through the whole staffing (each resource added separately), not
+    // grown by "duration x units" per newcomer. Once an assignment is shaped by
+    // hand the hold ends and the non-effort-driven "work grows" rule resumes.
+    Project p = makeProject(1, false);          // Fixed Duration, one work resource
+    TaskScheduling::removeAssignment(p, 100);   // back to no resources
+    Resource r3; r3.uniqueId = 12; r3.name = QStringLiteral("Cy");
+    p.resources.append(r3);
+
+    task(p).durationMillis = 4 * kHour;         // a short fixed span
+    TaskScheduling::setWork(p, 1, 120 * kHour);
+    QCOMPARE(task(p).enteredWorkMillis, 120 * kHour);
+
+    const int a1 = TaskScheduling::addAssignment(p, 1, 10, 0.5);
+    QCOMPARE(TaskScheduling::taskWork(p, 1), 120 * kHour);   // held, not 2h
+    const int a2 = TaskScheduling::addAssignment(p, 1, 11, 0.5);
+    QCOMPARE(TaskScheduling::taskWork(p, 1), 120 * kHour);   // still held (was 122h bug)
+    QCOMPARE(task(p).durationMillis, 4 * kHour);             // fixed span kept
+    QVERIFY(a1 > 0 && a2 > 0);
+
+    // Shape an assignment by hand -> the entered-Work hold is released.
+    TaskScheduling::setAssignmentUnits(p, a1, 1.0);
+    QCOMPARE(task(p).enteredWorkMillis, qint64(-1));
+    const qint64 before = TaskScheduling::taskWork(p, 1);
+    TaskScheduling::addAssignment(p, 1, 12, 1.0);
+    QVERIFY2(TaskScheduling::taskWork(p, 1) > before,
+             "non-effort-driven task grows work once staffing is done");
 }
 
 void TstTaskScheduling::materialConsumptionDoesNotCreateLaborOrDuration()

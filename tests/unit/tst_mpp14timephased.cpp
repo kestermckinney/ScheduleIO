@@ -40,6 +40,8 @@ private slots:
     void assignmentPeriodEditReconcilesAggregates();
     void actualOvertimeRoundTrips();
     void materialQuantityUsesProjectTimephasedStorage();
+    void baselineBlobsMatchProject();
+    void taskBaselineSumsAssignments();
 };
 
 void TstMpp14Timephased::nonFlatWorkRoundTrips()
@@ -166,6 +168,74 @@ void TstMpp14Timephased::materialQuantityUsesProjectTimephasedStorage()
         blob, assignment, calendar, {});
     QCOMPARE(total(decoded, schedule::TimephasedValue::RemainingWork),
              qint64(7.25 * kHour));
+}
+
+// Ground truth: the assignment baseline blobs (keys 52/53) Project 2016 wrote
+// for a 120 h assignment, 23 Sep 08:00 - 13 Oct 17:00 2026, $5280 at $44/h,
+// after Project > Set Baseline. Our encoder must produce the same bytes
+// (bar the cost blob's uninitialised marker words), or Project reads no
+// baseline spread and shows BCWS/SV/CPI of 0 -- or, with the old 1984 epoch,
+// every baseline day one day early.
+void TstMpp14Timephased::baselineBlobsMatchProject()
+{
+    const schedule::WorkCalendar calendar;
+    const QDateTime start(QDate(2026, 9, 23), QTime(8, 0));
+    const QDateTime finish(QDate(2026, 10, 13), QTime(17, 0));
+    schedule::TimephasedValue work;
+    work.type = schedule::TimephasedValue::BaselineWork;
+    work.start = start; work.finish = finish; work.unit = 1;
+    work.value = QStringLiteral("PT120H0M0S");
+    schedule::TimephasedValue cost = work;
+    cost.type = schedule::TimephasedValue::BaselineCost;
+    cost.value = QStringLiteral("5280");
+
+    const QByteArray projectWork = QByteArray::fromHex(
+        "030010001c0000000000000040775b41000000004019010000000000"
+        "8dedb5a0f7c6b0be00000000010000008058650d"
+        "0000000040775b41401901000000000098d2690d"
+        "0000000040775b410000000001000000f7750a34");
+    QCOMPARE(Mpp14Timephased::encodeBaselineWork({work}, 0, &calendar).toHex(),
+             projectWork.toHex());
+
+    QByteArray projectCost = QByteArray::fromHex(
+        "03000400100000000000000000000000"
+        "0100efc5530000008dedb5a0f7c6b0be8058650d"
+        "0000efc55300000000000000001d204198d2690d"
+        "010020000000000000000000001d2041f7750a34");
+    // Project leaves garbage in the start/data marker words; we write 0.
+    for (int record : {16, 36})
+        projectCost.replace(record + 2, 4, QByteArray(4, '\0'));
+    QCOMPARE(Mpp14Timephased::encodeBaselineCost({cost}, 0).toHex(),
+             projectCost.toHex());
+
+    const auto decodedWork = Mpp14Timephased::decodeBaselineWork(projectWork, 1, 0);
+    QCOMPARE(decodedWork.size(), 1);
+    QCOMPARE(decodedWork.at(0).start, start);
+    QCOMPARE(decodedWork.at(0).finish, finish);
+    QCOMPARE(decodedWork.at(0).durationMillis(), 120 * kHour);
+    const auto decodedCost = Mpp14Timephased::decodeBaselineCost(projectCost, 1, 0);
+    QCOMPARE(decodedCost.size(), 1);
+    QCOMPARE(decodedCost.at(0).start, start);
+    QCOMPARE(decodedCost.at(0).amount(), 5280.0);
+}
+
+void TstMpp14Timephased::taskBaselineSumsAssignments()
+{
+    // Two resources on the same days: the task spread is their per-period sum.
+    QList<schedule::TimephasedValue> values;
+    for (int resource = 0; resource < 2; ++resource)
+        for (int day = 0; day < 2; ++day) {
+            schedule::TimephasedValue value = bucket(
+                schedule::TimephasedValue::BaselineCost, QDate(2026, 9, 22).addDays(day), 0);
+            value.value = QStringLiteral("352");
+            values.append(value);
+        }
+    const auto summed = Mpp14Timephased::sumBaselineValues(
+        values, schedule::TimephasedValue::BaselineCost, 0, 42);
+    QCOMPARE(summed.size(), 2);
+    QCOMPARE(summed.at(0).amount(), 704.0);
+    QCOMPARE(summed.at(1).amount(), 704.0);
+    QCOMPARE(summed.at(1).uniqueId, 42);
 }
 
 QTEST_MAIN(TstMpp14Timephased)

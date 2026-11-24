@@ -65,5 +65,5 @@ QString XmlIO::errorString() const { return d->error; }
 extern "C" {
 XmlIO *xmlio_create() { return new XmlIO(); }
 void   xmlio_destroy(XmlIO *io) { delete io; }
-const char *xmlio_version() { return "0.1.0"; }
+const char *xmlio_version() { return "0.1.1"; }
 }

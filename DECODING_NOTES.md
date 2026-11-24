@@ -751,3 +751,105 @@ single-option MS Project saves): "Autolink inserted or moved tasks",
 save-counter / GUID / title items), and "Show project summary task" (a per-view
 flag in "   214/CV_iew"). "New tasks created Manual/Auto" has no
 `MSProject.Application` COM member and could not be probed automatically.
+
+## Task progress: Stop/Resume, the %-complete curve, assignment state (2026-09-27)
+
+Found because an 8%-complete task written by `MppIO` opened in Project 2016 with a
+full-length progress bar (Stop = Resume = Finish). Project draws the Progress bar
+to Complete Through; three things feed it, and all three must match what Project
+writes itself (oracle: `Task.PercentComplete = 8` via COM, then `FileSaveAs`):
+
+- Task fixed fields **RESUME (99, u32@132)** and **STOP (100, u32@136)**: NA when
+  unstarted; both = Actual Finish when complete; otherwise Stop = Actual Start +
+  Actual Duration on the task calendar and Resume = the next working instant
+  (a Stop at 17:00 resumes 08:00 the next working day).
+- Task var key **350**, the %-complete curve: 16-byte header
+  `03 00 04 00 10 00 00 00` + 8 zero bytes, then three 20-byte points
+  `{u32 kind, u32 0, f64 percent, u32 date}`: `(1, 32768.0, Actual Start)`,
+  `(0, pct, Stop)`, `(1, pct, 0x340A75F7)`. Dates are tenths of a minute since
+  1983-12-31 00:00 (same base as `decodeMppTimestamp`). Absent at 0%.
+- Assignment FixedMeta item byte 10: **0x2B while the assignment is in progress**
+  (actual > 0, remaining > 0); completed rows use 0x3B. With bit 0x10 set on a
+  partial assignment Project treats its work as done through the Finish; this bit
+  alone was what forced Stop = Finish (bisected with same-size patches).
+- Task FixedMeta item byte 16 bit **0x10** (tail byte 8): the resource-work
+  bit. Without it Project keeps assignment totals but spreads none of their
+  work over time: every Usage-view day cell and `TimeScaleData` value is blank.
+  Project sets it on every leaf with a real resource assignment and on every
+  summary except UID 0 (all fixtures: 174/174 and 53/53). Bisected 2026-09-27 by
+  swapping whole streams between 04_resources_assignments and our resave
+  (`tests/probe/swap_streams`), then same-size patches.
+- Calendar Fixed2Data (48 bytes) is `[calendar GUID][owning resource GUID][base
+  calendar GUID]`. A resource calendar's GUID *is* its resource's GUID (the
+  resource row's CALENDAR_GUID at Fixed2 +24 points at it); base calendars get
+  their own GUID and zeros after it. All-zero GUIDs make Project's native save
+  rebind resource calendars (one resource loses its calendar, another's name
+  is copied onto it).
+
+## Table column records (`   214/CTable`, 2026-09-27)
+
+Adding a table (seen when Project first shows Task Usage in a file that never
+had it): FixedData gets another 230-byte record (uid @0, UTF-16 name @4,
+resource flag u16 @108, per-table GUID bytes around @214). FixedMeta gets a
+10-byte item `[u32 0x00010000][u32 data offset][u16 0x00df]`, and its header
+count @8 and data size @12 are bumped. VarMeta/Var2Data get the column blob as
+type 6 / 0x2040. The new uid is max+1 and is repeated in the blob's first u32.
+Project ignores a file's table if the file has no *view* record for it: it
+copies view and table from its global template instead.
+
+Resource rows need WORK(13), ACTUAL_WORK(14) and REMAINING_WORK(22) stored in
+the resource record; Project displays the stored values (0 hrs when absent).
+
+A table's columns are one var blob (type 8/7/6) of the CTable row: a 12-byte
+header whose u16 at +4 is the column count - 1, then 115-byte column records:
+`+0 u32 field id`, `+4 u8 width (characters)`, `+5 0x10 | title alignment`,
+`+6 0x08`, `+7 data alignment (0 left, 1 centre, 2 right)`, `+8 0x08` (0x88 when
+a title alignment is stored), `+9 0x01` (| 0x02 with a custom title), `+13` UTF-16
+title (100 bytes, empty = the field's name). Project 2016's stock Entry table:
+ID, Indicators, Task Mode (1280), Name ("Task Name"), Duration **1287**, Start
+**1285**, Finish **1286**, Predecessors, Resource Names. It uses these
+manual-aware ids rather than 29/35/36. The "Add New Column" slot isn't a record.
+Decoded by diffing the stock table against one edited through
+`TaskTables("Entry").TableFields.Add/Delete`.
+
+## Applied view filter and group (FILTER_NAME / group items, 2026-11-17)
+
+Every view keeps its own filter and group, in its CV_iew properties blob (var
+type 6). View types (u16@112 of the 138-byte record) seen: Gantt 1, Network
+Diagram 2, Resource Sheet 7, Team Planner 9, Calendar 13, Task Usage 14,
+Resource Usage 15, Timeline 16.
+
+**Filter**: Props9 item **0x2240000B** (574619659, MPXJ FILTER_NAME), right
+after TABLE_NAME (0x2240000A): null-terminated UTF-16, flags 1. A view never
+filtered holds the hotkey spelling ("&All Tasks", "&All Resources"); after
+`FilterApply` Project writes the plain name ("Critical", "Milestones",
+"Overallocated Resources", "Resources - Material", ...). The split "Gantt with
+Timeline" record's item holds its other pane's view name ("Time&line").
+Applying a filter also copies its definition into `   214/CFilter` (230-byte
+FixedData record: uid, UTF-16 name with hotkey "&Critical", u16@108 1 for a
+resource filter; criteria in the var data). Project doesn't need it: a file
+naming a built-in filter the file lacks opens with that filter applied,
+resolved from the global template.
+
+**Group**: Props9 item **0x22400018** holds the group's name (UTF-16, flags 1,
+"No Group" when none) and **0x2240001D** an 83-byte copy of its definition:
+u32@0 the group's uid in `   214/CGrouping`, u8@5 1 for the Status group,
+u8@10 1 when grouped (u8@9 1 for No Group), u32@12 the field (0x0B400013
+Critical, 0x0B40021F Status, 0x0B400020 % Complete, 0x0B400500 Task Mode,
+0x0B400055 Outline Level, 0x0C40012C Resource Type), u8@16 1 for a task field,
+u8@21 1, the group header's cell colour 0xC1F6FF at @34, u8@46 0x81, u8@51 the
+interval (2 = Project's 0% / 1-99% / 100% bands). `GroupApply` copies the group
+into CGrouping (same 230-byte record shape as CTable/CFilter, u16@108 1 for a
+resource group; its type-6 var record is the same 83 bytes). A built-in group
+shows by name alone, but a **custom group (Outline Level) shows only with its
+CGrouping record** -- without it Project falls back to No Group (checked on
+dpr2hw3). The writer copies the source file's CFilter and CGrouping with its
+views, brings a missing group's record in from `src/serializer/mpp14views.mpp`
+(a Project file that has shown every modelled view and applied every group
+ScheduleIO writes), and points the view's definition at its uid
+(`ViewFormat::importGroups`). A view the file lacks (Network Diagram isn't in
+the template) is copied in from the same stock when it needs a filter or group.
+
+Samples: `tests/fixtures/mpp_samples/viewfilter` and `viewgroup` (ScheduleVault's
+`tools/viewfilter-samples-remote.vbs`, `viewgroup-samples-remote.vbs`); test
+`tst_viewfilter`.

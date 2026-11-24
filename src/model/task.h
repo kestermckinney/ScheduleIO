@@ -66,6 +66,14 @@ public:
                                  // assigned (MS Project keeps a task Work independent
                                  // of assignments). Mirrors the assignment total when
                                  // resources exist -- see TaskScheduling.
+    // Transient (not serialised): the Work value while the task still had no work
+    // resources. Staffing the task -- any number of resources, added together or
+    // one at a time -- holds this total (duration/units flex to fit), the way MS
+    // Project does when resources are assigned in one action. Reset to -1 once the
+    // work is assignment-shaped (an assignment's work or units edited) or the task
+    // is progressed; a reloaded file starts at -1 and re-adopts the stored Work on
+    // the first schedule while it stays resourceless.
+    qint64 enteredWorkMillis = -1;
     double percentComplete = 0.0;
     double physicalPercentComplete = 0.0; // 0..1, independent of duration progress
     int earnedValueMethod = 0;            // 0 = % Complete, 1 = Physical % Complete

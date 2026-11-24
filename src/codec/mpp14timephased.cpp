@@ -178,11 +178,21 @@ double actualRate(const schedule::TimephasedValue &value,
     return (double(value.durationMillis()) / double(elapsed)) * 10000.0;
 }
 
-qint32 wallTimestampTenths(const QDateTime &value)
+// Baseline blob timestamps count tenths of a minute from 1983-12-31 (the
+// calendar/availability epoch), one day before the cost-rate epoch that
+// FieldDecoders' tenths codec uses. With that codec Project read every
+// baseline day one day early (verified with TimeScaleData, 2026-09-27).
+constexpr qint32 kBaselineEpochShiftTenths = 24 * 60 * 10;
+
+qint32 baselineTimestampTenths(const QDateTime &value)
 {
-    // encodeTimestampTenths reads wall clock directly now, so there is nothing left to
-    // re-stamp here; the name is kept because it says what the callers want.
-    return FieldDecoders::encodeTimestampTenths(value);
+    return FieldDecoders::encodeTimestampTenths(value) + kBaselineEpochShiftTenths;
+}
+
+QDateTime decodeBaselineTimestamp(const QByteArray &blob, int offset)
+{
+    const QDateTime value = FieldDecoders::decodeTimestampTenths(blob, offset);
+    return value.isValid() ? value.addDays(-1) : value;
 }
 
 } // namespace
@@ -422,14 +432,14 @@ QList<schedule::TimephasedValue> decodeBaselineWork(
     if (blob.size() < 48 || !FieldDecoders::readU16(blob, 0, &blockCount)
         || blockCount < 3)
         return out;
-    QDateTime start = FieldDecoders::decodeTimestampTenths(blob, 44);
+    QDateTime start = decodeBaselineTimestamp(blob, 44);
     double previous = 0.0;
     int offset = 48;
     for (int i = 0; i < int(blockCount) - 2 && offset + 20 <= blob.size(); ++i, offset += 20) {
         double cumulative = 0.0;
         if (!FieldDecoders::readDouble(blob, offset, &cumulative))
             break;
-        const QDateTime finish = FieldDecoders::decodeTimestampTenths(blob, offset + 16);
+        const QDateTime finish = decodeBaselineTimestamp(blob, offset + 16);
         const qint64 work = qint64(std::llround((cumulative - previous) / 1000.0 * kMinuteMs));
         if (start.isValid() && finish > start && work > 0) {
             schedule::TimephasedValue value;
@@ -454,14 +464,14 @@ QList<schedule::TimephasedValue> decodeBaselineCost(
     if (blob.size() < 36 || !FieldDecoders::readU16(blob, 0, &blockCount)
         || blockCount < 3)
         return out;
-    QDateTime start = FieldDecoders::decodeTimestampTenths(blob, 32);
+    QDateTime start = decodeBaselineTimestamp(blob, 32);
     double previous = 0.0;
     int offset = 36;
     for (int i = 0; i < int(blockCount) - 2 && offset + 20 <= blob.size(); ++i, offset += 20) {
         double cumulative = 0.0;
         if (!FieldDecoders::readDouble(blob, offset + 8, &cumulative))
             break;
-        const QDateTime finish = FieldDecoders::decodeTimestampTenths(blob, offset + 16);
+        const QDateTime finish = decodeBaselineTimestamp(blob, offset + 16);
         const double cost = (cumulative - previous) / 100.0;
         if (start.isValid() && finish > start && cost != 0.0) {
             schedule::TimephasedValue value;
@@ -478,39 +488,81 @@ QList<schedule::TimephasedValue> decodeBaselineCost(
     return out;
 }
 
+// Baseline timephased blobs, byte-for-byte as Project 2016 writes them
+// (assignment keys 52/53, task keys 173/174; RE'd 2026-09-27 from a file
+// Project baselined itself). Both are a run of 20-byte records headed by a
+// start record and closed by an end record; `count` covers start, data and end.
+// Work blob: 8-byte header [count][0x10][0x1c][0], a summary record, then
+//   [cumulative work f64 (minutes*1000)][segment work u32 (tenths of minutes)]
+//   [flag u32: 1 = start/gap/end][finish timestamp u32].
+// Cost blob: 16-byte header [count][4][0x10], then
+//   [flag u16][marker u32][0 u16][cumulative cost f64 (cents)][finish u32].
+// Project leaves uninitialised memory in the cost marker except for the end
+// record's 0x20; it reads neither. Without these blobs Project has no baseline
+// spread, so BCWS/BCWP (and with them SV/CPI) are 0.
+namespace {
+const quint8 kBaselineStartSentinel[8] = { 0x8d, 0xed, 0xb5, 0xa0, 0xf7, 0xc6, 0xb0, 0xbe };
+constexpr quint32 kBaselineEndTimestamp = 0x340a75f7u;
+} // namespace
+
 QByteArray encodeBaselineWork(const QList<schedule::TimephasedValue> &all,
-                              int baselineNumber)
+                              int baselineNumber, const schedule::WorkCalendar *calendar)
 {
     const auto values = sortedBaselineValues(
         all, schedule::TimephasedValue::BaselineWork, baselineNumber);
     if (values.isEmpty())
         return {};
-    struct Record { qint64 cumulative = 0; qint64 amount = 0; QDateTime finish; };
+    // Each record's span is the WORKING time the segment covers (Project
+    // spreads the work evenly over it), not its work: a 7 h day at 8 h
+    // working time is 420 work over 480. Without a calendar, assume 100%
+    // units.
+    struct Record { qint64 cumulative = 0; qint64 span = 0; bool gap = false; QDateTime finish; };
     QList<Record> records;
     qint64 cumulative = 0;
+    qint64 totalSpan = 0;
     QDateTime cursor = values.first().start;
     for (const auto &value : values) {
         if (cursor < value.start)
-            records.append({cumulative, 0, value.start});
+            records.append({cumulative, 0, true, value.start});
+        qint64 span = calendar ? calendar->workBetween(value.start, value.finish) : 0;
+        if (span <= 0)
+            span = value.durationMillis();
         cumulative += value.durationMillis();
-        records.append({cumulative, value.durationMillis(), value.finish});
-        cursor = value.finish;
+        totalSpan += span;
+        records.append({cumulative, span, false, value.finish});
+        cursor = qMax(cursor, value.finish);
     }
     if (records.size() > std::numeric_limits<quint16>::max() - 2)
         return {};
+    const auto workUnits = [](qint64 millis) { return double(millis) / 60.0; };
+    const auto tenths = [](qint64 millis) { return quint32(qMax<qint64>(0, millis / 6000)); };
+
     QByteArray bytes(8, '\0');
     pokeU16(bytes, 0, quint16(records.size() + 2));
-    bytes.append(20, '\0'); // leading summary
+    pokeU16(bytes, 2, 0x10);
+    pokeU16(bytes, 4, 0x1c);
+    QByteArray summary(20, '\0');
+    pokeDouble(summary, 0, workUnits(cumulative));
+    pokeU32(summary, 12, tenths(totalSpan));
+    bytes += summary;
     QByteArray startBlock(20, '\0');
-    pokeU32(startBlock, 16, quint32(wallTimestampTenths(values.first().start)));
+    startBlock.replace(0, 8, QByteArrayView(reinterpret_cast<const char *>(kBaselineStartSentinel), 8));
+    pokeU32(startBlock, 12, 1);
+    pokeU32(startBlock, 16, quint32(baselineTimestampTenths(values.first().start)));
     bytes += startBlock;
     for (const Record &value : records) {
         QByteArray record(20, '\0');
-        pokeDouble(record, 0, double(value.cumulative) / 60.0);
-        pokeU32(record, 8, quint32(qMax<qint64>(0, value.amount / 6000)));
-        pokeU32(record, 16, quint32(wallTimestampTenths(value.finish)));
+        pokeDouble(record, 0, workUnits(value.cumulative));
+        pokeU32(record, 8, tenths(value.span));
+        pokeU32(record, 12, value.gap ? 1 : 0);
+        pokeU32(record, 16, quint32(baselineTimestampTenths(value.finish)));
         bytes += record;
     }
+    QByteArray endBlock(20, '\0');
+    pokeDouble(endBlock, 0, workUnits(cumulative));
+    pokeU32(endBlock, 12, 1);
+    pokeU32(endBlock, 16, kBaselineEndTimestamp);
+    bytes += endBlock;
     return bytes;
 }
 
@@ -530,22 +582,73 @@ QByteArray encodeBaselineCost(const QList<schedule::TimephasedValue> &all,
             records.append({cumulative, value.start});
         cumulative += value.value.toDouble() * 100.0;
         records.append({cumulative, value.finish});
-        cursor = value.finish;
+        cursor = qMax(cursor, value.finish);
     }
     if (records.size() > std::numeric_limits<quint16>::max() - 2)
         return {};
     QByteArray bytes(16, '\0');
     pokeU16(bytes, 0, quint16(records.size() + 2));
+    pokeU16(bytes, 2, 4);
+    pokeU16(bytes, 4, 0x10);
     QByteArray startBlock(20, '\0');
-    pokeU32(startBlock, 16, quint32(wallTimestampTenths(values.first().start)));
+    pokeU16(startBlock, 0, 1);
+    startBlock.replace(8, 8, QByteArrayView(reinterpret_cast<const char *>(kBaselineStartSentinel), 8));
+    pokeU32(startBlock, 16, quint32(baselineTimestampTenths(values.first().start)));
     bytes += startBlock;
     for (const Record &value : records) {
         QByteArray record(20, '\0');
         pokeDouble(record, 8, value.cumulative);
-        pokeU32(record, 16, quint32(wallTimestampTenths(value.finish)));
+        pokeU32(record, 16, quint32(baselineTimestampTenths(value.finish)));
         bytes += record;
     }
+    QByteArray endBlock(20, '\0');
+    pokeU16(endBlock, 0, 1);
+    pokeU32(endBlock, 2, 0x20);
+    pokeDouble(endBlock, 8, cumulative);
+    pokeU32(endBlock, 16, kBaselineEndTimestamp);
+    bytes += endBlock;
     return bytes;
+}
+
+QList<schedule::TimephasedValue> sumBaselineValues(
+    const QList<schedule::TimephasedValue> &all, int type, int baselineNumber, int uniqueId)
+{
+    const auto values = sortedBaselineValues(all, type, baselineNumber);
+    QList<QDateTime> cuts;
+    for (const auto &value : values) {
+        cuts.append(value.start);
+        cuts.append(value.finish);
+    }
+    std::sort(cuts.begin(), cuts.end());
+    cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
+    QList<schedule::TimephasedValue> out;
+    for (int i = 0; i + 1 < cuts.size(); ++i) {
+        const QDateTime from = cuts.at(i), to = cuts.at(i + 1);
+        double total = 0.0;
+        bool covered = false;
+        for (const auto &value : values) {
+            if (value.finish <= from || value.start >= to)
+                continue;
+            covered = true;
+            total += type == schedule::TimephasedValue::BaselineWork
+                ? double(value.durationInPeriod(from, to))
+                : value.amountInPeriod(from, to);
+        }
+        if (!covered)
+            continue;
+        schedule::TimephasedValue sum;
+        sum.type = type;
+        sum.uniqueId = uniqueId;
+        sum.baselineNumber = baselineNumber;
+        sum.start = from;
+        sum.finish = to;
+        sum.unit = 1;
+        sum.value = type == schedule::TimephasedValue::BaselineWork
+            ? isoDuration(qint64(std::llround(total)))
+            : QString::number(total, 'g', 15);
+        out.append(sum);
+    }
+    return out;
 }
 
 } // namespace Mpp14Timephased

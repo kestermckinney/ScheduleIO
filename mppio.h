@@ -44,7 +44,7 @@ private:
 extern "C" {
 SCHEDULEIO_EXPORT MppIO *scheduleio_create();
 SCHEDULEIO_EXPORT void   scheduleio_destroy(MppIO *io);
-SCHEDULEIO_EXPORT const char *scheduleio_version();   // library version string, e.g. "0.1.0"
+SCHEDULEIO_EXPORT const char *scheduleio_version();   // library version string, e.g. "0.1.1"
 }
 
 #endif // SCHEDULEIO_H

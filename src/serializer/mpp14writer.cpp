@@ -9,7 +9,10 @@
 #include "codec/mpp14timephased.h"
 #include "codec/propskeys.h"
 #include "codec/propsreader.h"
+#include "codec/autofiltercodec.h"
+#include "codec/customfielddefs.h"
 #include "codec/viewformat.h"
+#include "model/customfieldlogic.h"
 #include "ole/compoundfile.h"
 #include "serializer/mpp14manifest.h"
 
@@ -75,6 +78,7 @@ QByteArray guidFor(const char *kind, int uid)
     else if (qstrcmp(kind, "rsc") == 0) kindOrdinal = 2;
     else if (qstrcmp(kind, "assn") == 0) kindOrdinal = 3;
     else if (qstrcmp(kind, "cons") == 0) kindOrdinal = 4;
+    else if (qstrcmp(kind, "cal") == 0) kindOrdinal = 6;
 
     const quint32 entityOrdinal = quint32(qMax(0, uid)) & 0x000FFFFFu;
     const quint32 timeLow = 0xA1000000u | (kindOrdinal << 20) | entityOrdinal;
@@ -108,6 +112,82 @@ quint32 readLeU32(const QByteArray &b, int off)
 void appDouble(QByteArray &b, double v)
 { quint64 bits; memcpy(&bits, &v, 8); char t[8];
   qToLittleEndian<quint64>(bits, reinterpret_cast<uchar *>(t)); b.append(t, 8); }
+
+// "   214/CEdl" is Project's saved window state for the project. Its one blob is
+// [u32 size][u32 size-4][u32 size-4][u16 0][u16 1][u32 item count] followed by
+// items [u32 len][u32 key][u32 1][len bytes]. Two items cache the grid's rows:
+// 0x26400035, the displayed task UIDs in row order (ended by 1048000, 0, 0), and
+// 0x2640003d, a per-row record table. The template's copies are empty, and
+// Project trusts an empty row list over the task table: a file with a real
+// outline then opened with a blank grid until Show > All Subtasks. With the
+// two items absent Project rebuilds the rows from the tasks, as it does for
+// any file whose window state it has never seen.
+QByteArray stripCEdlRowCache(const QByteArray &blob)
+{
+    constexpr int kItemsAt = 20;
+    if (blob.size() < kItemsAt || readLeU32(blob, 0) != quint32(blob.size() - 4))
+        return blob;
+    QByteArray items;
+    quint32 count = 0;
+    int off = kItemsAt;
+    while (off + 12 <= blob.size()) {
+        const quint32 len = readLeU32(blob, off);
+        const quint32 key = readLeU32(blob, off + 4);
+        if (len > quint32(blob.size() - off - 12))
+            return blob;   // not the layout we know: leave it alone
+        if (key != 0x26400035u && key != 0x2640003Du) {
+            items.append(blob.constData() + off, int(12 + len));
+            ++count;
+        }
+        off += int(12 + len);
+    }
+    if (off != blob.size() || count == readLeU32(blob, 16))
+        return blob;
+    QByteArray out;
+    const quint32 size = quint32(kItemsAt + items.size());
+    appU32(out, size - 4);
+    appU32(out, size - 8);
+    appU32(out, size - 8);
+    out.append(blob.mid(12, 4));
+    appU32(out, count);
+    out.append(items);
+    return out;
+}
+
+// Tenths of a minute since 1983-12-31 00:00 (wall time; the same base as
+// decodeMppTimestamp), the timestamp form inside Project's time-phased blobs.
+quint32 tenthMinutesSinceEpoch(const QDateTime &dt)
+{
+    const qint64 days = QDate(1983, 12, 31).daysTo(dt.date());
+    return quint32(days * 14400 + dt.time().msecsSinceStartOfDay() / 6000);
+}
+
+// Task var key 350, the %-complete curve Project draws the Progress bar from
+// (it is where Complete Through comes from). A 16-byte header, then three
+// 20-byte points {u32 kind, u32 0, f64 percent, u32 date}: the start marker,
+// the Stop date at the task's percent complete, and a closing point whose
+// date is a constant. Byte-for-byte what Project 2016 writes for tasks set to
+// 8%, 50% and 100% (decoded 2026-09-27); 0% tasks carry no curve.
+QByteArray progressCurveBlob(const QDateTime &actualStart, const QDateTime &stop,
+                             int percent)
+{
+    QByteArray b;
+    appU16(b, 3);
+    appU16(b, 4);
+    appU32(b, 0x10);
+    appU32(b, 0);
+    appU32(b, 0);
+    const auto point = [&b](quint32 kind, double value, quint32 date) {
+        appU32(b, kind);
+        appU32(b, 0);
+        appDouble(b, value);
+        appU32(b, date);
+    };
+    point(1, 32768.0, tenthMinutesSinceEpoch(actualStart));
+    point(0, double(percent), tenthMinutesSinceEpoch(stop));
+    point(1, double(percent), 0x340A75F7u);
+    return b;
+}
 
 bool pokeU16(QByteArray &b, int off, quint16 v)
 {
@@ -376,6 +456,31 @@ void putBaselines(EntitySink &sink, const QList<schedule::Baseline> &baselines,
     }
 }
 
+// Set or clear the FixedMeta bits of an entity's flag fields. `tail` is the
+// meta item from byte `tailStart` on.
+void setMetaFlags(QByteArray &tail, int tailStart, const QList<schedule::CustomField> &fields,
+                  quint16 highWord, const QHash<quint16, EntityFieldLoc> &loc,
+                  const QVector<MppFieldIds::CustomFieldDef> &defs)
+{
+    for (const MppFieldIds::CustomFieldDef &d : defs) {
+        if (d.kind != MppFieldIds::FieldKind::Bool)
+            continue;
+        const auto it = loc.constFind(d.index);
+        if (it == loc.constEnd() || it->metaOffset < 0)
+            continue;
+        const int at = it->metaOffset - tailStart;
+        if (at < 0 || at + 4 > tail.size())
+            continue;
+        bool on = false;
+        for (const schedule::CustomField &c : fields)
+            if (quint32(c.fieldId) == ((quint32(highWord) << 16) | d.index))
+                on = c.value.toBool();
+        quint32 bits = qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(tail.constData() + at));
+        bits = on ? (bits | it->metaMask) : (bits & ~it->metaMask);
+        qToLittleEndian(bits, reinterpret_cast<uchar *>(tail.data() + at));
+    }
+}
+
 void putCustomFields(EntitySink &sink, const QList<schedule::CustomField> &fields,
                      quint16 highWord, const QVector<MppFieldIds::CustomFieldDef> &defs)
 {
@@ -408,6 +513,11 @@ void putCustomFields(EntitySink &sink, const QList<schedule::CustomField> &field
             sink.putDuration(idx, c.value.toLongLong());
             break;
         case MppFieldIds::FieldKind::Bool: {
+            // Meta-bit flags are set in the row's FixedMeta by the caller
+            // (setMetaFlags); Project ignores a var blob for them.
+            const auto meta = sink.loc->constFind(idx);
+            if (meta != sink.loc->constEnd() && meta->metaOffset >= 0)
+                break;
             QByteArray b;
             b.append(c.value.toBool() ? char(1) : char(0));
             sink.putVarBlob(idx, b);
@@ -428,6 +538,40 @@ void flushVars(EntitySink &sink, VarBuilder &vars, quint16 high)
     for (const auto &p : sink.varBlobs)
         vars.add(sink.uid, p.first, high, p.second);
     sink.varBlobs.clear();
+}
+
+// Var keys an EntitySink is about to flush, in first-seen order.
+QList<quint16> varKeys(const EntitySink &sink)
+{
+    QList<quint16> keys;
+    for (const auto &p : sink.varBlobs)
+        if (!keys.contains(p.first))
+            keys.append(p.first);
+    return keys;
+}
+
+// FixedMeta presence bitmap (tail = item bytes 8..): Project reads a var
+// field's Var2Data blob only when the row's bit for it is set (see
+// FieldMap::presenceBitOrdinals). Sets the bit of every var field in `present`;
+// with `clearAbsent`, first clears the bits of var-only fields the row does not
+// carry, since Project-authored rows never set those.
+void applyVarPresence(QByteArray &tail, const QList<quint16> &present,
+                      const QHash<quint16, int> &ordinals,
+                      const QHash<quint16, EntityFieldLoc> &loc, bool clearAbsent)
+{
+    const auto setBit = [&tail](int ordinal, bool on) {
+        if (ordinal < 0 || ordinal / 8 >= tail.size())
+            return;
+        const quint8 mask = quint8(1u << (ordinal % 8));
+        const quint8 old = quint8(tail[ordinal / 8]);
+        tail[ordinal / 8] = char(on ? (old | mask) : (old & ~mask));
+    };
+    if (clearAbsent)
+        for (auto it = loc.constBegin(); it != loc.constEnd(); ++it)
+            if (it->var && it->block < 0 && !present.contains(it.key()))
+                setBit(ordinals.value(it.key(), -1), false);
+    for (quint16 idx : present)
+        setBit(ordinals.value(idx, -1), true);
 }
 
 // ---- notes / cost rates / calendar data blobs ---------------------------------
@@ -890,9 +1034,8 @@ bool patchPropsU16(QByteArray &props, quint32 key, quint16 value)
 // a different length (or a key the template lacks) rebuilds the item and
 // fixes up the two header "byteSize" fields by the size delta -- everything
 // else in the stream (other items, the field maps) is untouched.
-void patchPropsString(QByteArray &props, quint32 key, const QString &value)
+void patchPropsBytes(QByteArray &props, quint32 key, const QByteArray &newData)
 {
-    const QByteArray newData = utf16zBytes(value);
     int o = 16;
     while (o + 12 <= props.size()) {
         const int itemStart = o;
@@ -938,6 +1081,130 @@ void patchPropsString(QByteArray &props, quint32 key, const QString &value)
     readU32(props, 4, &sz1);
     pokeU32(props, 0, quint32(int(sz0) + newItem.size()));
     pokeU32(props, 4, quint32(int(sz1) + newItem.size()));
+}
+
+void patchPropsString(QByteArray &props, quint32 key, const QString &value)
+{
+    patchPropsBytes(props, key, utf16zBytes(value));
+}
+
+// Task custom field definitions (codec/customfielddefs.h): aliases, formulas,
+// value lists and graphical indicators. The formulas and indicator rules go in
+// "   114/Props", the aliases and attribute records in "   114/TBkndTask/Props"
+// (`taskProps`, patched in place), the value lists in "   114/TBkndOutlCode",
+// which replaces the template's copy in `cf` when there are any.
+void writeTaskFieldDefinitions(const schedule::Project &in, QByteArray &props, QByteArray &taskProps,
+                               const CompoundFile &tpl, CompoundFile &cf)
+{
+    QList<CustomFieldDefs::Alias> aliases;
+    QList<CustomFieldDefs::Formula> formulas;
+    QList<CustomFieldDefs::AttributeField> attributes;
+    QList<CustomFieldDefs::LookupTable> tables;
+    QSet<quint32> seen;
+    for (const schedule::CustomField &d : in.customFieldDefinitions) {
+        const quint32 id = quint32(d.fieldId);
+        const QString slot = schedule::CustomFieldLogic::slotName(id);
+        if (slot.isEmpty() || seen.contains(id))
+            continue;
+        seen.insert(id);
+        if (!d.name.isEmpty() && d.name != slot)
+            aliases.append({ id, d.name.left(CustomFieldDefs::kMaxAliasLength) });
+
+        CustomFieldDefs::Formula record;
+        record.fieldId = id;
+        const bool formula = !d.formula.trimmed().isEmpty();
+        if (formula)
+            record.text = schedule::CustomFieldLogic::toProjectFormula(in, d.formula.trimmed());
+        // A field's custom attribute is its formula or its value list, not both.
+        CustomFieldDefs::LookupTable table;
+        QByteArray defaultGuid;
+        if (!formula && CustomFieldDefs::listType(id) != 0) {
+            for (int i = 0; i < d.lookupValues.size(); ++i) {
+                const QByteArray encoded = CustomFieldDefs::encodeListValue(id, d.lookupValues.at(i));
+                if (encoded.isEmpty())
+                    continue;
+                CustomFieldDefs::LookupValue value{ encoded, d.lookupDescriptions.value(i),
+                                                    CustomFieldDefs::newGuid() };
+                if (!d.defaultValue.isEmpty()
+                    && d.lookupValues.at(i).compare(d.defaultValue, Qt::CaseInsensitive) == 0)
+                    defaultGuid = value.guid;
+                table.values.append(value);
+            }
+            table.restrict = d.restrictToList;
+            table.order = d.listOrder;
+        }
+        if (!table.values.isEmpty()) {
+            table.guid = CustomFieldDefs::newGuid();
+            table.type = CustomFieldDefs::listType(id);
+            tables.append(table);
+            record.valueList = true;
+        }
+        for (const schedule::CustomField::IndicatorRule &rule : d.graphicalIndicators) {
+            CustomFieldDefs::Indicator indicator;
+            indicator.comparison = CustomFieldDefs::comparisonCode(rule.comparison);
+            indicator.image = CustomFieldDefs::imageCode(rule.indicator);
+            if (indicator.comparison < 0 || indicator.image == 0)
+                continue;   // nothing Project can show
+            const QString text = rule.value.toString().trimmed();
+            if (indicator.comparison != 11 && text.startsWith(QLatin1Char('['))
+                && text.endsWith(QLatin1Char(']'))) {
+                // Compared with another field.
+                indicator.field = schedule::CustomFieldLogic::taskFieldId(in, text.mid(1, text.size() - 2));
+                if (indicator.field == 0)
+                    continue;
+            } else if (indicator.comparison != 11) {
+                indicator.value = CustomFieldDefs::encodeRuleValue(id, text);
+                if (indicator.value.isEmpty())
+                    continue;
+            }
+            record.indicators.append(indicator);
+        }
+        record.summaryCalc = d.summaryCalc;
+        if (formula || record.valueList || !record.indicators.isEmpty() || d.summaryCalc != 10) {
+            formulas.append(record);
+            attributes.append({ id, formula, record.valueList ? table.guid : QByteArray(),
+                                record.valueList ? defaultGuid : QByteArray() });
+        }
+    }
+    // A field renamed only on the tasks (no definition) keeps its alias too.
+    for (const schedule::Task &t : in.tasks)
+        for (const schedule::CustomField &f : t.customFields) {
+            const quint32 id = quint32(f.fieldId);
+            const QString slot = schedule::CustomFieldLogic::slotName(id);
+            if (slot.isEmpty() || seen.contains(id) || f.name.isEmpty() || f.name == slot)
+                continue;
+            seen.insert(id);
+            aliases.append({ id, f.name.left(CustomFieldDefs::kMaxAliasLength) });
+        }
+    patchPropsBytes(props, CustomFieldDefs::kFormulasKey, CustomFieldDefs::writeFormulas(formulas));
+    if (!aliases.isEmpty() || !formulas.isEmpty())
+        patchPropsU16(props, CustomFieldDefs::kDefinedKey, 1);
+
+    PropsReader existing;
+    existing.parse(taskProps);
+    patchPropsBytes(taskProps, CustomFieldDefs::kTaskDefinitionsKey,
+                    CustomFieldDefs::writeTaskDefinitions(
+                        existing.value(CustomFieldDefs::kTaskDefinitionsKey), aliases, attributes));
+
+    if (!tables.isEmpty()) {
+        PropsReader projectProps;
+        projectProps.parse(props);
+        patchPropsBytes(props, CustomFieldDefs::kLookupDirectoryKey,
+                        CustomFieldDefs::writeLookupDirectory(
+                            projectProps.value(CustomFieldDefs::kLookupDirectoryKey), tables));
+        const QString storage = QStringLiteral("   114");
+        const QString outl = QStringLiteral("TBkndOutlCode");
+        auto read = [&](const char *name) { return tpl.readStream({ storage, outl, QLatin1String(name) }); };
+        CustomFieldDefs::OutlCodeStreams base{ read("FixedMeta"), read("FixedData"), read("Fixed2Meta"),
+                                               read("Fixed2Data"), read("VarMeta"), read("Var2Data") };
+        const CustomFieldDefs::OutlCodeStreams out = CustomFieldDefs::writeLookupTables(base, tables);
+        cf.addStream({ storage, outl, QStringLiteral("FixedMeta") }, out.fixedMeta);
+        cf.addStream({ storage, outl, QStringLiteral("FixedData") }, out.fixedData);
+        cf.addStream({ storage, outl, QStringLiteral("Fixed2Meta") }, out.fixed2Meta);
+        cf.addStream({ storage, outl, QStringLiteral("Fixed2Data") }, out.fixed2Data);
+        cf.addStream({ storage, outl, QStringLiteral("VarMeta") }, out.varMeta);
+        cf.addStream({ storage, outl, QStringLiteral("Var2Data") }, out.var2Data);
+    }
 }
 
 // Slice `count` meta items (without the 16-byte header) out of a meta stream.
@@ -1035,17 +1302,55 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     });
 
     if (viewTemplate == &sourcePresentation) {
-        // Overlay the native view and table rowsets. Keeping the backend
-        // template's other 214 children avoids importing unrelated rowsets
-        // whose manifest keys may not exist in every Project generation.
+        // Overlay the native view, table, filter and group rowsets (a view
+        // names its filter and group, so the file's own definitions go with
+        // its views).
+        // Keeping the backend template's other 214 children avoids importing
+        // unrelated rowsets whose manifest keys may not exist in every Project
+        // generation; reconcile() below restates each rowset's manifest entry.
         for (const QString &rowset : { QStringLiteral("CV_iew"),
-                                      QStringLiteral("CTable") }) {
+                                      QStringLiteral("CTable"),
+                                      QStringLiteral("CFilter"),
+                                      QStringLiteral("CGrouping") }) {
             const QStringList sourcePath = { viewStorage, rowset };
             if (!sourcePresentation.hasStorage(sourcePath))
                 continue;
             cf.addStorage(sourcePath);
             copyTree(sourcePresentation, cf, sourcePath,
                      [](const QStringList &) { return false; });
+        }
+    }
+
+    // A view that holds column filters, a filter or a group but that the file
+    // never showed (so has no record of) comes in from the embedded template --
+    // or, for a view the template lacks (Network Diagram), a stock file Project
+    // wrote with every view shown -- with its table, as Project adds a view the
+    // first time it is shown. The rest of the view work then runs on the
+    // augmented rowsets.
+    CompoundFile viewStock;
+    {
+        QFile sf(QStringLiteral(":/scheduleio/mpp14views.mpp"));
+        if (sf.open(QIODevice::ReadOnly))
+            viewStock.openFromData(sf.readAll());
+    }
+    CompoundFile withViews;
+    {
+        withViews = *viewTemplate;
+        if (ViewFormat::importViews(withViews, { &tpl, &viewStock }, viewProject)) {
+            for (const QString &rowset : { QStringLiteral("CV_iew"), QStringLiteral("CTable") })
+                for (const QString &stream : { QStringLiteral("FixedMeta"), QStringLiteral("FixedData"),
+                                               QStringLiteral("VarMeta"), QStringLiteral("Var2Data") })
+                    cf.addStream({ viewStorage, rowset, stream },
+                                 withViews.readStream({ viewStorage, rowset, stream }));
+            viewTemplate = &withViews;
+        }
+        // Each applied group's record, which a custom group needs to show.
+        if (ViewFormat::importGroups(withViews, { &tpl, &viewStock }, &viewProject)) {
+            for (const QString &stream : { QStringLiteral("FixedMeta"), QStringLiteral("FixedData"),
+                                           QStringLiteral("VarMeta"), QStringLiteral("Var2Data") })
+                cf.addStream({ viewStorage, QStringLiteral("CGrouping"), stream },
+                             withViews.readStream({ viewStorage, QStringLiteral("CGrouping"), stream }));
+            viewTemplate = &withViews;
         }
     }
 
@@ -1071,6 +1376,30 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
         }
     }
 
+    // A view with column AutoFilters needs Project's AutoFilter switch on, or
+    // Project keeps the criteria but shows every row.
+    const bool anyAutoFilter = !in.ganttView.autoFilters.isEmpty()
+        || !in.taskUsageView.autoFilters.isEmpty() || !in.resourceUsageView.autoFilters.isEmpty()
+        || !in.resourceSheetView.autoFilters.isEmpty();
+    if (anyAutoFilter) {
+        QByteArray viewProps = cf.readStream({ viewStorage, QStringLiteral("Props") });
+        for (int o = 16; o + 12 <= viewProps.size(); ) {
+            const quint32 len = readLeU32(viewProps, o);
+            const quint32 key = readLeU32(viewProps, o + 4);
+            o += 12;
+            if (len > quint32(viewProps.size() - o))
+                break;
+            if (key == AutoFilterCodec::kSwitchKey && len >= 2) {
+                pokeBytes(viewProps, o, QByteArray("\x01\x00", 2));
+                cf.addStream({ viewStorage, QStringLiteral("Props") }, viewProps);
+                break;
+            }
+            o += int(len);
+            if (len % 2 != 0)
+                ++o;
+        }
+    }
+
     if (patchViews && !ViewFormat::patch(*viewTemplate, cf, viewProject)) {
         // No usable Gantt view in the template: fall back to the verbatim copy.
         cf.addStream({ viewStorage, QStringLiteral("CV_iew"), QStringLiteral("VarMeta") },
@@ -1080,8 +1409,26 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     }
 
     if (ViewFormat::wantsTablePatch(viewProject))
-        ViewFormat::patchTables(*viewTemplate, cf, viewProject);
+        ViewFormat::patchTables(*viewTemplate, cf, viewProject,
+                                viewTemplate == &tpl ? nullptr : &tpl);
     ViewFormat::writeExtensions(cf, viewProject);
+
+    // The window state's cached grid rows describe the template's (empty) task
+    // list; drop them so Project lays the rows out from the tasks we write.
+    // reconcile() below restates the CEdl manifest size in 214/Props.
+    {
+        const QStringList cedl = { viewStorage, QStringLiteral("CEdl") };
+        const QByteArray var2 = cf.readStream(cedl + QStringList{ QStringLiteral("Var2Data") });
+        QByteArray varMeta = cf.readStream(cedl + QStringList{ QStringLiteral("VarMeta") });
+        const QByteArray stripped = stripCEdlRowCache(var2);
+        if (stripped.size() != var2.size() && varMeta.size() >= 24
+            && readLeU32(varMeta, 20) == quint32(var2.size())) {
+            qToLittleEndian<quint32>(quint32(stripped.size()),
+                                     reinterpret_cast<uchar *>(varMeta.data() + 20));
+            cf.addStream(cedl + QStringList{ QStringLiteral("VarMeta") }, varMeta);
+            cf.addStream(cedl + QStringList{ QStringLiteral("Var2Data") }, stripped);
+        }
+    }
 
     // ---- project-level Props (dates) + SummaryInformation (title/author) ------
     QByteArray props = tpl.readStream({ kDataStorage, QStringLiteral("Props") });
@@ -1175,6 +1522,11 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
     putU16(PropsKey::BaselineForEarnedValue, in.baselineForEarnedValue + 1);
     putBool(PropsKey::ShowProjectSummaryTask, in.showProjectSummaryTask);
 
+    {
+        QByteArray taskProps = tpl.readStream({ kDataStorage, QStringLiteral("TBkndTask"), QStringLiteral("Props") });
+        writeTaskFieldDefinitions(in, props, taskProps, tpl, cf);
+        cf.addStream({ kDataStorage, QStringLiteral("TBkndTask"), QStringLiteral("Props") }, taskProps);
+    }
     cf.addStream({ kDataStorage, QStringLiteral("Props") }, props);
     cf.addStream({ summaryName }, summaryInformationStream(in.title, in.author));
 
@@ -1194,6 +1546,12 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
         FieldMap::entityFieldLocations(rscFm, MppFieldIds::kResourceHigh);
     const QHash<quint16, EntityFieldLoc> assnLoc =
         FieldMap::entityFieldLocations(assnFm, MppFieldIds::kAssignmentHigh);
+    const QHash<quint16, int> taskPresence =
+        FieldMap::presenceBitOrdinals(taskFm, MppFieldIds::kTaskHigh);
+    const QHash<quint16, int> rscPresence =
+        FieldMap::presenceBitOrdinals(rscFm, MppFieldIds::kResourceHigh);
+    const QHash<quint16, int> assnPresence =
+        FieldMap::presenceBitOrdinals(assnFm, MppFieldIds::kAssignmentHigh);
 
     // ---- template record/meta byte templates -----------------------------------
     const auto tplStream = [&](const char *ent, const char *st) {
@@ -1287,6 +1645,27 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             }
         }
 
+        // Timephased baseline values under each task: its own assignments'
+        // plus, for a summary (the UID-0 project summary included), those of
+        // every task below it -- Project stores the rolled-up spread on
+        // summary rows too, and sums their BCWS from it.
+        QHash<int, QList<schedule::TimephasedValue>> baselineValuesUnder;
+        for (const schedule::Assignment &assignment : in.assignments) {
+            QList<schedule::TimephasedValue> values;
+            for (const schedule::TimephasedValue &value : assignment.timephasedValues)
+                if (value.type == schedule::TimephasedValue::BaselineWork
+                    || value.type == schedule::TimephasedValue::BaselineCost)
+                    values.append(value);
+            if (values.isEmpty())
+                continue;
+            QSet<int> visited;
+            for (int uid = assignment.taskUniqueId; uid >= 0 && !visited.contains(uid);
+                 uid = int(qint32(parentUidOf.value(uid, quint32(-1))))) {
+                visited.insert(uid);
+                baselineValuesUnder[uid] += values;
+            }
+        }
+
         for (const schedule::Task *taskPtr : tasksByUid) {
             const schedule::Task &t = *taskPtr;
             const quint16 percentComplete = encodePercent(t.percentComplete);
@@ -1304,7 +1683,6 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // slightly from percent * duration), but replace the complete set
             // when it represents a different integer completion percentage.
             const qint64 completedDuration = amountAtPercent(t.durationMillis, percentComplete);
-            const qint64 remainingDuration = qMax<qint64>(0, t.durationMillis - completedDuration);
             const qint64 completedWork = amountAtPercent(t.workMillis, percentComplete);
             bool progressContradictsPercent = false;
             if (t.actualDurationMillis != 0) {
@@ -1347,7 +1725,12 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // every row as a project-summary and render ALL task text in the
             // bold Calibri-12 ProjectSummary text style (proved by
             // byte-bisecting 03_hierarchy_dependencies).
-            sink.putDuration(31, remainingDuration);
+            // Duration - the Actual Duration written below: Project's own
+            // pair always sums to Duration (7 h actual of 10 d: 420 + 4380).
+            // (A task with a % but no Actual Duration keeps the %-derived value.)
+            sink.putDuration(31, qMax<qint64>(0, t.durationMillis
+                                                 - (actualDuration > 0 ? actualDuration
+                                                                       : completedDuration)));
             sink.putDate(35, t.start);                               // (scheduled) START
             sink.putDate(36, t.finish);                              // (scheduled) FINISH
             // Project-authored completed tasks retain their calculated date
@@ -1446,6 +1829,34 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             }
             sink.putDate(MppFieldIds::taskActual.start, actualStart);
             sink.putDate(MppFieldIds::taskActual.finish, actualFinish);
+            // STOP (100, u32@136) / RESUME (99, u32@132): Project's Complete
+            // Through, which the Progress bar style draws to. Project leaves
+            // both NA on unstarted tasks, sets both to Actual Finish on
+            // completed ones, and otherwise stops at Actual Start + Actual
+            // Duration on the task calendar (verified on Project 2016 by
+            // setting a task to 8%). Left at the scaffold's NA, a started
+            // task opens with Stop = Finish and a full-length progress bar.
+            if (!t.summary) {
+                QDateTime stop, resume;
+                if (actualFinish.isValid()) {
+                    stop = resume = actualFinish;
+                } else if (actualStart.isValid()) {
+                    const schedule::WorkCalendar calendar(
+                        in, t.calendarUniqueId >= 0 ? t.calendarUniqueId
+                                                    : in.calendarUniqueId);
+                    stop = actualDuration > 0
+                        ? calendar.addWork(actualStart, actualDuration) : actualStart;
+                    resume = calendar.nextWorkStart(stop);
+                }
+                sink.putDate(99, resume);                            // RESUME
+                sink.putDate(100, stop);                             // STOP
+                // Var key 350: the task's %-complete curve, which is where
+                // Project actually reads Complete Through (a task carrying
+                // Stop but no curve still opens with Stop = Finish).
+                if (stop.isValid() && percentComplete > 0)
+                    sink.putVarBlob(350, progressCurveBlob(actualStart, stop,
+                                                           percentComplete));
+            }
             sink.putDuration(MppFieldIds::taskActual.duration, actualDuration);
             sink.putWork(MppFieldIds::taskActual.work, actualWork);
             sink.putCurrency(MppFieldIds::taskCost.cost, t.cost);
@@ -1463,6 +1874,23 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             sink.putCurrency(MppFieldIds::taskEvm.eac, t.evm.eac);
             sink.putDouble(MppFieldIds::taskEvm.tcpi, t.evm.tcpi);
             putBaselines(sink, t.baselines, MppFieldIds::taskBaselines);
+            // Task baseline spread (173 work / 174 cost): Project's BCWS and
+            // BCWP come from these, not from the assignments' own blobs.
+            if (baselineValuesUnder.contains(t.uniqueId)) {
+                const QList<schedule::TimephasedValue> assignmentValues =
+                    baselineValuesUnder.value(t.uniqueId);
+                const schedule::WorkCalendar taskCalendar(
+                    in, t.calendarUniqueId >= 0 ? t.calendarUniqueId : in.calendarUniqueId);
+                const QByteArray baselineWork = Mpp14Timephased::encodeBaselineWork(
+                    Mpp14Timephased::sumBaselineValues(
+                        assignmentValues, schedule::TimephasedValue::BaselineWork, 0, t.uniqueId),
+                    0, &taskCalendar);
+                const QByteArray baselineCost = Mpp14Timephased::encodeBaselineCost(
+                    Mpp14Timephased::sumBaselineValues(
+                        assignmentValues, schedule::TimephasedValue::BaselineCost, 0, t.uniqueId), 0);
+                if (!baselineWork.isEmpty()) sink.putVarBlob(173, baselineWork);
+                if (!baselineCost.isEmpty()) sink.putVarBlob(174, baselineCost);
+            }
             putCustomFields(sink, t.customFields, MppFieldIds::kTaskHigh,
                             MppFieldIds::taskCustomFields());
 
@@ -1474,6 +1902,7 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             if (!t.hyperlink.isEmpty() || !t.hyperlinkAddress.isEmpty()
                 || !t.hyperlinkSubAddress.isEmpty())
                 sink.putVarBlob(kTaskHyperlink, hyperlinkBlob(t));
+            const QList<quint16> taskVarKeys = varKeys(sink);
             flushVars(sink, vars, MppFieldIds::kTaskHigh);
 
             // Task GUID heads the Fixed2Data block.
@@ -1488,6 +1917,10 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // FixedMeta bit flags: MILESTONE int@10 & 0x02, EFFORT_DRIVEN int@13
             // & 0x08 (Project 2013/2016 tables). The tail starts at item byte 8.
             QByteArray metaTail = taskMetaTailTpl;
+            // Advertise exactly the var fields this row carries. Without it
+            // Project skips e.g. the baseline blobs (Baseline Start/Finish/
+            // Cost read NA/$0, so its SV and CPI came out 0).
+            applyVarPresence(metaTail, taskVarKeys, taskPresence, taskLoc, true);
             // The only full task row in the embedded scaffold is its project
             // summary. Three undocumented bits on that row are not harmless
             // defaults: copying them to ordinary rows makes Project classify
@@ -1513,15 +1946,31 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // for non-summary rows or MS Project treats every row as a summary.
             metaTail[4] = char(t.summary ? (quint8(metaTail[4]) | 0x08)
                                          : (quint8(metaTail[4]) & ~0x08));
+            // Resource-work bit (item byte 16 & 0x10). Without it Project
+            // keeps the assignments' totals but spreads none of their work
+            // over time, so every Usage-view day cell is blank. Project sets
+            // it on every leaf with a resource assignment and on every summary
+            // except the project summary (all fixtures, 174/174 and 53/53);
+            // bisected on 04_resources_assignments with same-size patches.
+            bool hasResourceAssignment = false;
+            for (const schedule::Assignment &assignment : in.assignments)
+                if (assignment.taskUniqueId == t.uniqueId && assignment.resourceUniqueId >= 0) {
+                    hasResourceAssignment = true;
+                    break;
+                }
+            if (t.uniqueId != 0 && (t.summary || hasResourceAssignment))
+                metaTail[8] = char(quint8(metaTail[8]) | 0x10);
             // Notes presence: like the resource rows below, MS Project ignores
             // the notes Var2Data blob unless the row's FixedMeta advertises it
             // -- tail byte 36 bit 0x10 plus header bit 0x00010000 (both taken
             // from a task row MS Project itself wrote in 06_unicode_notes).
-            quint32 metaHeader = 0x00080000u;
-            if (!t.notes.isEmpty()) {
+            // The header's third byte is the row's var-field count on every
+            // Project-authored task row.
+            if (!t.notes.isEmpty())
                 metaTail[36] = char(quint8(metaTail[36]) | 0x10);
-                metaHeader |= 0x00010000u;
-            }
+            setMetaFlags(metaTail, 8, t.customFields, MppFieldIds::kTaskHigh, taskLoc,
+                         MppFieldIds::taskCustomFields());
+            const quint32 metaHeader = quint32(qMin<qsizetype>(taskVarKeys.size(), 0xFF)) << 16;
             fixed.addItem(metaHeader, rec, metaTail);
 
             // Fixed2Meta bit flags: TASK_MODE (manual) int@8 & 0x80.
@@ -1551,14 +2000,17 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             sink.putU32(27, quint32(r.uniqueId));                    // UNIQUE_ID
             sink.putU32(0, quint32(r.id));                           // ID
             sink.putDouble(4, r.maxUnits * 10000.0, true);           // MAX_UNITS (ten-thousandths)
-            qint64 resourceWork = 0, resourceOvertime = 0,
-                   resourceActualOvertime = 0, resourceRemainingOvertime = 0;
+            qint64 resourceWork = 0, resourceActualWork = 0, resourceRemainingWork = 0,
+                   resourceOvertime = 0, resourceActualOvertime = 0,
+                   resourceRemainingOvertime = 0;
             double resourceOvertimeCost = 0.0,
                    resourceActualOvertimeCost = 0.0,
                    resourceRemainingOvertimeCost = 0.0;
             for (const schedule::Assignment &assignment : in.assignments)
                 if (assignment.resourceUniqueId == r.uniqueId) {
                     resourceWork += assignment.workMillis;
+                    resourceActualWork += assignment.actualWorkMillis;
+                    resourceRemainingWork += assignment.remainingWorkMillis;
                     resourceOvertime += assignment.overtimeWorkMillis;
                     resourceActualOvertime += assignment.actualOvertimeWorkMillis;
                     resourceRemainingOvertime += assignment.remainingOvertimeWorkMillis;
@@ -1566,6 +2018,12 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                     resourceActualOvertimeCost += assignment.actualOvertimeCost;
                     resourceRemainingOvertimeCost += assignment.remainingOvertimeCost;
                 }
+            // WORK / ACTUAL_WORK / REMAINING_WORK: Project shows these stored
+            // rollups on the resource rows of Resource Usage and the Resource
+            // Sheet; left unwritten they read as 0 hrs.
+            sink.putWork(13, resourceWork, true);
+            sink.putWork(14, resourceActualWork, true);
+            sink.putWork(22, resourceRemainingWork, true);
             sink.putWork(16, resourceOvertime, true);
             sink.putWork(38, qMax<qint64>(0, resourceWork - resourceOvertime), true);
             sink.putWork(39, resourceActualOvertime, true);
@@ -1577,6 +2035,31 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             sink.putCurrency(MppFieldIds::resourceCost.actualCost, r.actualCost);
             sink.putCurrency(MppFieldIds::resourceCost.remainingCost, r.remainingCost);
             sink.putCurrency(MppFieldIds::resourceCost.costVariance, r.costVariance);
+            // STANDARD_RATE / OVERTIME_RATE (fixed doubles, per hour): the
+            // table-A rate in effect today. Project costs work from these; a
+            // single-entry table is stored ONLY here (no var-61 blob), and
+            // with them left 0 it reads every rate as $0.00/hr.
+            {
+                const QDateTime now = QDateTime::currentDateTime();
+                const schedule::CostRate *current = nullptr;
+                for (const schedule::CostRate &cr : r.costRates) {
+                    if (cr.table != 0)
+                        continue;
+                    if (!current)
+                        current = &cr;
+                    if ((!cr.startDate.isValid() || cr.startDate <= now)
+                        && (!cr.endDate.isValid() || now <= cr.endDate))
+                        current = &cr;
+                }
+                if (current) {
+                    const quint16 stdFmt = current->standardRateUnit == 2
+                        ? 0xFFFF : quint16(current->standardRateUnit);
+                    const quint16 otFmt = current->overtimeRateUnit == 2
+                        ? 0xFFFF : quint16(current->overtimeRateUnit);
+                    sink.putDouble(6, rateToHours(current->standardRate, stdFmt), true);
+                    sink.putDouble(7, rateToHours(current->overtimeRate, otFmt), true);
+                }
+            }
             sink.putWork(753, r.budgetWorkMillis, true);             // BUDGET_WORK
             sink.putCurrency(754, r.budgetCost, true);               // BUDGET_COST
             putBaselines(sink, r.baselines, MppFieldIds::resourceBaselines);
@@ -1602,6 +2085,7 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             }
             if (!r.availabilityTable.isEmpty())
                 sink.putVarBlob(kAvailabilityVarKey, availabilityBlob(r.availabilityTable));
+            const QList<quint16> rscVarKeys = varKeys(sink);
             flushVars(sink, vars, MppFieldIds::kResourceHigh);
 
             // Internal resource row ordinal. This is not exposed by the field
@@ -1642,6 +2126,10 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             const quint32 resourceMetaFlags =
                 r.type == schedule::Resource::Type::Material ? 0x00060000u
                                                               : 0x00050000u;
+            // Additive only: the hand-fitted live-row patterns above stay as
+            // they are; this adds the bits for var fields like multi-entry
+            // cost-rate tables (keys 61..65), which Project otherwise skips.
+            applyVarPresence(metaTail, rscVarKeys, rscPresence, rscLoc, false);
             fixed.addItem(resourceMetaFlags, rec, metaTail);
             QByteArray f2(kRscF2Block, '\0');
             // Project-authored resource Fixed2 rows contain the resource GUID,
@@ -1826,7 +2314,8 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                 const quint16 workKey = baseline == 0 ? 52 : quint16(282 + baseline * 9);
                 const quint16 costKey = quint16(workKey + 1);
                 const QByteArray baselineWork =
-                    Mpp14Timephased::encodeBaselineWork(a.timephasedValues, baseline);
+                    Mpp14Timephased::encodeBaselineWork(a.timephasedValues, baseline,
+                                                        &workCalendar);
                 const QByteArray baselineCost =
                     Mpp14Timephased::encodeBaselineCost(a.timephasedValues, baseline);
                 if (!baselineWork.isEmpty()) sink.putVarBlob(workKey, baselineWork);
@@ -1840,6 +2329,7 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                 appU32(created, encodeMppTimestamp(in.startDate));
                 sink.putVarBlob(634, created);
             }
+            const QList<quint16> assnVarKeys = varKeys(sink);
             flushVars(sink, vars, MppFieldIds::kAssignmentHigh);
 
             const bool unstarted = a.actualWorkMillis == 0
@@ -1850,6 +2340,12 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             const quint8 *tailBytes = unstarted ? assnUnstartedTail : assnProgressTail;
             QByteArray metaTail(kAssnMetaItem - 8, '\0');
             memcpy(metaTail.data(), tailBytes, 8);
+            // An assignment still in progress: Project 2016 writes 0x2B, not
+            // the completed rows' 0x3B. With 0x10 set Project takes the work as
+            // done through the Finish, so an 8% task opens with Stop = Finish
+            // and a full progress bar (bisected on the user's file 2026-09-27).
+            if (!unstarted && a.remainingWorkMillis > 0)
+                metaTail[2] = char(quint8(metaTail.at(2)) & ~0x10);
             if (hasOvertime) {
                 // Project-authored overtime rows mark the var-backed work
                 // fields present in bytes 5/6 and carry the timephased tail bit.
@@ -1863,6 +2359,10 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
             // Project-authored live assignment rows set the time-phased field
             // presence bit at metadata byte 32 (tail byte 24).
             metaTail[24] = char(quint8(metaTail[24]) | 0x40);
+            // Advertise the var fields written, above all the timephased
+            // baseline work/cost (52/53): without their bits Project has no
+            // baseline spread, so BCWS/BCWP and with them SV/CPI read 0.
+            applyVarPresence(metaTail, assnVarKeys, assnPresence, assnLoc, false);
             fixed.addItem(hasOvertime ? 0x000F0000u : 0x00090000u, rec, metaTail);
             // Assignment Fixed2Data is three GUIDs: assignment, task and
             // resource. Project uses these links in addition to the integer
@@ -1991,9 +2491,23 @@ bool writeMpp14(const schedule::Project &in, CompoundFile &cf, QString *error)
                                      : (isBase ? 0x00020000u
                                                : (needed ? 0x00010000u : 0u)),
                           rec, metaTail);
+            // Fixed2Data is [calendar GUID][owning resource GUID][base
+            // calendar GUID]. A resource calendar shares its resource's GUID,
+            // which is also what the resource row stores as CALENDAR_GUID.
+            // Leaving these zero makes Project lose every resource-calendar
+            // link: assignments then have no working time, so the Usage views
+            // show no time-phased work at all.
+            const bool isResourceCalendar = !isBase && resId > 0;
+            QByteArray f2(kCalF2Block, '\0');
+            pokeBytes(f2, 0, isResourceCalendar ? guidFor("rsc", int(resId))
+                                                : guidFor("cal", c.uniqueId));
+            if (isResourceCalendar)
+                pokeBytes(f2, 16, guidFor("rsc", int(resId)));
+            if (!isBase)
+                pokeBytes(f2, 32, guidFor("cal", c.baseCalendarUniqueId));
             QByteArray f2Tail;
             appU16(f2Tail, isStandard ? 0x001E : 0x000E);
-            fixed2.addItem(0, QByteArray(kCalF2Block, '\0'), f2Tail);
+            fixed2.addItem(0, f2, f2Tail);
 
             if (isBase && !c.name.isEmpty())
                 vars.add(quint32(c.uniqueId), kCalName, kCalHigh, utf16zBytes(c.name));

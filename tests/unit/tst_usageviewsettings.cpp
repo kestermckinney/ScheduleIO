@@ -13,6 +13,10 @@ constexpr quint32 kTaskName = 188743694u;
 constexpr quint32 kTaskWork = 188743680u;
 constexpr quint32 kResourceName = 205520897u;
 constexpr quint32 kResourceWork = 205520909u;
+constexpr quint32 kTaskId = 188743703u;
+constexpr quint32 kTaskPercentComplete = 188743712u;
+constexpr quint32 kTaskDurationEntry = 188744967u;   // Entry table "Duration"
+constexpr quint32 kTaskResourceNames = 188743729u;
 }
 
 class TstUsageViewSettings : public QObject
@@ -22,6 +26,7 @@ private slots:
     void readsNativeUsageTables();
     void writesNativeWidthsAndTimescale();
     void preservesSourceTableRowsetWhenUnchanged();
+    void writesGanttColumnLayout();
 };
 
 static QString fixture(const QString &name)
@@ -123,6 +128,50 @@ void TstUsageViewSettings::preservesSourceTableRowsetWhenUnchanged()
                                   QStringLiteral("VarMeta"), QStringLiteral("Var2Data")})
         QCOMPARE(saved.readStream(base + QStringList{stream}),
                  source.readStream(base + QStringList{stream}));
+}
+
+// A full column layout replaces the Gantt view's table: order, membership
+// and widths, keeping the Name column's stored "Task Name" title.
+void TstUsageViewSettings::writesGanttColumnLayout()
+{
+    MppIO reader;
+    QVERIFY2(reader.open(fixture(QStringLiteral("Empty.mpp"))),
+             qPrintable(reader.errorString()));
+    schedule::Project edited = reader.project();
+    QVERIFY(edited.ganttView.present);
+    QVERIFY(edited.ganttView.columnWidth(kTaskDurationEntry) > 0);
+
+    QList<schedule::UsageTableColumn> layout;
+    for (const auto &[field, width] : QList<QPair<quint32, int>>{
+             {kTaskId, 6}, {kTaskName, 30}, {kTaskPercentComplete, 11},
+             {kTaskResourceNames, 20}}) {
+        schedule::UsageTableColumn column;
+        column.fieldId = field;
+        column.width = width;
+        layout.append(column);
+    }
+    edited.ganttView.setColumns(layout);
+
+    MppIO writer;
+    writer.setProject(edited);
+    const QByteArray bytes = writer.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(writer.errorString()));
+
+    MppIO roundTrip;
+    QVERIFY2(roundTrip.openFromData(bytes), qPrintable(roundTrip.errorString()));
+    const schedule::UsageViewSettings &actual = roundTrip.project().ganttView;
+    QCOMPARE(actual.columns.size(), 4);
+    QCOMPARE(actual.columns.at(0).fieldId, kTaskId);
+    QCOMPARE(actual.columns.at(1).fieldId, kTaskName);
+    QCOMPARE(actual.columns.at(1).width, 30);
+    QCOMPARE(actual.columns.at(1).title, QStringLiteral("Task Name"));
+    QCOMPARE(actual.columns.at(2).fieldId, kTaskPercentComplete);
+    QCOMPARE(actual.columns.at(2).width, 11);
+    QCOMPARE(actual.columns.at(3).fieldId, kTaskResourceNames);
+    QCOMPARE(actual.columnWidth(kTaskDurationEntry), 0);
+    // The other views' tables are untouched.
+    QCOMPARE(roundTrip.project().taskUsageView.columns,
+             reader.project().taskUsageView.columns);
 }
 
 QTEST_APPLESS_MAIN(TstUsageViewSettings)

@@ -6,6 +6,8 @@
 #include "model/schedulingcalendar.h"
 #include "model/workcalendar.h"
 
+#include <algorithm>
+
 #include <QHash>
 #include <QMultiHash>
 #include <QQueue>
@@ -81,6 +83,46 @@ bool Scheduler::reachable(const Project &project, int fromUid, int toUid)
 
 namespace {
 
+// Each task's outline parent, from display-ID order (the order Microsoft
+// Project nests by; storage order can differ).
+class OutlineParents
+{
+public:
+    explicit OutlineParents(const Project &project)
+    {
+        QVector<const Task *> ordered;
+        ordered.reserve(project.tasks.size());
+        for (const Task &t : project.tasks)
+            ordered.append(&t);
+        std::stable_sort(ordered.begin(), ordered.end(),
+                         [](const Task *a, const Task *b) { return a->id < b->id; });
+        QVector<const Task *> open;   // the chain of ancestors of the next row
+        m_parent.reserve(ordered.size());
+        for (const Task *t : std::as_const(ordered)) {
+            while (!open.isEmpty() && open.last()->outlineLevel >= t->outlineLevel)
+                open.removeLast();
+            if (!open.isEmpty())
+                m_parent.insert(t->uniqueId, open.last()->uniqueId);
+            open.append(t);
+        }
+    }
+
+    bool related(int a, int b) const { return isAncestor(a, b) || isAncestor(b, a); }
+
+private:
+    bool isAncestor(int ancestor, int uid) const
+    {
+        for (auto it = m_parent.constFind(uid); it != m_parent.cend();
+             it = m_parent.constFind(it.value())) {
+            if (it.value() == ancestor)
+                return true;
+        }
+        return false;
+    }
+
+    QHash<int, int> m_parent;
+};
+
 void rescheduleForward(Project &project)
 {
     QHash<int, int> idx;   // uid -> tasks index
@@ -94,9 +136,11 @@ void rescheduleForward(Project &project)
     QHash<int, int> indegree;
     for (const Task &t : project.tasks)
         indegree.insert(t.uniqueId, 0);
+    const OutlineParents outline(project);
     for (const Relation &rel : project.relations) {
         if (!idx.contains(rel.predecessorTaskUid) || !idx.contains(rel.successorTaskUid)
-            || rel.predecessorTaskUid == rel.successorTaskUid)
+            || rel.predecessorTaskUid == rel.successorTaskUid
+            || outline.related(rel.predecessorTaskUid, rel.successorTaskUid))
             continue;
         // An inactive predecessor imposes no constraint: its successors schedule as if
         // the link weren't there (MS Project Inactivate semantics).
@@ -247,6 +291,7 @@ void rescheduleBackward(Project &project)
 
     // Walk successors before predecessors. Inactive successors impose no
     // backward bound, matching the forward pass's inactive-link behavior.
+    const OutlineParents outline(project);
     QMultiHash<int, const Relation *> succLinksOf;
     QMultiHash<int, int> predsOf;
     QHash<int, int> outdegree;
@@ -255,7 +300,8 @@ void rescheduleBackward(Project &project)
     for (const Relation &rel : project.relations) {
         if (!idx.contains(rel.predecessorTaskUid) || !idx.contains(rel.successorTaskUid)
             || rel.predecessorTaskUid == rel.successorTaskUid
-            || !project.tasks.at(idx.value(rel.successorTaskUid)).active)
+            || !project.tasks.at(idx.value(rel.successorTaskUid)).active
+            || outline.related(rel.predecessorTaskUid, rel.successorTaskUid))
             continue;
         succLinksOf.insert(rel.predecessorTaskUid, &rel);
         predsOf.insert(rel.successorTaskUid, rel.predecessorTaskUid);
@@ -391,6 +437,9 @@ void Scheduler::reschedule(Project &project)
 {
     // The early pass provides anchors for explicit ASAP tasks and establishes
     // the project finish used by ALAP tasks in start-scheduled projects.
+    // Neither pass reshapes the assignment/resource/calendar lists, so one
+    // index serves both and spares a rescan of every assignment per task.
+    const SchedulingCalendar::IndexScope index(project);
     rescheduleForward(project);
     rescheduleBackward(project);
 }
@@ -425,9 +474,11 @@ void Scheduler::computeSlack(Project &project)
     QHash<int, int> outdegree;
     for (const Task &t : project.tasks)
         outdegree.insert(t.uniqueId, 0);
+    const OutlineParents outline(project);
     for (const Relation &rel : project.relations) {
         if (!idx.contains(rel.predecessorTaskUid) || !idx.contains(rel.successorTaskUid)
-            || rel.predecessorTaskUid == rel.successorTaskUid)
+            || rel.predecessorTaskUid == rel.successorTaskUid
+            || outline.related(rel.predecessorTaskUid, rel.successorTaskUid))
             continue;
         succLinksOf.insert(rel.predecessorTaskUid, &rel);
         predsOf.insert(rel.successorTaskUid, rel.predecessorTaskUid);
@@ -611,6 +662,11 @@ void Scheduler::computeSlack(Project &project)
             s.lateFinish = lateFinish;
         }
     }
+}
+
+bool Scheduler::isOutlineRelated(const Project &project, int aUid, int bUid)
+{
+    return aUid != bUid && OutlineParents(project).related(aUid, bUid);
 }
 
 } // namespace schedule

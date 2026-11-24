@@ -14,6 +14,8 @@ constexpr int kRecordBytes = 12;   // [u32 uid][u32 offset][u16 type][u16 unused
 bool BkndVarData::parse(const QByteArray &varMeta, const QByteArray &var2Data)
 {
     m_records.clear();
+    m_index.clear();
+    m_uniqueIds.clear();
     m_var2 = var2Data;
 
     if (varMeta.size() < kHeaderBytes)
@@ -22,11 +24,16 @@ bool BkndVarData::parse(const QByteArray &varMeta, const QByteArray &var2Data)
     if (qFromLittleEndian<quint32>(p) != kVarMetaMagic)
         return false;
 
+    const qsizetype count = (varMeta.size() - kHeaderBytes) / kRecordBytes;
+    m_records.reserve(count);
+    m_index.reserve(count);
     for (int o = kHeaderBytes; o + kRecordBytes <= varMeta.size(); o += kRecordBytes) {
         Record r;
         r.uniqueId = qFromLittleEndian<quint32>(p + o);
         r.offset   = qFromLittleEndian<quint32>(p + o + 4);
         r.type     = qFromLittleEndian<quint16>(p + o + 8);
+        m_index.try_emplace(key(r.uniqueId, r.type), m_records.size()); // first wins
+        m_uniqueIds.insert(r.uniqueId);
         m_records.append(r);
     }
     return true;
@@ -57,25 +64,21 @@ QVector<BkndVarData::Entry> BkndVarData::stringsForType(quint16 type) const
 
 bool BkndVarData::hasEntriesFor(quint32 uniqueId) const
 {
-    for (const Record &r : m_records)
-        if (r.uniqueId == uniqueId)
-            return true;
-    return false;
+    return m_uniqueIds.contains(uniqueId);
 }
 
 QByteArray BkndVarData::blobFor(quint32 uniqueId, quint16 type) const
 {
     const uchar *v = reinterpret_cast<const uchar *>(m_var2.constData());
     const quint32 size = static_cast<quint32>(m_var2.size());
-    for (const Record &r : m_records) {
-        if (r.type != type || r.uniqueId != uniqueId)
-            continue;
-        if (r.offset + 4 > size)
-            return QByteArray();
-        const quint32 len = qFromLittleEndian<quint32>(v + r.offset);
-        if (len == 0 || r.offset + 4 + len > size)
-            return QByteArray();
-        return m_var2.mid(static_cast<int>(r.offset + 4), static_cast<int>(len));
-    }
-    return QByteArray();
+    const auto it = m_index.constFind(key(uniqueId, type));
+    if (it == m_index.cend())
+        return QByteArray();
+    const Record &r = m_records.at(it.value());
+    if (r.offset + 4 > size)
+        return QByteArray();
+    const quint32 len = qFromLittleEndian<quint32>(v + r.offset);
+    if (len == 0 || r.offset + 4 + len > size)
+        return QByteArray();
+    return m_var2.mid(static_cast<int>(r.offset + 4), static_cast<int>(len));
 }

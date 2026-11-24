@@ -158,6 +158,23 @@ int main(int argc, char **argv)
                     qPrintable(fieldId(u32(sd, o + 67))), qPrintable(fieldId(u32(sd, o + 71))),
                     qPrintable(fieldId(u32(sd, o + 75))), qPrintable(fieldId(u32(sd, o + 79))),
                     qPrintable(fieldId(u32(sd, o + 83))), u16(sd, o + 89));
+        // DUMP_CPP=1: the decoded record as a C++ ViewBarStyle initialiser, for
+        // baking MS Project's own rows into code verbatim.
+        if (qEnvironmentVariableIsSet("DUMP_CPP")) {
+            const schedule::ViewBarStyle b = BarStyleCodec::readRecord(sd, o);
+            std::printf("     CPP: r.name=u\"%s\"_s; r.middleShape=%u; r.middlePattern=%u; "
+                        "r.middleFlag=%u; r.middleColor=%d; r.startShape=%u; r.startColor=%d; "
+                        "r.endShape=%u; r.endColor=%d; r.fromField=qint32(0x%08x); "
+                        "r.toField=qint32(0x%08x); r.showFor=0x%016llxull; "
+                        "r.showForNot=0x%016llxull; r.row=%d; r.barText={%d,%d,%d,%d,%d}; "
+                        "r.styleId=%u; r.flag87=%u;\n",
+                        qPrintable(b.name), b.middleShape, b.middlePattern, b.middleFlag,
+                        b.middleColor, b.startShape, b.startColor, b.endShape, b.endColor,
+                        quint32(b.fromField), quint32(b.toField),
+                        (unsigned long long)b.showFor, (unsigned long long)b.showForNot,
+                        b.row, b.barText[0], b.barText[1], b.barText[2], b.barText[3],
+                        b.barText[4], b.styleId, b.flag87);
+        }
     }
 
     // Verify readRecord/writeRecord are byte-exact inverses on this real file:

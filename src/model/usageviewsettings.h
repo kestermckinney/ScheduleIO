@@ -5,7 +5,9 @@
 #define USAGEVIEWSETTINGS_H
 
 #include "scheduleio_export.h"
+#include "model/viewautofilter.h"
 
+#include <QByteArray>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -28,6 +30,14 @@ struct SCHEDULEIO_EXPORT UsageTableColumn
     }
 };
 
+// The definition Microsoft Project keeps in a view for the group `name`
+// (Project 2016's own bytes): "No Group", the built-in task groups "Critical",
+// "Status", "Complete and Incomplete Tasks" and "Auto Scheduled v. Manually
+// Scheduled" (also spelled "...vs. ..."), the built-in resource group
+// "Resource Type", and "Outline Level" (a custom group on the Outline Level
+// field). Empty for any other name.
+SCHEDULEIO_EXPORT QByteArray projectGroupDefinition(const QString &name);
+
 // Presentation state shared by the Gantt, Task Usage and Resource Usage views.
 // Native fields use Project's view records. detailSelection preserves an exact
 // application selection when it includes calculated details Project cannot
@@ -36,6 +46,9 @@ struct SCHEDULEIO_EXPORT UsageViewSettings
 {
     bool present = false;
     bool modified = false; // writer patch request; not part of semantic identity
+    // Writer request: `columns` is the table's complete ordered column list
+    // (rebuild the native table), not just width overrides for its columns.
+    bool columnLayout = false;
     QString viewName;
     QString tableName;
     QList<UsageTableColumn> columns;
@@ -43,6 +56,36 @@ struct SCHEDULEIO_EXPORT UsageViewSettings
     QStringList detailSelection; // exact Task Usage selection (MPP extension)
     int timescaleSize = 100; // Project's Timescale "Size" / Enlarge percentage
     int tableWidth = 0;      // width of the table (left) pane in a split view
+    // The view's column AutoFilters (Project ANDs them). Written whenever the
+    // view is modified, so clearing the list clears the file's filters.
+    QList<ColumnAutoFilter> autoFilters;
+    // The named filter the view has applied, spelled as Project stores it
+    // ("&All Tasks", "Critical"); empty when the file's view records none.
+    // Written whenever it differs from the file's, ignoring the '&' hotkey.
+    QString filterName;
+    // The group the view has applied, as Project names it ("No Group",
+    // "Critical"), and the copy of its definition Project keeps in the view
+    // (the 83-byte Props9 item 0x2240001D). Empty when the view records none.
+    // Written whenever the name differs from the file's.
+    QString groupName;
+    QByteArray groupDefinition;
+
+    void setFilterName(const QString &name)
+    {
+        filterName = name;
+        present = true;
+    }
+
+    // Apply one of Project's groups (see projectGroupDefinition). False, and
+    // nothing changed, for a group whose definition ScheduleIO doesn't carry.
+    bool setGroup(const QString &name);
+
+    void setAutoFilters(const QList<ColumnAutoFilter> &filters)
+    {
+        autoFilters = filters;
+        present = true;
+        modified = true;
+    }
 
     int columnWidth(quint32 fieldId, int fallback = 0) const
     {
@@ -68,6 +111,26 @@ struct SCHEDULEIO_EXPORT UsageViewSettings
         columns.append(column);
         present = true;
         modified = true;
+    }
+
+    // Replace the table's visible columns (in order). Entries with fieldId 0
+    // are dropped; widths are Project's character widths (0 keeps the stored
+    // width of a field already in the table).
+    void setColumns(const QList<UsageTableColumn> &list)
+    {
+        QList<UsageTableColumn> next;
+        for (UsageTableColumn column : list) {
+            if (column.fieldId == 0)
+                continue;
+            column.width = qBound(0, column.width, 255);
+            next.append(column);
+        }
+        if (next.isEmpty())
+            return;
+        columns = next;
+        present = true;
+        modified = true;
+        columnLayout = true;
     }
 
     void setTimescaleSize(int percent)
@@ -112,7 +175,9 @@ struct SCHEDULEIO_EXPORT UsageViewSettings
             && tableName == o.tableName && columns == o.columns
             && detailFields == o.detailFields && detailSelection == o.detailSelection
             && timescaleSize == o.timescaleSize
-            && tableWidth == o.tableWidth;
+            && tableWidth == o.tableWidth && autoFilters == o.autoFilters
+            && filterName == o.filterName && groupName == o.groupName
+            && groupDefinition == o.groupDefinition;
     }
 };
 

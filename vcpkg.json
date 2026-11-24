@@ -1,6 +1,6 @@
 {
   "name": "scheduleio",
-  "version-string": "0.1.0",
+  "version-string": "0.1.1",
   "description": "Cross-platform Qt6 library to read and write Microsoft Project .mpp files",
   "dependencies": []
 }

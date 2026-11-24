@@ -12,7 +12,11 @@
 #include "model/resource.h"
 #include "model/timephasedvalue.h"
 
+#include "codec/fielddecoders.h"
+#include "ole/compoundfile.h"
+
 #include <QTest>
+#include <QtEndian>
 
 namespace {
 
@@ -70,6 +74,79 @@ schedule::Project projectWithWorkResource()
     return project;
 }
 
+// A task's STOP (u32@136) and RESUME (u32@132) as the MPP14 writer stored them,
+// read straight from the TBkndTask fixed rows (47-byte FixedMeta items whose
+// +4 is the row's FixedData offset; UNIQUE_ID at row offset 4).
+QPair<QDateTime, QDateTime> writtenStopResume(const QByteArray &mpp, int uid)
+{
+    CompoundFile cf;
+    if (!cf.openFromData(mpp))
+        return {};
+    const QStringList base{QStringLiteral("   114"), QStringLiteral("TBkndTask")};
+    const QByteArray meta = cf.readStream(base + QStringList{QStringLiteral("FixedMeta")});
+    const QByteArray data = cf.readStream(base + QStringList{QStringLiteral("FixedData")});
+    const auto u32 = [](const QByteArray &b, int o) {
+        return qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(b.constData()) + o);
+    };
+    const int count = (meta.size() - 16) / 47;
+    for (int i = 0; i < count; ++i) {
+        const int at = int(u32(meta, 16 + i * 47 + 4));
+        const int next = i + 1 < count ? int(u32(meta, 16 + (i + 1) * 47 + 4))
+                                       : int(data.size());
+        if (next - at < 140 || int(u32(data, at + 4)) != uid)
+            continue;
+        const QByteArray row = data.mid(at, next - at);
+        return { FieldDecoders::decodeMppTimestamp(row, 136),
+                 FieldDecoders::decodeMppTimestamp(row, 132) };
+    }
+    return {};
+}
+
+// A var-data blob of one entity row ("TBkndTask"/"TBkndAssn"), by field key.
+QByteArray writtenVarBlob(const QByteArray &mpp, const QString &entity, int uid, quint16 key)
+{
+    CompoundFile cf;
+    if (!cf.openFromData(mpp))
+        return {};
+    const QStringList base{QStringLiteral("   114"), entity};
+    const QByteArray meta = cf.readStream(base + QStringList{QStringLiteral("VarMeta")});
+    const QByteArray data = cf.readStream(base + QStringList{QStringLiteral("Var2Data")});
+    const auto u32 = [](const QByteArray &b, int o) {
+        return qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(b.constData()) + o);
+    };
+    const int count = int(u32(meta, 8));
+    for (int i = 0; i < count; ++i) {
+        const int at = 24 + i * 12;
+        if (int(u32(meta, at)) != uid
+            || qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(meta.constData()) + at + 8) != key)
+            continue;
+        const int offset = int(u32(meta, at + 4));
+        return data.mid(offset + 4, int(u32(data, offset)));
+    }
+    return {};
+}
+
+// Byte 10 of an assignment's 34-byte FixedMeta item (its progress-state flags).
+int writtenAssignmentState(const QByteArray &mpp, int uid)
+{
+    CompoundFile cf;
+    if (!cf.openFromData(mpp))
+        return -1;
+    const QStringList base{QStringLiteral("   114"), QStringLiteral("TBkndAssn")};
+    const QByteArray meta = cf.readStream(base + QStringList{QStringLiteral("FixedMeta")});
+    const QByteArray data = cf.readStream(base + QStringList{QStringLiteral("FixedData")});
+    const int count = (meta.size() - 16) / 34;
+    for (int i = 0; i < count; ++i) {
+        const int at = int(qFromLittleEndian<quint32>(
+            reinterpret_cast<const uchar *>(meta.constData()) + 16 + i * 34 + 4));
+        if (at + 4 <= data.size()
+            && int(qFromLittleEndian<quint32>(
+                   reinterpret_cast<const uchar *>(data.constData()) + at)) == uid)
+            return quint8(meta.at(16 + i * 34 + 10));
+    }
+    return -1;
+}
+
 } // namespace
 
 class TstProgressUpdating : public QObject
@@ -90,6 +167,7 @@ private slots:
     void directActualAndRemainingWorkReconcileAssignments();
     void scheduledProgressRoundTrips();
     void rescheduledProgressRoundTrips();
+    void percentCompleteWritesCompleteThrough();
 };
 
 void TstProgressUpdating::directDurationAndDateFieldsStayCanonical()
@@ -587,6 +665,68 @@ void TstProgressUpdating::rescheduledProgressRoundTrips()
     XmlIO xmlReader;
     QVERIFY2(xmlReader.openFromData(xml), qPrintable(xmlReader.errorString()));
     verify(xmlReader.project());
+}
+
+// Project draws the Progress bar to Complete Through, which it takes from the
+// task's Stop/Resume. Left at NA on a started task, Project reads them as the
+// Finish and an 8%-complete task opens with a full progress bar.
+void TstProgressUpdating::percentCompleteWritesCompleteThrough()
+{
+    schedule::Project project = projectWithWorkResource();
+    project.formatVersion = schedule::Project::FormatVersion::Mpp14;
+    const QDateTime monday(QDate(2026, 8, 3), QTime(8, 0));
+    project.tasks = { task(1, monday, 40 * kHour), task(2, monday, 40 * kHour),
+                      task(3, monday, 40 * kHour) };
+    for (schedule::Task &t : project.tasks)
+        t.finish = QDateTime(QDate(2026, 8, 7), QTime(17, 0));
+    project.assignments = { assignment(1, 1, 0, 40 * kHour) };
+    project.assignments[0].start = monday;
+    project.assignments[0].finish = project.tasks[0].finish;
+    QVERIFY(schedule::ProgressUpdating::setPercentComplete(project, 1, 0.25));
+    QVERIFY(schedule::ProgressUpdating::setPercentComplete(project, 2, 1.0));
+
+    MppIO writer;
+    writer.setProject(project);
+    const QByteArray mpp = writer.saveToData();
+    QVERIFY2(!mpp.isEmpty(), qPrintable(writer.errorString()));
+
+    // 25% of 40h = 10h: Monday's 8h, then 08:00-10:00 on Tuesday.
+    const auto partial = writtenStopResume(mpp, 1);
+    QCOMPARE(partial.first, QDateTime(QDate(2026, 8, 4), QTime(10, 0)));
+    QCOMPARE(partial.second, QDateTime(QDate(2026, 8, 4), QTime(10, 0)));
+    const auto complete = writtenStopResume(mpp, 2);
+    QCOMPARE(complete.first, QDateTime(QDate(2026, 8, 7), QTime(17, 0)));
+    QCOMPARE(complete.second, QDateTime(QDate(2026, 8, 7), QTime(17, 0)));
+    const auto unstarted = writtenStopResume(mpp, 3);
+    QVERIFY(!unstarted.first.isValid());
+    QVERIFY(!unstarted.second.isValid());
+
+    // Project reads Complete Through from the task's %-complete curve (var
+    // key 350): Actual Start, then the Stop date at 25%, then a fixed closing
+    // point. Dates are tenths of a minute since 1983-12-31.
+    const auto tenths = [](const QDateTime &dt) {
+        return quint32(QDate(1983, 12, 31).daysTo(dt.date()) * 14400
+                       + dt.time().msecsSinceStartOfDay() / 6000);
+    };
+    QByteArray curve = QByteArray::fromHex("03000400100000000000000000000000");
+    const auto point = [&curve](quint32 kind, double value, quint32 date) {
+        uchar b[20] = {};
+        qToLittleEndian<quint32>(kind, b);
+        quint64 bits;
+        memcpy(&bits, &value, 8);
+        qToLittleEndian<quint64>(bits, b + 8);
+        qToLittleEndian<quint32>(date, b + 16);
+        curve.append(reinterpret_cast<const char *>(b), 20);
+    };
+    point(1, 32768.0, tenths(monday));
+    point(0, 25.0, tenths(QDateTime(QDate(2026, 8, 4), QTime(10, 0))));
+    point(1, 25.0, 0x340A75F7u);
+    QCOMPARE(writtenVarBlob(mpp, QStringLiteral("TBkndTask"), 1, 350).toHex(), curve.toHex());
+    QVERIFY(writtenVarBlob(mpp, QStringLiteral("TBkndTask"), 3, 350).isEmpty());
+
+    // The in-progress assignment carries Project's 0x2B state, not the
+    // completed rows' 0x3B (which makes Project draw the work as finished).
+    QCOMPARE(writtenAssignmentState(mpp, 1), 0x2B);
 }
 
 QTEST_MAIN(TstProgressUpdating)

@@ -5,16 +5,41 @@
 #include "model/duration.h"
 #include "model/scheduler.h"
 
+#include <QHash>
+
 #include <cmath>
+#include <optional>
 
 namespace schedule::SchedulingCalendar {
+
+struct IndexScope::Data
+{
+    const Project *project = nullptr;
+    QHash<int, int> resourceIndex;               // resource uid -> first index in resources
+    QHash<int, QVector<int>> workAssignments;    // task uid -> its work assignments, list order
+    QHash<int, WorkCalendar> calendars;          // calendar uid -> resolved calendar
+    std::optional<WorkCalendar> projectCalendar;
+    QHash<QPair<int, int>, WorkCalendar> intersections;   // (task cal, resource cal)
+};
 
 namespace {
 
 constexpr double kMinUnits = 0.01;
 
+thread_local IndexScope::Data *t_index = nullptr;
+
+// The active index, when it was built for this project.
+IndexScope::Data *indexFor(const Project &project)
+{
+    return t_index && t_index->project == &project ? t_index : nullptr;
+}
+
 const Resource *resourceByUid(const Project &project, int uid)
 {
+    if (const IndexScope::Data *index = indexFor(project)) {
+        const auto it = index->resourceIndex.constFind(uid);
+        return it == index->resourceIndex.cend() ? nullptr : &project.resources.at(it.value());
+    }
     for (const Resource &resource : project.resources)
         if (resource.uniqueId == uid)
             return &resource;
@@ -24,6 +49,13 @@ const Resource *resourceByUid(const Project &project, int uid)
 QList<const Assignment *> workAssignments(const Project &project, const Task &task)
 {
     QList<const Assignment *> out;
+    if (const IndexScope::Data *index = indexFor(project)) {
+        const auto it = index->workAssignments.constFind(task.uniqueId);
+        if (it != index->workAssignments.cend())
+            for (const int i : it.value())
+                out.append(&project.assignments.at(i));
+        return out;
+    }
     for (const Assignment &a : project.assignments) {
         if (a.taskUniqueId != task.uniqueId)
             continue;
@@ -34,6 +66,17 @@ QList<const Assignment *> workAssignments(const Project &project, const Task &ta
     return out;
 }
 
+WorkCalendar resolvedCalendar(const Project &project, int calendarUniqueId)
+{
+    IndexScope::Data *index = indexFor(project);
+    if (!index)
+        return WorkCalendar(project, calendarUniqueId);
+    auto it = index->calendars.find(calendarUniqueId);
+    if (it == index->calendars.end())
+        it = index->calendars.insert(calendarUniqueId, WorkCalendar(project, calendarUniqueId));
+    return it.value();
+}
+
 qint64 span(const Assignment &assignment)
 {
     return qint64(std::llround(double(assignment.workMillis)
@@ -42,10 +85,47 @@ qint64 span(const Assignment &assignment)
 
 } // namespace
 
+IndexScope::IndexScope(const Project &project)
+    : m_previous(t_index)
+{
+    if (t_index && t_index->project == &project)
+        return;   // an outer scope already indexes this project
+    m_data = new Data;
+    m_data->project = &project;
+    const QList<Resource> &resources = project.resources;
+    m_data->resourceIndex.reserve(resources.size());
+    for (int i = 0; i < resources.size(); ++i)
+        if (!m_data->resourceIndex.contains(resources.at(i).uniqueId))
+            m_data->resourceIndex.insert(resources.at(i).uniqueId, i);
+    const QList<Assignment> &assignments = project.assignments;
+    for (int i = 0; i < assignments.size(); ++i) {
+        const Assignment &a = assignments.at(i);
+        const auto r = m_data->resourceIndex.constFind(a.resourceUniqueId);
+        if (r != m_data->resourceIndex.cend()
+            && resources.at(r.value()).type == Resource::Type::Work)
+            m_data->workAssignments[a.taskUniqueId].append(i);
+    }
+    t_index = m_data;
+}
+
+IndexScope::~IndexScope()
+{
+    if (m_data) {
+        t_index = m_previous;
+        delete m_data;
+    }
+}
+
 WorkCalendar taskBase(const Project &project, const Task &task)
 {
-    return task.calendarUniqueId >= 0 ? WorkCalendar(project, task.calendarUniqueId)
-                                      : Scheduler::projectCalendar(project);
+    if (task.calendarUniqueId >= 0)
+        return resolvedCalendar(project, task.calendarUniqueId);
+    if (IndexScope::Data *index = indexFor(project)) {
+        if (!index->projectCalendar)
+            index->projectCalendar = Scheduler::projectCalendar(project);
+        return *index->projectCalendar;
+    }
+    return Scheduler::projectCalendar(project);
 }
 
 WorkCalendar assignment(const Project &project, const Task &task,
@@ -56,7 +136,15 @@ WorkCalendar assignment(const Project &project, const Task &task,
     if (task.manual || task.ignoreResourceCalendar || !resource
         || resource->type != Resource::Type::Work || resource->calendarUniqueId < 0)
         return base;
-    return WorkCalendar::intersection({ base, WorkCalendar(project, resource->calendarUniqueId) });
+    IndexScope::Data *index = indexFor(project);
+    if (!index)
+        return WorkCalendar::intersection({ base, WorkCalendar(project, resource->calendarUniqueId) });
+    const QPair<int, int> key(task.calendarUniqueId, resource->calendarUniqueId);
+    auto it = index->intersections.find(key);
+    if (it == index->intersections.end())
+        it = index->intersections.insert(key, WorkCalendar::intersection(
+            { base, resolvedCalendar(project, resource->calendarUniqueId) }));
+    return it.value();
 }
 
 QDateTime nextStart(const Project &project, const Task &task, const QDateTime &candidate)

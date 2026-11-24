@@ -5,6 +5,8 @@
 #define BKNDVARDATA_H
 
 #include <QByteArray>
+#include <QHash>
+#include <QSet>
 #include <QString>
 #include <QVector>
 
@@ -52,7 +54,16 @@ private:
         quint32 offset = 0;
         quint16 type = 0;
     };
+    static quint64 key(quint32 uniqueId, quint16 type)
+    {
+        return (quint64(uniqueId) << 16) | type;
+    }
     QVector<Record> m_records;
+    // (uniqueId, type) -> index of its first record, and the unique ids that
+    // have any record. Callers look up every field of every row, so a linear
+    // scan here made reading a large file quadratic.
+    QHash<quint64, qsizetype> m_index;
+    QSet<quint32> m_uniqueIds;
     QByteArray m_var2;
 };
 

@@ -1,0 +1,57 @@
+Project 16.0
+saved af-none visible=["Phase","Design review","Build","Test","Deploy","Sign-off"]
+saved af-off visible=["Phase","Design review","Build","Test","Deploy","Sign-off"]
+OK   af-name-contains SetAutoFilter "Name", 1, "contains", "De"
+saved af-name-contains visible=["Phase","Design review","Deploy"]
+OK   af-name-equals SetAutoFilter "Name", 1, "equals", "Build"
+saved af-name-equals visible=["Phase","Build"]
+OK   af-name-notequals SetAutoFilter "Name", 1, "does not equal", "Build"
+saved af-name-notequals visible=["Phase","Design review","Test","Deploy","Sign-off"]
+FAIL af-name-begins SetAutoFilter "Name", 45, , "De": 1101 The argument value is not valid.
+saved af-name-begins visible=["Phase","Design review","Build","Test","Deploy","Sign-off"]
+OK   af-name-or SetAutoFilter "Name", 1, "equals", "Build", "Or", "equals", "Test"
+saved af-name-or visible=["Phase","Build","Test"]
+OK   af-name-in SetAutoFilter "Name", 2, , "Build" & vbTab & "Test"
+saved af-name-in visible=["Phase","Build","Test"]
+OK   af-start-thisweek SetAutoFilter "Start", 7
+saved af-start-thisweek visible=["Phase","Design review","Build","Test","Deploy","Sign-off"]
+OK   af-start-nextmonth SetAutoFilter "Start", 9
+FAIL af-start-nextmonth visible rows: Object not a collection
+saved af-start-nextmonth visible=[]
+OK   af-start-beforesd SetAutoFilter "Start", 19
+FAIL af-start-beforesd visible rows: Object not a collection
+saved af-start-beforesd visible=[]
+OK   af-finish-nodate SetAutoFilter "Deadline", 21
+saved af-finish-nodate visible=["Phase","Design review","Build","Test","Deploy","Sign-off"]
+OK   af-finish-greater SetAutoFilter "Finish", 1, "is greater than", "12/1/2026"
+FAIL af-finish-greater visible rows: Object not a collection
+saved af-finish-greater visible=[]
+OK   af-start-within SetAutoFilter "Start", 1, "is greater than or equal to", "11/17/2026", "And", "is less than or equal to", "12/1/2026"
+saved af-start-within visible=["Phase","Design review","Build","Test","Deploy","Sign-off"]
+OK   af-dur-1day SetAutoFilter "Duration", 22
+saved af-dur-1day visible=["Phase","Design review","Sign-off"]
+OK   af-dur-1week SetAutoFilter "Duration", 24
+saved af-dur-1week visible=["Phase","Build","Test"]
+OK   af-dur-none SetAutoFilter "Duration", 25
+saved af-dur-none visible=["Phase","Sign-off"]
+OK   af-dur-greater SetAutoFilter "Duration", 1, "is greater than", "3d"
+saved af-dur-greater visible=["Phase","Build","Test"]
+OK   af-work-8h SetAutoFilter "Work", 26
+saved af-work-8h visible=["Phase","Design review","Build","Test","Deploy","Sign-off"]
+OK   af-pct-notstarted SetAutoFilter "% Complete", 30
+saved af-pct-notstarted visible=["Phase","Design review","Deploy","Sign-off"]
+OK   af-pct-inprogress SetAutoFilter "% Complete", 31
+saved af-pct-inprogress visible=["Phase","Build"]
+OK   af-pct-complete SetAutoFilter "% Complete", 32
+saved af-pct-complete visible=["Phase","Test"]
+OK   af-cost-gt0 SetAutoFilter "Cost", 37
+saved af-cost-gt0 visible=["Phase","Build","Deploy"]
+OK   af-flag1-yes SetAutoFilter "Flag1", 38
+saved af-flag1-yes visible=["Phase","Design review","Test"]
+OK   af-two-columns SetAutoFilter "Name", 1, "contains", "e"
+OK   af-two-columns SetAutoFilter "Duration", 24
+saved af-two-columns visible=["Phase","Test"]
+OK   af-taskusage-name SetAutoFilter "Name", 1, "contains", "De"
+saved af-taskusage-name visible=["Phase","Design review","Deploy"]
+OK   af-ressheet-name SetAutoFilter "Name", 1, "contains", "A"
+saved af-ressheet-name visible=["Ann"]

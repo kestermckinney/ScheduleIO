@@ -58,6 +58,7 @@ private slots:
     void constraints();
     void manualAndStartedUntouched();
     void cycleIsSafe();
+    void summaryLinkedToOwnSubtaskDoesNotDrift();
     void reachability();
     void slackAndCriticalPath();
     void deadlineCapsLateFinish();
@@ -226,6 +227,50 @@ void tst_scheduler::cycleIsSafe()
 
     QCOMPARE(p.tasks[0].start, s1);
     QCOMPARE(p.tasks[1].start, s2);
+}
+
+// Microsoft Project refuses a link between a summary and its own subtask; one
+// can still arise here (an indent turns an existing link into one). The
+// summary's dates roll up from the very subtask the link would move, so
+// honouring it pushed the subtask out again on every recalculation. The
+// passes ignore such a link: repeated recalculation leaves the dates alone.
+void tst_scheduler::summaryLinkedToOwnSubtaskDoesNotDrift()
+{
+    Project p;
+    Task summary = makeTask(1, QDateTime(kMon, QTime(8, 0)), 2 * kDay);
+    summary.summary = true;
+    summary.outlineLevel = 1;
+    Task child = makeTask(2, QDateTime(kMon, QTime(8, 0)), 2 * kDay);
+    child.outlineLevel = 2;
+    Task grandchild = makeTask(3, QDateTime(kMon, QTime(8, 0)), kDay);
+    grandchild.outlineLevel = 3;
+    Task after = makeTask(4, QDateTime(kMon, QTime(8, 0)), kDay);
+    after.outlineLevel = 1;
+    child.summary = true;   // over the grandchild
+    p.tasks << summary << child << grandchild << after;
+    // Summary -> its grandchild (two levels down) and a normal link out.
+    p.relations << link(1, 3) << link(3, 4);
+
+    QVERIFY(Scheduler::isOutlineRelated(p, 1, 3));
+    QVERIFY(Scheduler::isOutlineRelated(p, 3, 1));
+    QVERIFY(Scheduler::isOutlineRelated(p, 2, 3));
+    QVERIFY(!Scheduler::isOutlineRelated(p, 3, 4));
+    QVERIFY(!Scheduler::isOutlineRelated(p, 1, 4));
+    QVERIFY(!Scheduler::isOutlineRelated(p, 1, 1));
+
+    const QDateTime start = p.tasks[2].start;
+    for (int pass = 0; pass < 3; ++pass) {
+        Scheduler::reschedule(p);
+        Scheduler::computeSlack(p);
+        // The caller's rollup: both summaries span the grandchild.
+        for (int i : {0, 1}) {
+            p.tasks[i].start = p.tasks[2].start;
+            p.tasks[i].finish = p.tasks[2].finish;
+        }
+        QCOMPARE(p.tasks[2].start, start);
+    }
+    // The link out of the grandchild still schedules its successor.
+    QVERIFY(p.tasks[3].start >= p.tasks[2].finish);
 }
 
 void tst_scheduler::reachability()

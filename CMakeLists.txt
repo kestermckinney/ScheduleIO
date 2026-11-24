@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-project(ScheduleIO VERSION 0.1.0 LANGUAGES CXX)
+project(ScheduleIO VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -32,6 +32,9 @@ set(SCHEDULEIO_SOURCES
     src/codec/mppfieldids.cpp
     src/codec/barstylecodec.cpp
     src/codec/viewformat.cpp
+    src/codec/autofiltercodec.cpp
+    src/codec/customfielddefs.cpp
+    src/codec/viewgroups.cpp
     src/codec/mpp14timephased.cpp
     src/model/project.cpp
     src/model/task.cpp
@@ -53,6 +56,7 @@ set(SCHEDULEIO_SOURCES
     src/model/materialcosting.cpp
     src/model/projectreconciliation.cpp
     src/model/progressupdating.cpp
+    src/model/earnedvalue.cpp
     src/model/workcontouring.cpp
     src/model/resourceleveling.cpp
     src/serializer/docserializer.cpp
@@ -78,6 +82,8 @@ set(SCHEDULEIO_HEADERS
     src/codec/mppfieldids.h
     src/codec/barstylecodec.h
     src/codec/viewformat.h
+    src/codec/autofiltercodec.h
+    src/codec/customfielddefs.h
     src/model/project.h
     src/model/task.h
     src/model/resource.h
@@ -89,6 +95,7 @@ set(SCHEDULEIO_HEADERS
     src/model/customfieldlogic.h
     src/model/viewstyles.h
     src/model/usageviewsettings.h
+    src/model/viewautofilter.h
     src/model/timelineviewsettings.h
     src/model/costrate.h
     src/model/availability.h
@@ -100,6 +107,7 @@ set(SCHEDULEIO_HEADERS
     src/model/materialcosting.h
     src/model/projectreconciliation.h
     src/model/progressupdating.h
+    src/model/earnedvalue.h
     src/model/workcontouring.h
     src/model/resourceleveling.h
     src/serializer/docserializer.h

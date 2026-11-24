@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "codec/viewformat.h"
+#include "codec/autofiltercodec.h"
 
 #include "codec/barstylecodec.h"
 #include "codec/bkndvardata.h"
@@ -37,6 +38,14 @@ constexpr quint32 kKeyStyleData = 574619656u;         // STYLE_DATA
 constexpr quint32 kKeyColumnProperties = 574619660u;  // COLUMN_PROPERTIES
 constexpr quint32 kKeyBarExceptions = 574619661u;     // BAR_EXCEPTION_STYLES
 constexpr quint32 kKeyTableName = 574619658u;         // TABLE_NAME
+// The applied named filter, null-terminated UTF-16 ("&All Tasks", "Critical").
+// Project resolves the name against the file's CFilter rowset, then its global
+// template, so a built-in filter needs no definition in the file.
+constexpr quint32 kKeyFilterName = 574619659u;        // FILTER_NAME (0x2240000B)
+// The applied group: its name (null-terminated UTF-16) and the 83-byte copy of
+// its definition Project keeps in the view (see src/codec/viewgroups.cpp).
+constexpr quint32 kKeyGroupName = 0x22400018u;
+constexpr quint32 kKeyGroupDefinition = 0x2240001Du;
 constexpr quint32 kKeyTableProperties = 574619655u;   // TABLE_PROPERTIES
 constexpr quint32 kKeyViewFields = 574619708u;        // VIEW_FIELDS (Usage details)
 constexpr quint32 kKeyFontBases = 54525952u;          // 0x03400000, in 214/Props
@@ -45,11 +54,13 @@ constexpr quint16 kViewPropsType = 6;   // GanttChartView14.PROPERTIES
 // MPP view-type codes (u16@112 of the FixedData record). These do NOT match
 // MPXJ's ViewType enum ordinals -- verified against real files by view name.
 constexpr quint16 kViewTypeGantt = 1;
+constexpr quint16 kViewTypeNetwork = 2;
 constexpr quint16 kViewTypeResourceUsage = 15;
 constexpr quint16 kViewTypeTaskUsage = 14;
 constexpr quint16 kViewTypeTeamPlanner = 9;
 constexpr quint16 kViewTypeCalendar = 13;
 constexpr quint16 kViewTypeTimeline = 16;
+constexpr quint16 kViewTypeResourceSheet = 7;
 constexpr int kViewRecordSize = 138;    // CV_iew FixedData block size
 
 // The Timeline view is a self-describing UTF-16 "<TLViewData>" XML document held
@@ -84,6 +95,7 @@ constexpr int kUsageFieldsOffset = 2237;
 constexpr int kTableRecordSize = 230;
 constexpr int kTableColumnHeaderSize = 12;
 constexpr int kTableColumnSize = 115;
+constexpr int kTableMetaItemSize = 10;
 
 // Per-cell/row exceptional-style records. Field ids are 0x0B400000 | MPXJ
 // MPPTaskField FIELD_ARRAY index for a single cell; 0xFFFFFFFF means "the
@@ -656,6 +668,9 @@ QString normalizedPresentationName(QString name)
     return name.trimmed().toCaseFolded();
 }
 
+void readTableColumns(const CompoundFile &cf, bool resourceTable,
+                      schedule::UsageViewSettings *out);
+
 void readUsageView(const CompoundFile &cf, const QByteArray &viewFixedMeta,
                    const QByteArray &viewFixedData, const BkndVarData &viewVarData,
                    quint16 viewType, schedule::UsageViewSettings *out)
@@ -670,12 +685,21 @@ void readUsageView(const CompoundFile &cf, const QByteArray &viewFixedMeta,
     Props9 props;
     if (!parseProps9(viewVarData.blobFor(viewUid, kViewPropsType), &props))
         return;
+    // Every view names its filter (and a sheet view its group), table or not.
+    if (const PropsItem *filter = props.find(kKeyFilterName))
+        out->filterName = rdUtf16(filter->data, 0, filter->data.size());
+    if (const PropsItem *group = props.find(kKeyGroupName))
+        out->groupName = rdUtf16(group->data, 0, group->data.size());
+    if (const PropsItem *group = props.find(kKeyGroupDefinition))
+        out->groupDefinition = group->data;
     const PropsItem *tableNameItem = props.find(kKeyTableName);
     if (!tableNameItem)
         return;
 
     out->viewName = rdUtf16(viewRecord, 4, 104);
     out->tableName = rdUtf16(tableNameItem->data, 0, tableNameItem->data.size());
+    if (const PropsItem *filters = props.find(AutoFilterCodec::kPropsKey))
+        out->autoFilters = AutoFilterCodec::decode(filters->data);
     if (const PropsItem *table = props.find(kKeyTableProperties)) {
         if (table->data.size() >= 37)
             out->tableWidth = rdU16(table->data, 35);
@@ -706,6 +730,14 @@ void readUsageView(const CompoundFile &cf, const QByteArray &viewFixedMeta,
         }
     }
 
+    readTableColumns(cf, viewType == kViewTypeResourceUsage || viewType == kViewTypeTeamPlanner,
+                     out);
+}
+
+// The columns of the table named out->tableName (a resource table when
+// `resourceTable`), from the file's CTable storage.
+void readTableColumns(const CompoundFile &cf, bool resourceTable, schedule::UsageViewSettings *out)
+{
     const QByteArray tableFixed = cf.readStream(
         { kViewStorage, kCTable, QStringLiteral("FixedData") });
     BkndVarData tableVars;
@@ -720,9 +752,7 @@ void readUsageView(const CompoundFile &cf, const QByteArray &viewFixedMeta,
         const quint32 tableUid = rdU32(rec, 0);
         if (normalizedPresentationName(rdUtf16(rec, 4, 104)) != wanted)
             continue;
-        const bool resourceTable = rdU16(rec, 108) == 1;
-        if (resourceTable != (viewType == kViewTypeResourceUsage
-                              || viewType == kViewTypeTeamPlanner))
+        if ((rdU16(rec, 108) == 1) != resourceTable)
             continue;
 
         QByteArray columns;
@@ -1510,8 +1540,29 @@ void read(const CompoundFile &cf, schedule::Project *out)
                   &out->resourceUsageView);
     readUsageView(cf, fixedMeta, fixedData, vd, kViewTypeTaskUsage,
                   &out->taskUsageView);
+    // A file whose usage view was never opened carries no view record, but
+    // Project still shows the file's own "Usage" table there.
+    const auto readStockTable = [&cf](schedule::UsageViewSettings *view, bool resource,
+                                      const QString &viewName, const QString &tableName) {
+        if (view->present || !cf.hasStorage({ kViewStorage, kCTable }))
+            return;
+        view->tableName = tableName;
+        readTableColumns(cf, resource, view);
+        if (view->present)
+            view->viewName = viewName;
+        else
+            view->tableName.clear();
+    };
+    readStockTable(&out->taskUsageView, false, QStringLiteral("Tas&k Usage"),
+                   QStringLiteral("Usa&ge"));
+    readStockTable(&out->resourceUsageView, true, QStringLiteral("Resource &Usage"),
+                   QStringLiteral("&Usage"));
     readUsageView(cf, fixedMeta, fixedData, vd, kViewTypeTeamPlanner,
                   &out->teamPlannerView);
+    readUsageView(cf, fixedMeta, fixedData, vd, kViewTypeResourceSheet,
+                  &out->resourceSheetView);
+    readUsageView(cf, fixedMeta, fixedData, vd, kViewTypeCalendar, &out->calendarView);
+    readUsageView(cf, fixedMeta, fixedData, vd, kViewTypeNetwork, &out->networkView);
 
     const auto readSelection = [&cf](const QString &stream) {
         QStringList selection;
@@ -1602,10 +1653,15 @@ bool wantsPatch(const schedule::Project &in)
         || in.teamPlannerStyles.present || in.calendarStyles.present)
         return true;
     if (in.ganttView.modified || in.resourceUsageView.modified || in.taskUsageView.modified
-        || in.teamPlannerView.modified)
+        || in.teamPlannerView.modified || in.resourceSheetView.modified)
         return true;
     if (in.timelineView.present && in.timelineView.modified)
         return true;
+    for (const schedule::UsageViewSettings *v : { &in.ganttView, &in.taskUsageView,
+             &in.resourceUsageView, &in.teamPlannerView, &in.resourceSheetView,
+             &in.calendarView, &in.networkView })
+        if (!v->filterName.isEmpty() || !v->groupName.isEmpty())
+            return true;   // patch() leaves the file alone when the names already match
     if (!in.mppBarExceptions.isEmpty())
         return true;
     for (const schedule::Task &t : in.tasks)
@@ -1841,6 +1897,107 @@ bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &
             patched.insert(rec, buildProps9(props));
     }
 
+    // Column AutoFilters: every modified view gets its list re-encoded, so a
+    // cleared list clears the filters the file had.
+    const struct { quint16 type; const schedule::UsageViewSettings *settings; } kFiltered[] = {
+        { kViewTypeGantt, &in.ganttView },
+        { kViewTypeTaskUsage, &in.taskUsageView },
+        { kViewTypeResourceUsage, &in.resourceUsageView },
+        { kViewTypeResourceSheet, &in.resourceSheetView },
+        { kViewTypeTeamPlanner, &in.teamPlannerView },
+        { kViewTypeCalendar, &in.calendarView },
+        { kViewTypeNetwork, &in.networkView },
+    };
+    const QDateTime stamp(in.statusDate.isValid() ? in.statusDate.date() : QDate::currentDate(),
+                          in.defaultStartTime.isValid() ? in.defaultStartTime : QTime(8, 0));
+    // The applied named filter and group, on each view that names them. Only a
+    // name that differs from the file's (ignoring the '&' hotkey) is rewritten,
+    // so Project's own bytes survive a plain round trip.
+    const auto bare = [](QString name) { return name.remove(QLatin1Char('&')); };
+    const auto setItem = [](Props9 &props, quint32 key, const QByteArray &data) {
+        if (PropsItem *item = props.find(key)) {
+            item->data = data;
+            return;
+        }
+        PropsItem added;
+        added.key = key;
+        added.flags = 1;
+        added.data = data;
+        props.items.append(added);
+    };
+    const auto utf16z = [](const QString &text) {
+        QByteArray data(int(text.size() + 1) * 2, '\0');
+        wrUtf16(data, 0, data.size(), text);
+        return data;
+    };
+    for (const auto &v : kFiltered) {
+        const bool wantGroup = !v.settings->groupName.isEmpty()
+            && !v.settings->groupDefinition.isEmpty();
+        if (v.settings->filterName.isEmpty() && !wantGroup)
+            continue;
+        const int uid = findViewUid(fixedMeta, fixedData, v.type);
+        const int rec = uid >= 0 ? recordForView(uid) : -1;
+        if (rec < 0)
+            continue;
+        Props9 props;
+        const bool parsed = patched.contains(rec)
+            ? parseProps9(patched.value(rec), &props)
+            : parseRecordProps(rec, &props);
+        if (!parsed)
+            continue;
+        const auto stored = [&props](quint32 key) {
+            const PropsItem *item = props.find(key);
+            return item ? rdUtf16(item->data, 0, item->data.size()) : QString();
+        };
+        bool changed = false;
+        if (!v.settings->filterName.isEmpty()
+            && (!props.find(kKeyFilterName)
+                || bare(stored(kKeyFilterName)) != bare(v.settings->filterName))) {
+            setItem(props, kKeyFilterName, utf16z(v.settings->filterName));
+            changed = true;
+        }
+        if (wantGroup
+            && (!props.find(kKeyGroupName)
+                || bare(stored(kKeyGroupName)) != bare(v.settings->groupName))) {
+            setItem(props, kKeyGroupName, utf16z(v.settings->groupName));
+            setItem(props, kKeyGroupDefinition, v.settings->groupDefinition);
+            changed = true;
+        }
+        if (changed)
+            patched.insert(rec, buildProps9(props));
+    }
+
+    for (const auto &v : kFiltered) {
+        if (!v.settings->modified)
+            continue;
+        const int uid = findViewUid(fixedMeta, fixedData, v.type);
+        const int rec = uid >= 0 ? recordForView(uid) : -1;
+        if (rec < 0)
+            continue;
+        Props9 props;
+        const bool parsed = patched.contains(rec)
+            ? parseProps9(patched.value(rec), &props)
+            : parseRecordProps(rec, &props);
+        if (!parsed)
+            continue;
+        PropsItem *item = props.find(AutoFilterCodec::kPropsKey);
+        if (!item && v.settings->autoFilters.isEmpty())
+            continue;
+        const QByteArray data = AutoFilterCodec::encode(v.settings->autoFilters, stamp);
+        if (item && AutoFilterCodec::decode(item->data) == v.settings->autoFilters)
+            continue;   // unchanged: keep Project's own bytes
+        if (item) {
+            item->data = data;
+        } else {
+            PropsItem added;
+            added.key = AutoFilterCodec::kPropsKey;
+            added.flags = 1;
+            added.data = data;
+            props.items.append(added);
+        }
+        patched.insert(rec, buildProps9(props));
+    }
+
     if (patched.isEmpty())
         return false;   // nothing to change; caller copies the template verbatim
 
@@ -1874,12 +2031,339 @@ bool patch(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &
     return true;
 }
 
-bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in)
+// One table-column record inside a CTable column blob (115 bytes, after the
+// 12-byte blob header whose u16 at +4 is the column count - 1):
+//   +0  u32  field id (0x0B40xxxx task / 0x0C40xxxx resource)
+//   +4  u8   width (characters)
+//   +5  u8   0x10 | title alignment      +6 u8 0x08
+//   +7  u8   data alignment (0 left, 1 centre, 2 right)
+//   +8  u8   0x08 (0x88 once Project stores an explicit title alignment)
+//   +9  u8   0x01 (| 0x02 when +13 holds a custom title)
+//   +13 UTF-16 title, 100 bytes, empty = the field's own name
+// Decoded 2026-09-27 by diffing Project 2016's stock Entry table against one
+// edited through TaskTables("Entry").TableFields.Add/Delete.
+static QByteArray tableColumnRecord(const QByteArray &base, const schedule::UsageTableColumn &column)
+{
+    QByteArray rec = base;
+    if (rec.size() != kTableColumnSize) {
+        rec = QByteArray(kTableColumnSize, '\0');
+        rec[5] = char(0x10);
+        rec[6] = char(0x08);
+        rec[8] = char(0x08);
+        rec[9] = char(0x01);
+    }
+    wrU32(rec, 0, column.fieldId);
+    if (column.width > 0)
+        rec[4] = char(qBound(1, column.width, 255));
+    if (!column.title.isEmpty()) {
+        for (int i = 13; i < 113; ++i)
+            rec[i] = 0;
+        const QString title = column.title.left(49);
+        for (int i = 0; i < title.size(); ++i)
+            wrU16(rec, 13 + i * 2, title.at(i).unicode());
+        rec[9] = char(quint8(rec.at(9)) | 0x02);
+    }
+    return rec;
+}
+
+// The uid of the table named `wanted` in a CTable FixedData stream, or 0.
+static quint32 findTableUid(const QByteArray &fixedData, const QString &wanted, bool resource,
+                            int *recordOffset = nullptr)
+{
+    for (int offset = 0; offset + kTableRecordSize <= fixedData.size();
+         offset += kTableRecordSize) {
+        const QByteArray rec = fixedData.mid(offset, kTableRecordSize);
+        if ((rdU16(rec, 108) == 1) != resource)
+            continue;
+        if (normalizedPresentationName(rdUtf16(rec, 4, 104)) == wanted) {
+            if (recordOffset)
+                *recordOffset = offset;
+            return rdU32(rec, 0);
+        }
+    }
+    return 0;
+}
+
+// Copy the stock template's table `wanted` (task or resource) into a CTable
+// rowset that lacks it, as the next table uid -- what Project does when a view
+// first shows a table from its global template. False when the rowset already
+// has the table or the stock template does not.
+static bool importStockTable(QByteArray &fixedMeta, QByteArray &fixedData, QByteArray &var2,
+                             QVector<VarRecord> &records, const QByteArray &stockMeta,
+                             const QByteArray &stockData, const QByteArray &stockVar2,
+                             const QVector<VarRecord> &stockRecords, const QString &wanted,
+                             bool resource)
+{
+    if (fixedMeta.size() < 16 || findTableUid(fixedData, wanted, resource) != 0)
+        return false;
+    int stockOffset = -1;
+    const quint32 stockUid = findTableUid(stockData, wanted, resource, &stockOffset);
+    if (stockUid == 0)
+        return false;
+    quint32 newUid = 0;
+    for (int offset = 0; offset + kTableRecordSize <= fixedData.size();
+         offset += kTableRecordSize)
+        newUid = qMax(newUid, rdU32(fixedData, offset));
+    ++newUid;
+
+    QByteArray rec = stockData.mid(stockOffset, kTableRecordSize);
+    wrU32(rec, 0, newUid);
+    // FixedMeta item: [u32 flags][u32 data offset][u16 tail], taken from
+    // the stock table's own item.
+    const int stockItem = 16 + (stockOffset / kTableRecordSize) * kTableMetaItemSize;
+    QByteArray item = stockMeta.mid(stockItem, kTableMetaItemSize);
+    if (item.size() != kTableMetaItemSize)
+        return false;
+    wrU32(item, 4, quint32(fixedData.size()));
+    fixedData += rec;
+    fixedMeta += item;
+    wrU32(fixedMeta, 8, rdU32(fixedMeta, 8) + 1);
+    wrU32(fixedMeta, 12, quint32(fixedData.size()));
+
+    for (const VarRecord &r : stockRecords) {
+        if (r.uid != stockUid)
+            continue;
+        const int len = int(rdU32(stockVar2, int(r.offset)));
+        if (len < 0 || int(r.offset) + 4 + len > stockVar2.size())
+            continue;
+        QByteArray blob = stockVar2.mid(int(r.offset) + 4, len);
+        if (blob.size() >= 4 && rdU32(blob, 0) == stockUid)
+            wrU32(blob, 0, newUid);
+        VarRecord copy = r;
+        copy.uid = newUid;
+        copy.offset = quint32(var2.size());
+        appU32(var2, quint32(blob.size()));
+        var2 += blob;
+        records.append(copy);
+    }
+    return true;
+}
+
+// VarMeta (24-byte header: u32@8 record count, u32@20 data size) for records.
+static QByteArray buildVarMeta(const QByteArray &headerFrom, const QVector<VarRecord> &records,
+                               int dataSize)
+{
+    QByteArray meta = headerFrom.left(24);
+    for (const VarRecord &r : records) {
+        appU32(meta, r.uid);
+        appU32(meta, r.offset);
+        appU16(meta, r.typeLow);
+        appU16(meta, r.typeHigh);
+    }
+    wrU32(meta, 8, quint32(records.size()));
+    wrU32(meta, 20, quint32(dataSize));
+    return meta;
+}
+
+// Whether `v` needs its view in the file: column filters, a filter other than
+// the view's everything-filter, or a group.
+static bool viewNeedsRecord(const schedule::UsageViewSettings &v)
+{
+    const auto bare = [](QString name) { return name.remove(QLatin1Char('&')); };
+    const QString filter = bare(v.filterName), group = bare(v.groupName);
+    return !v.autoFilters.isEmpty()
+        || (!filter.isEmpty() && filter != QLatin1String("All Tasks")
+            && filter != QLatin1String("All Resources"))
+        || (!group.isEmpty() && group != QLatin1String("No Group"));
+}
+
+bool importViews(CompoundFile &doc, const QList<const CompoundFile *> &stocks,
+                 const schedule::Project &in)
+{
+    const QString fm = QStringLiteral("FixedMeta"), fd = QStringLiteral("FixedData"),
+                  vm = QStringLiteral("VarMeta"), v2 = QStringLiteral("Var2Data");
+    if (!doc.hasStorage({ kViewStorage, kCView }))
+        return false;
+    QByteArray fixedMeta = doc.readStream({ kViewStorage, kCView, fm });
+    QByteArray fixedData = doc.readStream({ kViewStorage, kCView, fd });
+    const QByteArray varMeta = doc.readStream({ kViewStorage, kCView, vm });
+    QByteArray var2 = doc.readStream({ kViewStorage, kCView, v2 });
+    QVector<VarRecord> records;
+    if (fixedMeta.size() < 16 || !parseVarMeta(varMeta, &records))
+        return false;
+
+    // The CTable rowset, for a view whose table the file lacks.
+    QByteArray tMeta = doc.readStream({ kViewStorage, kCTable, fm });
+    QByteArray tData = doc.readStream({ kViewStorage, kCTable, fd });
+    const QByteArray tVarMeta = doc.readStream({ kViewStorage, kCTable, vm });
+    QByteArray tVar2 = doc.readStream({ kViewStorage, kCTable, v2 });
+    QVector<VarRecord> tRecords;
+    const bool haveTables = parseVarMeta(tVarMeta, &tRecords);
+    bool viewsAdded = false, tablesAdded = false;
+
+    const struct { quint16 type; bool resource; const schedule::UsageViewSettings *settings; } kViews[] = {
+        { kViewTypeGantt, false, &in.ganttView },
+        { kViewTypeTaskUsage, false, &in.taskUsageView },
+        { kViewTypeResourceUsage, true, &in.resourceUsageView },
+        { kViewTypeResourceSheet, true, &in.resourceSheetView },
+        { kViewTypeTeamPlanner, true, &in.teamPlannerView },
+        { kViewTypeCalendar, false, &in.calendarView },
+        { kViewTypeNetwork, false, &in.networkView },
+    };
+    for (const auto &v : kViews) {
+        if (!viewNeedsRecord(*v.settings) || findViewUid(fixedMeta, fixedData, v.type) >= 0)
+            continue;
+        for (const CompoundFile *stock : stocks) {
+            if (!stock || !stock->hasStorage({ kViewStorage, kCView }))
+                continue;
+            const QByteArray stockMeta = stock->readStream({ kViewStorage, kCView, fm });
+            const QByteArray stockData = stock->readStream({ kViewStorage, kCView, fd });
+            const QByteArray stockVar2 = stock->readStream({ kViewStorage, kCView, v2 });
+            QVector<VarRecord> stockRecords;
+            if (!parseVarMeta(stock->readStream({ kViewStorage, kCView, vm }), &stockRecords))
+                continue;
+            const int stockUid = findViewUid(stockMeta, stockData, v.type);
+            if (stockUid < 0)
+                continue;
+            int stockItem = -1, stockOffset = -1;
+            for (int i = 0; i < int(rdU32(stockMeta, 8)); ++i) {
+                const int off = int(rdU32(stockMeta, 16 + i * 10 + 4));
+                if (off + kViewRecordSize <= stockData.size()
+                    && rdU32(stockData, off) == quint32(stockUid)) {
+                    stockItem = 16 + i * 10;
+                    stockOffset = off;
+                    break;
+                }
+            }
+            if (stockItem < 0)
+                continue;
+
+            quint32 newUid = 0;
+            for (int i = 0; i < int(rdU32(fixedMeta, 8)); ++i)
+                newUid = qMax(newUid, rdU32(fixedData, int(rdU32(fixedMeta, 16 + i * 10 + 4))));
+            ++newUid;
+
+            // The 138-byte view record and its 10-byte meta item ([u16 0][u16 flags]
+            // [u32 data offset][u16 tail]), as Project appends a view it first shows.
+            QByteArray rec = stockData.mid(stockOffset, kViewRecordSize);
+            wrU32(rec, 0, newUid);
+            QByteArray item = stockMeta.mid(stockItem, 10);
+            wrU32(item, 4, quint32(fixedData.size()));
+            fixedData += rec;
+            fixedMeta += item;
+            wrU32(fixedMeta, 8, rdU32(fixedMeta, 8) + 1);
+            wrU32(fixedMeta, 12, quint32(fixedData.size()));
+
+            // Its properties (type 6) and other var records, re-keyed.
+            QString tableName;
+            for (const VarRecord &r : stockRecords) {
+                if (r.uid != quint32(stockUid))
+                    continue;
+                const int len = int(rdU32(stockVar2, int(r.offset)));
+                if (len < 0 || int(r.offset) + 4 + len > stockVar2.size())
+                    continue;
+                const QByteArray blob = stockVar2.mid(int(r.offset) + 4, len);
+                if (r.typeLow == kViewPropsType) {
+                    Props9 props;
+                    if (parseProps9(blob, &props))
+                        if (const PropsItem *name = props.find(kKeyTableName))
+                            tableName = rdUtf16(name->data, 0, name->data.size());
+                }
+                VarRecord copy = r;
+                copy.uid = newUid;
+                copy.offset = quint32(var2.size());
+                appU32(var2, quint32(blob.size()));
+                var2 += blob;
+                records.append(copy);
+            }
+            viewsAdded = true;
+
+            // The view's table, when the file has never shown it.
+            if (haveTables && !tableName.isEmpty()) {
+                QVector<VarRecord> stockTableRecords;
+                parseVarMeta(stock->readStream({ kViewStorage, kCTable, vm }), &stockTableRecords);
+                if (importStockTable(tMeta, tData, tVar2, tRecords,
+                                     stock->readStream({ kViewStorage, kCTable, fm }),
+                                     stock->readStream({ kViewStorage, kCTable, fd }),
+                                     stock->readStream({ kViewStorage, kCTable, v2 }),
+                                     stockTableRecords, normalizedPresentationName(tableName),
+                                     v.resource))
+                    tablesAdded = true;
+            }
+            break;
+        }
+    }
+    if (!viewsAdded)
+        return false;
+    doc.addStream({ kViewStorage, kCView, fm }, fixedMeta);
+    doc.addStream({ kViewStorage, kCView, fd }, fixedData);
+    doc.addStream({ kViewStorage, kCView, vm }, buildVarMeta(varMeta, records, int(var2.size())));
+    doc.addStream({ kViewStorage, kCView, v2 }, var2);
+    if (tablesAdded) {
+        doc.addStream({ kViewStorage, kCTable, fm }, tMeta);
+        doc.addStream({ kViewStorage, kCTable, fd }, tData);
+        doc.addStream({ kViewStorage, kCTable, vm }, buildVarMeta(tVarMeta, tRecords, int(tVar2.size())));
+        doc.addStream({ kViewStorage, kCTable, v2 }, tVar2);
+    }
+    return true;
+}
+
+bool importGroups(CompoundFile &doc, const QList<const CompoundFile *> &stocks,
+                  schedule::Project *in)
+{
+    const QString fm = QStringLiteral("FixedMeta"), fd = QStringLiteral("FixedData"),
+                  vm = QStringLiteral("VarMeta"), v2 = QStringLiteral("Var2Data"),
+                  rowset = QStringLiteral("CGrouping");
+    if (!in || !doc.hasStorage({ kViewStorage, rowset }))
+        return false;
+    QByteArray meta = doc.readStream({ kViewStorage, rowset, fm });
+    QByteArray data = doc.readStream({ kViewStorage, rowset, fd });
+    const QByteArray varMeta = doc.readStream({ kViewStorage, rowset, vm });
+    QByteArray var2 = doc.readStream({ kViewStorage, rowset, v2 });
+    QVector<VarRecord> records;
+    if (!parseVarMeta(varMeta, &records))
+        return false;
+
+    const struct { schedule::UsageViewSettings *settings; bool resource; } kViews[] = {
+        { &in->ganttView, false }, { &in->taskUsageView, false },
+        { &in->calendarView, false }, { &in->networkView, false },
+        { &in->resourceUsageView, true }, { &in->teamPlannerView, true },
+        { &in->resourceSheetView, true },
+    };
+    bool changed = false;
+    for (const auto &v : kViews) {
+        schedule::UsageViewSettings &settings = *v.settings;
+        if (settings.groupName.isEmpty() || settings.groupDefinition.size() < 4)
+            continue;
+        const QString wanted = normalizedPresentationName(settings.groupName);
+        quint32 uid = findTableUid(data, wanted, v.resource);
+        for (int i = 0; uid == 0 && i < stocks.size(); ++i) {
+            const CompoundFile *stock = stocks.at(i);
+            if (!stock || !stock->hasStorage({ kViewStorage, rowset }))
+                continue;
+            QVector<VarRecord> stockRecords;
+            if (!parseVarMeta(stock->readStream({ kViewStorage, rowset, vm }), &stockRecords))
+                continue;
+            if (importStockTable(meta, data, var2, records,
+                                 stock->readStream({ kViewStorage, rowset, fm }),
+                                 stock->readStream({ kViewStorage, rowset, fd }),
+                                 stock->readStream({ kViewStorage, rowset, v2 }),
+                                 stockRecords, wanted, v.resource)) {
+                changed = true;
+                uid = findTableUid(data, wanted, v.resource);
+            }
+        }
+        if (uid != 0)
+            wrU32(settings.groupDefinition, 0, uid);
+    }
+    if (!changed)
+        return false;
+    doc.addStream({ kViewStorage, rowset, fm }, meta);
+    doc.addStream({ kViewStorage, rowset, fd }, data);
+    doc.addStream({ kViewStorage, rowset, vm }, buildVarMeta(varMeta, records, int(var2.size())));
+    doc.addStream({ kViewStorage, rowset, v2 }, var2);
+    return true;
+}
+
+bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Project &in,
+                 const CompoundFile *stockTables)
 {
     if (!wantsTablePatch(in) || !tpl.hasStorage({ kViewStorage, kCTable }))
         return false;
 
-    const QByteArray fixedData = tpl.readStream(
+    QByteArray fixedMeta = tpl.readStream(
+        { kViewStorage, kCTable, QStringLiteral("FixedMeta") });
+    QByteArray fixedData = tpl.readStream(
         { kViewStorage, kCTable, QStringLiteral("FixedData") });
     const QByteArray varMeta = tpl.readStream(
         { kViewStorage, kCTable, QStringLiteral("VarMeta") });
@@ -1894,22 +2378,43 @@ bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Pro
         { &in.ganttView, false }, { &in.resourceUsageView, true },
         { &in.taskUsageView, false }, { &in.teamPlannerView, true }
     };
-    bool changed = false;
+
+    // A file only carries the tables its views have used: one whose Task Usage
+    // view was never opened has no "Usage" table. Project copies the table in
+    // from its global template when the view is first shown, as the next table
+    // uid (and the uid is repeated at the head of the column blob). Do the same
+    // from the embedded template, so a rebuilt column list has a home.
+    bool imported = false;
+    if (stockTables && stockTables->hasStorage({ kViewStorage, kCTable })
+        && fixedMeta.size() >= 16) {
+        const QByteArray stockMeta = stockTables->readStream(
+            { kViewStorage, kCTable, QStringLiteral("FixedMeta") });
+        const QByteArray stockData = stockTables->readStream(
+            { kViewStorage, kCTable, QStringLiteral("FixedData") });
+        const QByteArray stockVar2 = stockTables->readStream(
+            { kViewStorage, kCTable, QStringLiteral("Var2Data") });
+        QVector<VarRecord> stockRecords;
+        parseVarMeta(stockTables->readStream(
+                         { kViewStorage, kCTable, QStringLiteral("VarMeta") }),
+                     &stockRecords);
+        for (const Target &target : targets) {
+            if (!target.settings->modified || !target.settings->columnLayout
+                || target.settings->tableName.isEmpty())
+                continue;
+            if (importStockTable(fixedMeta, fixedData, var2, records, stockMeta, stockData,
+                                 stockVar2, stockRecords,
+                                 normalizedPresentationName(target.settings->tableName),
+                                 target.resource))
+                imported = true;
+        }
+    }
+
+    QHash<int, QByteArray> patched;   // var record index -> replacement blob
     for (const Target &target : targets) {
         if (!target.settings->modified || target.settings->tableName.isEmpty())
             continue;
         const QString wanted = normalizedPresentationName(target.settings->tableName);
-        quint32 tableUid = 0;
-        for (int offset = 0; offset + kTableRecordSize <= fixedData.size();
-             offset += kTableRecordSize) {
-            const QByteArray rec = fixedData.mid(offset, kTableRecordSize);
-            if ((rdU16(rec, 108) == 1) != target.resource)
-                continue;
-            if (normalizedPresentationName(rdUtf16(rec, 4, 104)) == wanted) {
-                tableUid = rdU32(rec, 0);
-                break;
-            }
-        }
+        const quint32 tableUid = findTableUid(fixedData, wanted, target.resource);
         if (tableUid == 0)
             continue;
 
@@ -1930,29 +2435,101 @@ bool patchTables(const CompoundFile &tpl, CompoundFile &out, const schedule::Pro
         const int length = int(rdU32(var2, blobOffset));
         if (length < kTableColumnHeaderSize || blobOffset + 4 + length > var2.size())
             continue;
-        const int count = int(rdU16(var2, blobOffset + 4 + 4)) + 1;
+        const QByteArray blob = var2.mid(blobOffset + 4, length);
+        const int count = int(rdU16(blob, 4)) + 1;
+        QVector<QByteArray> existing;
         for (int i = 0; i < count; ++i) {
-            const int at = blobOffset + 4 + kTableColumnHeaderSize + i * kTableColumnSize;
-            if (at + kTableColumnSize > blobOffset + 4 + length)
+            const int at = kTableColumnHeaderSize + i * kTableColumnSize;
+            if (at + kTableColumnSize > blob.size())
                 break;
-            const quint32 fieldId = rdU32(var2, at);
-            for (const schedule::UsageTableColumn &column : target.settings->columns) {
-                if (column.fieldId == fieldId) {
-                    const char value = char(qBound(0, column.width, 255));
-                    if (var2.at(at + 4) != value) {
-                        var2[at + 4] = value;
-                        changed = true;
-                    }
+            existing.append(blob.mid(at, kTableColumnSize));
+        }
+        const int columnsEnd = kTableColumnHeaderSize + int(existing.size()) * kTableColumnSize;
+
+        QByteArray next;
+        if (target.settings->columnLayout && !target.settings->columns.isEmpty()) {
+            // Replace the table's column list with the requested one, keeping
+            // each field's existing record (alignment, title) when present; a
+            // newly shown field copies a plain left-aligned untitled record.
+            QByteArray generic;
+            for (const QByteArray &rec : existing) {
+                if (quint8(rec.at(7)) == 0 && rdU16(rec, 13) == 0) {
+                    generic = rec;
                     break;
                 }
             }
+            next = blob.left(kTableColumnHeaderSize);
+            int written = 0;
+            for (const schedule::UsageTableColumn &column : target.settings->columns) {
+                if (column.fieldId == 0 || written >= 0xFFFF)
+                    continue;
+                QByteArray base;
+                for (const QByteArray &rec : existing) {
+                    if (rdU32(rec, 0) == column.fieldId) {
+                        base = rec;
+                        break;
+                    }
+                }
+                if (base.isEmpty())
+                    base = generic;
+                next += tableColumnRecord(base, column);
+                ++written;
+            }
+            if (written == 0)
+                continue;
+            wrU16(next, 4, quint16(written - 1));
+            next += blob.mid(columnsEnd);
+        } else {
+            next = blob;
+            for (int i = 0; i < existing.size(); ++i) {
+                const int at = kTableColumnHeaderSize + i * kTableColumnSize;
+                const quint32 fieldId = rdU32(next, at);
+                for (const schedule::UsageTableColumn &column : target.settings->columns) {
+                    if (column.fieldId == fieldId) {
+                        next[at + 4] = char(qBound(0, column.width, 255));
+                        break;
+                    }
+                }
+            }
         }
+        if (next != blob)
+            patched.insert(recordIndex, next);
     }
 
-    if (!changed)
+    if (patched.isEmpty() && !imported)
         return false;
-    out.addStream({ kViewStorage, kCTable, QStringLiteral("VarMeta") }, varMeta);
-    out.addStream({ kViewStorage, kCTable, QStringLiteral("Var2Data") }, var2);
+    if (imported) {
+        out.addStream({ kViewStorage, kCTable, QStringLiteral("FixedMeta") }, fixedMeta);
+        out.addStream({ kViewStorage, kCTable, QStringLiteral("FixedData") }, fixedData);
+    }
+
+    // Rebuild Var2Data with every blob verbatim (in record order) except the
+    // patched column blobs, recomputing offsets; then rebuild VarMeta to match.
+    QByteArray newVar2;
+    QByteArray newMeta = varMeta.left(24);
+    for (int i = 0; i < records.size(); ++i) {
+        const VarRecord &r = records[i];
+        const int oldOff = int(r.offset);
+        const int len = int(rdU32(var2, oldOff));
+        QByteArray blob;
+        if (patched.contains(i))
+            blob = patched.value(i);
+        else if (len >= 0 && oldOff + 4 + len <= var2.size())
+            blob = var2.mid(oldOff + 4, len);
+
+        const quint32 newOff = quint32(newVar2.size());
+        appU32(newVar2, quint32(blob.size()));
+        newVar2 += blob;
+
+        appU32(newMeta, r.uid);
+        appU32(newMeta, newOff);
+        appU16(newMeta, r.typeLow);
+        appU16(newMeta, r.typeHigh);
+    }
+    wrU32(newMeta, 20, quint32(newVar2.size()));   // header dataSize
+
+    out.addStream({ kViewStorage, kCTable, QStringLiteral("VarMeta") }, newMeta);
+    out.addStream({ kViewStorage, kCTable, QStringLiteral("Var2Data") }, newVar2);
     return true;
 }
 

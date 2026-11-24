@@ -6,6 +6,10 @@
 
 #include <QSet>
 
+#include <algorithm>
+#include <atomic>
+#include <unordered_map>
+
 namespace schedule {
 
 namespace {
@@ -13,9 +17,45 @@ namespace {
 constexpr qint64 kMsPerDay = 24LL * 60LL * 60LL * 1000LL;
 
 inline qint64 msOfDay(const QDateTime &dt) { return QTime(0, 0).msecsTo(dt.time()); }
-inline QDateTime at(const QDate &d, qint64 ms)
+// A local date-time for a day and a time of day. Building a local QDateTime
+// runs the time-zone conversion (several microseconds on Windows), and
+// scheduling builds one for every calendar step of every task -- yet a
+// schedule only ever lands on a few thousand distinct (day, time) pairs. So
+// each pair is built once per thread and copied after that: the same value,
+// without paying for the conversion again.
+// Bumped by WorkCalendar::clearLocalTimeCache(); each thread compares it with
+// the generation its cache was filled under.
+std::atomic<int> g_localTimeGeneration{ 0 };
+
+QDateTime at(const QDate &d, qint64 ms)
 {
-    return QDateTime(d, QTime::fromMSecsSinceStartOfDay(int(ms)));
+    struct Key {
+        qint64 day;
+        qint64 ms;
+        bool operator==(const Key &o) const { return day == o.day && ms == o.ms; }
+    };
+    struct KeyHash {
+        size_t operator()(const Key &k) const noexcept
+        {
+            return std::hash<qint64>()(k.day * 86400001LL + k.ms);
+        }
+    };
+    thread_local std::unordered_map<Key, QDateTime, KeyHash> cache;
+    thread_local int cacheGeneration = 0;
+    const int generation = g_localTimeGeneration.load(std::memory_order_relaxed);
+    if (generation != cacheGeneration) {
+        cache.clear();
+        cacheGeneration = generation;
+    }
+    const Key key{ d.toJulianDay(), ms };
+    const auto it = cache.find(key);
+    if (it != cache.end())
+        return it->second;
+    if (cache.size() > 500000)   // a bound, not an expected size
+        cache.clear();
+    QDateTime value(d, QTime::fromMSecsSinceStartOfDay(int(ms)));
+    cache.emplace(key, value);
+    return value;
 }
 
 // The Standard day: 08:00-12:00, 13:00-17:00.
@@ -111,15 +151,31 @@ bool recurrenceMatches(const WorkCalendar::Exception &e, const QDate &date)
     return seen <= e.occurrences;
 }
 
+// A day table never grows past this; spans beyond it take the day-by-day path.
+constexpr qint64 kMaxDayWorkDays = 200000;
+// Padding added around a requested range so neighbouring requests reuse it.
+constexpr qint64 kDayWorkPad = 366;
+
 } // namespace
 
+struct WorkCalendar::DayWorkTable
+{
+    QDate origin;              // the day prefix[0] starts at
+    QVector<qint64> prefix;    // prefix[i] = work on days origin .. origin+i-1
+
+    bool isEmpty() const { return prefix.isEmpty(); }
+    QDate end() const { return origin.addDays(prefix.size() - 1); }   // first day not covered
+};
+
 WorkCalendar::WorkCalendar()
+    : m_dayWork(QSharedPointer<DayWorkTable>::create())
 {
     for (int i = 0; i < 5; ++i)
         m_week[i] = standardDay();
 }
 
 WorkCalendar::WorkCalendar(const Project &project, int calendarUniqueId)
+    : m_dayWork(QSharedPointer<DayWorkTable>::create())
 {
     // Leaf-to-base calendar chain (cycle-guarded).
     QList<const Calendar *> chain;
@@ -193,6 +249,7 @@ WorkCalendar WorkCalendar::intersection(const QList<WorkCalendar> &calendars)
         return calendars.first();
 
     WorkCalendar out = calendars.first();
+    out.m_dayWork = QSharedPointer<DayWorkTable>::create();   // a different calendar now
     out.m_exceptions.clear();
     out.m_intersectionCalendars.clear();
     for (const WorkCalendar &calendar : calendars)
@@ -219,6 +276,65 @@ const QVector<WorkCalendar::Period> &WorkCalendar::periodsFor(const QDate &d) co
         if (recurrenceMatches(e, d))
             return e.working ? e.periods : m_none;
     return m_week[d.dayOfWeek() - 1];
+}
+
+qint64 WorkCalendar::workOnDay(const QDate &d, qint64 fromMs, qint64 toMs) const
+{
+    qint64 total = 0;
+    for (const Period &p : periodsFor(d)) {
+        const qint64 b = qMax(fromMs, p.begin);
+        const qint64 e = qMin(toMs, p.end);
+        if (e > b)
+            total += e - b;
+    }
+    return total;
+}
+
+bool WorkCalendar::ensureDayWork(const QDate &first, const QDate &last) const
+{
+    if (!first.isValid() || !last.isValid() || !m_dayWork)
+        return false;
+    DayWorkTable &table = *m_dayWork;
+    if (table.isEmpty()) {
+        const QDate from = first.addDays(-kDayWorkPad);
+        const QDate to = last.addDays(kDayWorkPad);
+        if (from.daysTo(to) > kMaxDayWorkDays)
+            return false;
+        table.origin = from;
+        table.prefix.reserve(int(from.daysTo(to)) + 2);
+        table.prefix.append(0);
+        for (QDate d = from; d <= to; d = d.addDays(1))
+            table.prefix.append(table.prefix.last() + workOnDay(d, 0, kMsPerDay));
+        return true;
+    }
+    if (first < table.origin) {
+        const QDate from = first.addDays(-kDayWorkPad);
+        if (from.daysTo(table.end()) > kMaxDayWorkDays)
+            return false;
+        QVector<qint64> grown;
+        grown.reserve(int(from.daysTo(table.end())) + 2);
+        grown.append(0);
+        for (QDate d = from; d < table.origin; d = d.addDays(1))
+            grown.append(grown.last() + workOnDay(d, 0, kMsPerDay));
+        const qint64 shift = grown.last();
+        for (int i = 1; i < table.prefix.size(); ++i)
+            grown.append(table.prefix.at(i) + shift);
+        table.prefix.swap(grown);
+        table.origin = from;
+    }
+    if (last >= table.end()) {
+        const QDate to = last.addDays(kDayWorkPad);
+        if (table.origin.daysTo(to) > kMaxDayWorkDays)
+            return false;
+        for (QDate d = table.end(); d <= to; d = d.addDays(1))
+            table.prefix.append(table.prefix.last() + workOnDay(d, 0, kMsPerDay));
+    }
+    return true;
+}
+
+qint64 WorkCalendar::workBefore(const QDate &d) const
+{
+    return m_dayWork->prefix.at(int(m_dayWork->origin.daysTo(d)));
 }
 
 bool WorkCalendar::isWorkingDay(const QDate &d) const
@@ -290,7 +406,30 @@ QDateTime WorkCalendar::addWork(const QDateTime &from, qint64 millis) const
         QDate d = cur.date();
         qint64 ms = msOfDay(cur);
         qint64 remaining = millis;
+        bool jumped = false;
         for (int guard = 0; guard < 200000; ++guard) {   // ~770 working years
+            if (!jumped && guard > 0) {
+                // Past the first (partial) day: skip straight to the day the
+                // work runs out on, using the day table.
+                jumped = true;
+                if (ensureDayWork(d, d)) {
+                    const qint64 base = workBefore(d);
+                    const qint64 target = base + remaining;
+                    while (m_dayWork->prefix.last() < target
+                           && ensureDayWork(d, m_dayWork->end().addDays(
+                                  qMax<qint64>(kDayWorkPad, m_dayWork->prefix.size())))) {
+                    }
+                    const QVector<qint64> &prefix = m_dayWork->prefix;
+                    if (prefix.last() >= target) {
+                        const int from = int(m_dayWork->origin.daysTo(d)) + 1;
+                        const int k = int(std::lower_bound(prefix.cbegin() + from, prefix.cend(),
+                                                           target) - prefix.cbegin()) - 1;
+                        remaining -= prefix.at(k) - base;   // the whole days skipped
+                        d = m_dayWork->origin.addDays(k);
+                        ms = 0;
+                    }
+                }
+            }
             for (const Period &p : periodsFor(d)) {
                 if (ms >= p.end)
                     continue;
@@ -310,7 +449,36 @@ QDateTime WorkCalendar::addWork(const QDateTime &from, qint64 millis) const
     QDate d = cur.date();
     qint64 ms = msOfDay(cur);
     qint64 remaining = -millis;
+    bool jumped = false;
     for (int guard = 0; guard < 200000; ++guard) {
+        if (!jumped && guard > 0) {
+            // Past the first (partial) day: skip straight back to the day the
+            // work runs out on.
+            jumped = true;
+            if (ensureDayWork(d, d)) {
+                // Growing the table backwards shifts every prefix value, so the
+                // bounds are re-read after each growth.
+                qint64 top = workBefore(d.addDays(1));   // work through day d
+                qint64 target = top - remaining;
+                while (m_dayWork->prefix.first() > target
+                       && ensureDayWork(m_dayWork->origin.addDays(
+                              -qMax<qint64>(kDayWorkPad, m_dayWork->prefix.size())), d)) {
+                    top = workBefore(d.addDays(1));
+                    target = top - remaining;
+                }
+                const QVector<qint64> &prefix = m_dayWork->prefix;
+                if (prefix.first() <= target) {
+                    // Largest j <= index(d) with prefix[j] <= target: day j is
+                    // where the work runs out; days j+1 .. d are consumed whole.
+                    const int last = int(m_dayWork->origin.daysTo(d));
+                    const int j = int(std::upper_bound(prefix.cbegin(), prefix.cbegin() + last + 1,
+                                                       target) - prefix.cbegin()) - 1;
+                    remaining -= top - prefix.at(j + 1);
+                    d = m_dayWork->origin.addDays(j);
+                    ms = kMsPerDay;
+                }
+            }
+        }
         const QVector<Period> &periods = periodsFor(d);
         for (int i = periods.size() - 1; i >= 0; --i) {
             const Period &p = periods.at(i);
@@ -332,9 +500,16 @@ qint64 WorkCalendar::workBetween(const QDateTime &from, const QDateTime &to) con
 {
     if (!from.isValid() || !to.isValid() || to <= from)
         return 0;
-    qint64 total = 0;
-    QDate d = from.date();
+    const QDate first = from.date();
     const QDate last = to.date();
+    if (first.daysTo(last) > 2 && ensureDayWork(first, last)) {
+        // Partial first and last days, and every whole day between from the table.
+        return workOnDay(first, msOfDay(from), kMsPerDay)
+             + (workBefore(last) - workBefore(first.addDays(1)))
+             + workOnDay(last, 0, msOfDay(to));
+    }
+    qint64 total = 0;
+    QDate d = first;
     for (int guard = 0; d <= last && guard < 200000; ++guard, d = d.addDays(1)) {
         const qint64 dayBegin = (d == from.date()) ? msOfDay(from) : 0;
         const qint64 dayEnd = (d == last) ? msOfDay(to) : kMsPerDay;
@@ -346,6 +521,11 @@ qint64 WorkCalendar::workBetween(const QDateTime &from, const QDateTime &to) con
         }
     }
     return total;
+}
+
+void WorkCalendar::clearLocalTimeCache()
+{
+    g_localTimeGeneration.fetch_add(1, std::memory_order_relaxed);
 }
 
 qint64 WorkCalendar::workPerDay() const

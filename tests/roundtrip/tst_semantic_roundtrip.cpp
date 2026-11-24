@@ -4,6 +4,8 @@
 #include "mppio.h"
 #include "codec/bkndvardata.h"
 #include "codec/fielddecoders.h"
+#include "codec/fieldmap.h"
+#include "codec/propsreader.h"
 #include "ole/compoundfile.h"
 #include "serializer/mpp14manifest.h"
 
@@ -329,6 +331,7 @@ private slots:
     void timephasedAssignmentRoundTrip();
     void nativeParityMetadataRoundTrip();
     void nativeCostRateHeaderIsWritten();
+    void earnedValueInputsReachProject();
     void nativePhysicalProgressFieldsAreWritten();
     void fontBaseTableAndIndicesArePreserved();
     void normalRowWeightIsWrittenExplicitly();
@@ -699,6 +702,145 @@ void TstSemanticRoundtrip::nativeCostRateHeaderIsWritten()
              quint16(4));
     QCOMPARE(qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(blob.constData() + 4)),
              quint16(16));
+}
+
+// Everything Project's earned value needs must be readable by Project itself,
+// not just by our reader: it ignores a var field whose FixedMeta presence bit
+// is clear, costs work from the fixed STANDARD_RATE (field 6), and takes BCWS
+// from the task's own baseline spread (173/174). With any of these missing a
+// ScheduleVault file opened in Project showed SV and CPI of 0 (2026-09-27).
+void TstSemanticRoundtrip::earnedValueInputsReachProject()
+{
+    schedule::Project project;
+    project.formatVersion = schedule::Project::FormatVersion::Mpp14;
+    project.startDate = QDateTime(QDate(2026, 9, 8), QTime(8, 0));
+    schedule::Task task;
+    task.uniqueId = 1; task.id = 1; task.outlineLevel = 1;
+    task.name = QStringLiteral("Design");
+    task.start = QDateTime(QDate(2026, 9, 8), QTime(8, 0));
+    task.finish = QDateTime(QDate(2026, 9, 8), QTime(17, 0));
+    task.durationMillis = qint64(8) * 3600 * 1000;
+    task.cost = 352.0;
+    schedule::Baseline baseline;
+    baseline.number = 0;
+    baseline.cost = 352.0;
+    baseline.workMillis = task.durationMillis;
+    baseline.durationMillis = task.durationMillis;
+    baseline.start = task.start;
+    baseline.finish = task.finish;
+    task.baselines = { baseline };
+    project.tasks = { task };
+
+    schedule::Resource resource;
+    resource.uniqueId = 1; resource.id = 1; resource.name = QStringLiteral("Rick");
+    schedule::CostRate rate;
+    rate.standardRate = 44.0;
+    rate.overtimeRate = 10.0;
+    resource.costRates = { rate };
+    project.resources = { resource };
+
+    schedule::Assignment assignment;
+    assignment.uniqueId = 1; assignment.taskUniqueId = 1; assignment.resourceUniqueId = 1;
+    assignment.units = 1.0;
+    assignment.workMillis = task.durationMillis;
+    assignment.cost = 352.0;
+    assignment.start = task.start;
+    assignment.finish = task.finish;
+    assignment.baselines = { baseline };
+    schedule::TimephasedValue work;
+    work.type = schedule::TimephasedValue::BaselineWork;
+    work.uniqueId = 1;
+    work.start = task.start;
+    work.finish = task.finish;
+    work.unit = 1;
+    work.value = QStringLiteral("PT8H0M0S");
+    schedule::TimephasedValue cost = work;
+    cost.type = schedule::TimephasedValue::BaselineCost;
+    cost.value = QStringLiteral("352");
+    assignment.timephasedValues = { work, cost };
+    project.assignments = { assignment };
+
+    MppIO io;
+    io.setProject(project);
+    const QByteArray bytes = io.saveToData();
+    QVERIFY2(!bytes.isEmpty(), qPrintable(io.errorString()));
+    CompoundFile cf;
+    QVERIFY2(cf.openFromData(bytes), qPrintable(cf.errorString()));
+    const QString data = QStringLiteral("   114");
+    PropsReader props;
+    QVERIFY(props.parse(cf.readStream({ data, QStringLiteral("Props") })));
+
+    struct Entity { QString storage; int metaItem; quint32 fmKey1, fmKey2; quint16 high; };
+    const auto stream = [&](const Entity &e, const char *name) {
+        return cf.readStream({ data, e.storage, QLatin1String(name) });
+    };
+    const auto u32At = [](const QByteArray &b, int o) {
+        return qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(b.constData() + o));
+    };
+    // The live row for `uid`: its FixedMeta item (header + presence tail),
+    // located through the item's FixedData offset (unique id at record +4).
+    const auto metaItemFor = [&](const Entity &e, quint32 uid, QByteArray *record) {
+        const QByteArray meta = stream(e, "FixedMeta");
+        const QByteArray fixedData = stream(e, "FixedData");
+        for (int o = 16; o + e.metaItem <= meta.size(); o += e.metaItem) {
+            const quint32 off = u32At(meta, o + 4);
+            if (meta.at(o) != 0 || off + 8 > quint32(fixedData.size()))
+                continue;   // placeholder rows
+            if (u32At(fixedData, int(off) + 4) == uid) {
+                if (record)
+                    *record = fixedData.mid(int(off));
+                return meta.mid(o, e.metaItem);
+            }
+        }
+        return QByteArray();
+    };
+    const auto varTypesFor = [&](const Entity &e, quint32 uid) {
+        const QByteArray varMeta = stream(e, "VarMeta");
+        QSet<quint16> types;
+        for (int o = 24; o + 12 <= varMeta.size(); o += 12)
+            if (u32At(varMeta, o) == uid)
+                types.insert(qFromLittleEndian<quint16>(
+                    reinterpret_cast<const uchar *>(varMeta.constData() + o + 8)));
+        return types;
+    };
+    const auto hasPresenceBit = [&](const Entity &e, const QByteArray &item, quint16 field) {
+        const QHash<quint16, int> ordinals = FieldMap::presenceBitOrdinals(
+            FieldMap::fieldMapBytes(props, e.fmKey1, e.fmKey2), e.high);
+        if (!ordinals.contains(field))
+            return false;
+        const int bit = 64 + ordinals.value(field);
+        return bit / 8 < item.size() && ((quint8(item.at(bit / 8)) >> (bit % 8)) & 1);
+    };
+
+    const Entity taskEntity { QStringLiteral("TBkndTask"), 47, 0x00020014u, 0x03000014u, 0x0B40 };
+    const QByteArray taskItem = metaItemFor(taskEntity, 1, nullptr);
+    QVERIFY(!taskItem.isEmpty());
+    const QSet<quint16> taskVars = varTypesFor(taskEntity, 1);
+    // Baseline cost/work/duration/start/finish + the task's baseline spread.
+    for (quint16 field : { 1, 6, 27, 43, 44, 173, 174 }) {
+        QVERIFY2(taskVars.contains(field), qPrintable(QString::number(field)));
+        QVERIFY2(hasPresenceBit(taskEntity, taskItem, field), qPrintable(QString::number(field)));
+    }
+    // Header byte 2 is the row's var-field count on every Project-authored row.
+    QCOMPARE(int(quint8(taskItem.at(2))), int(taskVars.size()));
+
+    const Entity assnEntity { QStringLiteral("TBkndAssn"), 34, 0x00020017u, 0x03000017u, 0x0F40 };
+    const QByteArray assnItem = metaItemFor(assnEntity, 1, nullptr);
+    QVERIFY(!assnItem.isEmpty());
+    for (quint16 field : { 52, 53 })
+        QVERIFY2(hasPresenceBit(assnEntity, assnItem, field), qPrintable(QString::number(field)));
+
+    // STANDARD_RATE / OVERTIME_RATE as fixed per-hour doubles.
+    const Entity rscEntity { QStringLiteral("TBkndRsc"), 37, 0x00020015u, 0x03000015u, 0x0C40 };
+    const QHash<quint16, FieldMap::EntityFieldLoc> rscLoc = FieldMap::entityFieldLocations(
+        FieldMap::fieldMapBytes(props, rscEntity.fmKey1, rscEntity.fmKey2), rscEntity.high);
+    QByteArray rscRecord;
+    QVERIFY(!metaItemFor(rscEntity, 1, &rscRecord).isEmpty());
+    double standard = 0.0, overtime = 0.0;
+    QVERIFY(FieldDecoders::readDouble(rscRecord, rscLoc.value(6).offset, &standard));
+    QVERIFY(FieldDecoders::readDouble(rscRecord, rscLoc.value(7).offset, &overtime));
+    QCOMPARE(standard, 44.0);
+    QCOMPARE(overtime, 10.0);
 }
 
 void TstSemanticRoundtrip::nativePhysicalProgressFieldsAreWritten()

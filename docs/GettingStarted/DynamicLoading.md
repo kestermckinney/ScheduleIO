@@ -10,7 +10,7 @@ The library exposes a small `extern "C"` factory so the symbols are easy to reso
 extern "C" {
     MppIO       *scheduleio_create();          // construct an instance
     void         scheduleio_destroy(MppIO *);  // destroy it
-    const char  *scheduleio_version();         // library version string, e.g. "0.1.0"
+    const char  *scheduleio_version();         // library version string, e.g. "0.1.1"
 }
 ```
 
