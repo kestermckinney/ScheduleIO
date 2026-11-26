@@ -59,6 +59,7 @@ endif()
 
 # Layer 2 - round-trip (synthetic now; fixture-driven cases self-skip if absent)
 if(SCHEDULEIO_BUILD_VAULT)
+    scheduleio_add_test(tst_vaultconnection vault/tst_vaultconnection.cpp)
     scheduleio_add_test_executable(tst_vault_reimport vault/tst_vault_reimport.cpp)
     add_test(NAME tst_vault_export_selection COMMAND tst_vault_reimport
         filtersExportReferences omitsOptionalExportFields replacesImportedActualsWithoutDoubleCounting)

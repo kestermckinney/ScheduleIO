@@ -153,8 +153,19 @@ if(SCHEDULEIO_BUILD_VAULT)
     target_sources(scheduleio_objects PRIVATE
         src/vault/vaultreader.cpp src/vault/vaultreader.h
         src/vault/vaultmigrations.cpp src/vault/vaultmigrations.h
+        src/vault/vaultconnection.cpp src/vault/vaultconnection.h
+        src/vault/vaultcredentials.cpp src/vault/vaultcredentials.h
         vaultmigrations.qrc)
     target_link_libraries(scheduleio_objects PUBLIC Qt${QT_VERSION_MAJOR}::Sql)
+    # The system credential stores behind vaultcredentials.cpp.
+    if(WIN32)
+        target_link_libraries(scheduleio_objects PUBLIC advapi32)
+    elseif(APPLE)
+        find_library(SCHEDULEIO_SECURITY_FRAMEWORK Security REQUIRED)
+        find_library(SCHEDULEIO_COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+        target_link_libraries(scheduleio_objects PUBLIC
+            ${SCHEDULEIO_SECURITY_FRAMEWORK} ${SCHEDULEIO_COREFOUNDATION_FRAMEWORK})
+    endif()
 endif()
 
 add_library(ScheduleIO SHARED $<TARGET_OBJECTS:scheduleio_objects>)
