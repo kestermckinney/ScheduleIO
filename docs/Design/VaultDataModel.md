@@ -28,7 +28,8 @@ organizations
 
 | Tables | Responsibility and constraints |
 | --- | --- |
-| `organizations`, `users`, `organization_members` | Organizations are tenant roots. Users are global within a Vault and identified by a stable authentication subject. Membership is unique by organization and user, with owner, admin, or member role and an active state. Tenant-facing user lookups go through authorized membership views. |
+| `organizations`, `users`, `organization_members` | Organizations are tenant roots, with an active or suspended status. Users are identified by a stable authentication subject and have one home organization; a membership must be in that organization, so each person belongs to exactly one. Membership has an owner, admin, or member role and an active state. Tenant-facing user lookups go through authorized membership views. |
+| `platform_operators`, `organization_service_accounts` | Platform administrators are users with no home organization. Each organization has one service account, an owner membership that platform administrators act through and that the organization can't change or grant to. |
 | `groups`, `group_members` | Named groups and their members. Every group member references an organization membership in the same tenant. |
 | `projects` | A project holds its schedule metadata, lifecycle status, and an edit counter for concurrent saves. An authorized save changes the existing schedule in place. |
 | `project_import_sources` | Binds a recognized source identity to a project within an organization. A trusted source identifier, where available, is unique within the tenant and source namespace. |
@@ -80,6 +81,7 @@ Apply a restrictive tenant and active membership predicate, then command-specifi
 
 | Role or relationship | Effective access inside the active organization |
 | --- | --- |
+| Platform administrator | Everything in every organization, through that organization's service account, plus creating and suspending organizations, naming an owner, and managing platform administrators. Organization audit entries record the platform administrator behind each change. |
 | Organization owner or admin | Manage tenant memberships and projects, read organization schedules, map resources, and approve project time. Owner-level operations include ownership transfer. |
 | Project manager | Read and save the full schedule through ScheduleVault, administer project grants and mappings, view unmapped resources, and approve project time. |
 | Editor or viewer | Editor can save schedule changes through ScheduleVault. Viewer can read the shared schedule. Both are subject to resource, cost, and export restrictions. |
@@ -87,7 +89,7 @@ Apply a restrictive tenant and active membership predicate, then command-specifi
 | Time Entry | Log own time on eligible project tasks or assignments visible to the caller, including task-only entries without a mapped resource. |
 | Time Approver | Review and approve submitted project time. Grant schedule visibility separately as needed. |
 
-Combine direct and group permissions by capability. Check active membership and group membership on each request so revocations affect new requests. Unmapped resource details are manager/admin only. Expose sensitive costs or native payloads through separately granted projections or operations. Keep personal time visible to the logger and authorized project approvers/managers and organization admins. Prevent self-approval by default.
+`vault.bind_manager_context` derives the platform administrator from the authenticated login, never from a setting a client can change, and refuses a suspended organization to everyone else. Combine direct and group permissions by capability. Check active membership and group membership on each request so revocations affect new requests. Unmapped resource details are manager/admin only. Expose sensitive costs or native payloads through separately granted projections or operations. Keep personal time visible to the logger and authorized project approvers/managers and organization admins. Prevent self-approval by default.
 
 ## Time and resourcing
 

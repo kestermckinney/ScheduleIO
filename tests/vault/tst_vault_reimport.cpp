@@ -519,7 +519,8 @@ void VaultReimportTest::preservesTimeWhenAssignmentMoves()
         "DELETE FROM vault.project_members WHERE organization_id = '%1' AND user_id = '%2'; "
         "INSERT INTO vault.groups VALUES ('%1','%3','Managers'); "
         "INSERT INTO vault.group_members VALUES ('%1','%3','%2'); "
-        "INSERT INTO vault.users (id, issuer, subject, display_name) VALUES ('%4','test','recipient','Recipient'); "
+        "INSERT INTO vault.users (id, issuer, subject, display_name, home_organization_id) "
+        "VALUES ('%4','test','recipient','Recipient','%1'); "
         "INSERT INTO vault.organization_members VALUES ('%1','%4','member',true); "
         "GRANT EXECUTE ON FUNCTION vault.manager_change_project_share(uuid,uuid,text,uuid,text,boolean) TO %5")
         .arg(tenantId, actorId, team, recipient, actorRole)));

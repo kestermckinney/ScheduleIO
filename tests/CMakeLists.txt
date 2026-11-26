@@ -67,6 +67,13 @@ if(SCHEDULEIO_BUILD_VAULT)
     set_tests_properties(tst_vault_reimport PROPERTIES
         LABELS "postgresql"
         SKIP_REGULAR_EXPRESSION "Set SCHEDULEIO_VAULT_TEST_DATABASE to a fresh, disposable PostgreSQL database")
+    # Isolation between platform administrators and organization admins. It
+    # creates and drops its own database on the same server.
+    scheduleio_add_test_executable(tst_vault_platform vault/tst_vault_platform.cpp)
+    add_test(NAME tst_vault_platform COMMAND tst_vault_platform)
+    set_tests_properties(tst_vault_platform PROPERTIES
+        LABELS "postgresql"
+        SKIP_REGULAR_EXPRESSION "Set SCHEDULEIO_VAULT_TEST_DATABASE and the PG\\* variables")
 endif()
 scheduleio_add_test(tst_semantic_roundtrip roundtrip/tst_semantic_roundtrip.cpp)
 

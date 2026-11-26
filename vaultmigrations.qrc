@@ -67,5 +67,6 @@
     <file alias="065_exclude_mapping_placeholders.sql">vault/migrations/065_exclude_mapping_placeholders.sql</file>
     <file alias="066_organization_rename.sql">vault/migrations/066_organization_rename.sql</file>
     <file alias="067_scoped_overview_counts.sql">vault/migrations/067_scoped_overview_counts.sql</file>
+    <file alias="068_platform_administration.sql">vault/migrations/068_platform_administration.sql</file>
   </qresource>
 </RCC>
