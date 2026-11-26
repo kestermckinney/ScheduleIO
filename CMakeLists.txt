@@ -12,6 +12,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
+option(SCHEDULEIO_BUILD_VAULT "Build the PostgreSQL Vault adapter" OFF)
 option(SCHEDULEIO_BUILD_TESTS "Build the ScheduleIO test suite" ON)
 option(SCHEDULEIO_ORACLE_MSPROJECT "Enable the MS Project COM writer-acceptance oracle (Windows + Project required)" OFF)
 
@@ -22,6 +23,10 @@ find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core)
 set(SCHEDULEIO_SOURCES
     mppio.cpp
     xmlio.cpp
+    src/vault/importmatch.cpp
+    src/vault/exportselection.cpp
+    src/vault/projectmetadata.cpp
+    src/vault/schedulecodec.cpp
     src/xml/xmlserializer.cpp
     src/ole/compoundfile.cpp
     src/codec/streamquartet.cpp
@@ -70,6 +75,10 @@ set(SCHEDULEIO_SOURCES
 set(SCHEDULEIO_HEADERS
     mppio.h
     xmlio.h
+    src/vault/importmatch.h
+    src/vault/exportselection.h
+    src/vault/projectmetadata.h
+    src/vault/schedulecodec.h
     scheduleio_export.h
     src/xml/xmlserializer.h
     src/ole/compoundfile.h
@@ -138,6 +147,15 @@ target_include_directories(scheduleio_objects
 )
 
 target_link_libraries(scheduleio_objects PUBLIC Qt${QT_VERSION_MAJOR}::Core)
+
+if(SCHEDULEIO_BUILD_VAULT)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Sql)
+    target_sources(scheduleio_objects PRIVATE
+        src/vault/vaultreader.cpp src/vault/vaultreader.h
+        src/vault/vaultmigrations.cpp src/vault/vaultmigrations.h
+        vaultmigrations.qrc)
+    target_link_libraries(scheduleio_objects PUBLIC Qt${QT_VERSION_MAJOR}::Sql)
+endif()
 
 add_library(ScheduleIO SHARED $<TARGET_OBJECTS:scheduleio_objects>)
 target_link_libraries(ScheduleIO PUBLIC scheduleio_objects)

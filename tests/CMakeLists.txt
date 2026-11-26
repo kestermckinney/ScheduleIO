@@ -3,8 +3,8 @@
 
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Test)
 
-# Helper: declare a QtTest executable and register it with ctest.
-function(scheduleio_add_test name)
+# Helper: declare a QtTest executable.
+function(scheduleio_add_test_executable name)
     qt_add_executable(${name} ${ARGN})
     # Link the object library (internal symbols) rather than the DLL's exported
     # ABI, so unit tests can exercise internal classes directly.
@@ -18,6 +18,10 @@ function(scheduleio_add_test name)
     target_compile_definitions(${name} PRIVATE
         SCHEDULEIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
         SCHEDULEIO_LIB_PATH="$<TARGET_FILE:ScheduleIO>")
+endfunction()
+
+function(scheduleio_add_test name)
+    scheduleio_add_test_executable(${name} ${ARGN})
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
@@ -54,6 +58,15 @@ if(WIN32 AND SCHEDULEIO_ORACLE_MSPROJECT)
 endif()
 
 # Layer 2 - round-trip (synthetic now; fixture-driven cases self-skip if absent)
+if(SCHEDULEIO_BUILD_VAULT)
+    scheduleio_add_test_executable(tst_vault_reimport vault/tst_vault_reimport.cpp)
+    add_test(NAME tst_vault_export_selection COMMAND tst_vault_reimport
+        filtersExportReferences omitsOptionalExportFields replacesImportedActualsWithoutDoubleCounting)
+    add_test(NAME tst_vault_reimport COMMAND tst_vault_reimport preservesTimeWhenAssignmentMoves)
+    set_tests_properties(tst_vault_reimport PROPERTIES
+        LABELS "postgresql"
+        SKIP_REGULAR_EXPRESSION "Set SCHEDULEIO_VAULT_TEST_DATABASE to a fresh, disposable PostgreSQL database")
+endif()
 scheduleio_add_test(tst_semantic_roundtrip roundtrip/tst_semantic_roundtrip.cpp)
 
 # Layer 3 - oracle: decoded data must agree with the MS Project XML export

@@ -45,6 +45,8 @@ nav:
   - 'Reference':
     - 'Field Coverage': Reference/FieldCoverage.md
     - 'MPP File Format and Storage': Reference/FileFormat.md
+  - 'Design':
+    - 'ScheduleIO Vault Data Model': Design/VaultDataModel.md
   - 'Contributing': Contributing.md
 
 extra_css:
