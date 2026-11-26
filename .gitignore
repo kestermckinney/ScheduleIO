@@ -11,3 +11,4 @@ site/
 CMakeLists.txt.user*
 .codegraph/
 .opencode/
+*.sublime-workspace
