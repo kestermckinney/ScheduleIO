@@ -68,5 +68,6 @@
     <file alias="066_organization_rename.sql">vault/migrations/066_organization_rename.sql</file>
     <file alias="067_scoped_overview_counts.sql">vault/migrations/067_scoped_overview_counts.sql</file>
     <file alias="068_platform_administration.sql">vault/migrations/068_platform_administration.sql</file>
+    <file alias="069_member_access.sql">vault/migrations/069_member_access.sql</file>
   </qresource>
 </RCC>
