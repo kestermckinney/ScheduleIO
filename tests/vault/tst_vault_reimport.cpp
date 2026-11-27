@@ -524,7 +524,7 @@ void VaultReimportTest::preservesTimeWhenAssignmentMoves()
         "INSERT INTO vault.organization_members VALUES ('%1','%4','member',true); "
         "GRANT EXECUTE ON FUNCTION vault.manager_change_project_share(uuid,uuid,text,uuid,text,boolean) TO %5")
         .arg(tenantId, actorId, team, recipient, actorRole)));
-    QVERIFY(execute(QStringLiteral("INSERT INTO vault.project_group_shares VALUES (%1,'%2','manager')")
+    QVERIFY(execute(QStringLiteral("INSERT INTO vault.project_group_shares VALUES (%1,'%2','editor')")
                     .arg(scope, team)));
     QVERIFY(execute(QStringLiteral("SET SESSION AUTHORIZATION %1").arg(actorRole)));
     const QString share = QStringLiteral("SELECT vault.manager_change_project_share(%1,'user','%2','viewer',%3)");
@@ -537,7 +537,7 @@ void VaultReimportTest::preservesTimeWhenAssignmentMoves()
     QVERIFY(sql.next());
     QCOMPARE(sql.value(0).toString(), QStringLiteral("group"));
     QCOMPARE(sql.value(1).toString(), QStringLiteral("Managers"));
-    QCOMPARE(sql.value(2).toString(), QStringLiteral("manager"));
+    QCOMPARE(sql.value(2).toString(), QStringLiteral("editor"));
     QVERIFY(sql.next());
     QCOMPARE(sql.value(0).toString(), QStringLiteral("user"));
     QCOMPARE(sql.value(1).toString(), QStringLiteral("Recipient"));
@@ -584,8 +584,9 @@ void VaultReimportTest::preservesTimeWhenAssignmentMoves()
     QList<schedule::VaultSharedTask> sharedTasks;
     QVERIFY2(schedule::listDesktopVaultTasks(database, tenant, project, sharedTasks, error), qPrintable(error));
     QCOMPARE(sharedTasks.size(), 2);
+    // View access shows the whole schedule, assignments included.
     QVERIFY(sharedTasks.front().assignments.isEmpty());
-    QVERIFY(sharedTasks.back().assignments.isEmpty());
+    QCOMPARE(sharedTasks.back().assignments.size(), 1);
     QVERIFY(sharedTasks.front().predecessors.isEmpty());
     QCOMPARE(sharedTasks.back().predecessors.size(), 1);
     const auto &predecessor = sharedTasks.back().predecessors.front();
@@ -593,11 +594,11 @@ void VaultReimportTest::preservesTimeWhenAssignmentMoves()
     QCOMPARE(predecessor.linkType, int(schedule::Relation::FinishToStart));
     QCOMPARE(predecessor.lagMillis, qint64(3600000));
     QVERIFY(execute(QStringLiteral("SELECT count(*) FROM vault.desktop_read_schedule(%1)").arg(scope)));
-    QVERIFY(sql.next() && sql.value(0).toInt() == 0);
+    QVERIFY(sql.next() && sql.value(0).toInt() > 0);
     QVERIFY(execute(QStringLiteral("RESET SESSION AUTHORIZATION")));
 
     QVERIFY(execute(QStringLiteral(
-        "UPDATE vault.project_members SET role = 'contributor' WHERE (organization_id, project_id) = (%1) "
+        "UPDATE vault.project_members SET role = 'viewer' WHERE (organization_id, project_id) = (%1) "
         "AND user_id = '%2'; "
         "INSERT INTO vault.resource_user_mappings (organization_id, project_id, id, resource_id, user_id) "
         "SELECT organization_id, project_id, '%3', id, '%2' FROM vault.resources "
@@ -606,15 +607,20 @@ void VaultReimportTest::preservesTimeWhenAssignmentMoves()
     QVERIFY(execute(QStringLiteral("SET SESSION AUTHORIZATION %1").arg(actorRole)));
     const QString visibleTasks = QStringLiteral(
         "SELECT source_uid FROM vault.desktop_list_schedule_tasks(%1) ORDER BY source_uid").arg(scope);
-    QVERIFY(execute(visibleTasks));
-    QVERIFY(sql.next());
-    QCOMPARE(sql.value(0).toInt(), 11);
-    QVERIFY(!sql.next());
+    // View sees every task, whether or not the person is linked to its work.
+    const auto allTasksVisible = [&]() {
+        if (!execute(visibleTasks))
+            return false;
+        QList<int> uids;
+        while (sql.next())
+            uids.append(sql.value(0).toInt());
+        return uids == QList<int>{10, 11};
+    };
+    QVERIFY(allTasksVisible());
     QVERIFY2(schedule::listDesktopVaultTasks(database, tenant, project, sharedTasks, error), qPrintable(error));
-    QCOMPARE(sharedTasks.size(), 1);
-    QVERIFY(sharedTasks.front().predecessors.isEmpty());
-    QCOMPARE(sharedTasks.front().assignments.size(), 1);
-    const auto &visibleAssignment = sharedTasks.front().assignments.front();
+    QCOMPARE(sharedTasks.size(), 2);
+    QCOMPARE(sharedTasks.back().assignments.size(), 1);
+    const auto &visibleAssignment = sharedTasks.back().assignments.front();
     QCOMPARE(visibleAssignment.resourceName, QStringLiteral("Planner"));
     QVERIFY(visibleAssignment.workMillis.has_value());
     QCOMPARE(*visibleAssignment.workMillis, qint64(7200000));
@@ -628,8 +634,7 @@ void VaultReimportTest::preservesTimeWhenAssignmentMoves()
         "WHERE (organization_id, project_id) = (%1) AND source_uid = 20 AND NOT retired")
         .arg(scope, actorId, id(QUuid::createUuid()), recipient)));
     QVERIFY(execute(QStringLiteral("SET SESSION AUTHORIZATION %1").arg(actorRole)));
-    QVERIFY(execute(visibleTasks));
-    QVERIFY(!sql.next());
+    QVERIFY(allTasksVisible());
     QVERIFY(execute(QStringLiteral("SELECT id FROM vault.desktop_list_time(%1)").arg(scope)));
     QVERIFY(sql.next());
     QCOMPARE(sql.value(0).toUuid(), entry);
@@ -650,7 +655,7 @@ void VaultReimportTest::preservesTimeWhenAssignmentMoves()
     QVERIFY(sql.next() && !sql.value(0).toBool());
 
     QVERIFY(execute(QStringLiteral("RESET SESSION AUTHORIZATION")));
-    QVERIFY(execute(QStringLiteral("INSERT INTO vault.project_members VALUES (%1,'%2','time_approver'); "
+    QVERIFY(execute(QStringLiteral("INSERT INTO vault.project_members VALUES (%1,'%2','editor'); "
                                     "UPDATE vault.manager_principals SET user_id = '%2' WHERE database_role_name = '%3'")
                     .arg(scope, recipient, actorRole)));
     QVERIFY(execute(QStringLiteral("SET SESSION AUTHORIZATION %1").arg(actorRole)));

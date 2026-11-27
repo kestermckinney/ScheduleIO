@@ -83,13 +83,11 @@ Apply a restrictive tenant and active membership predicate, then command-specifi
 | --- | --- |
 | Platform administrator | Everything in every organization, through that organization's service account, plus creating and suspending organizations, naming an owner, and managing platform administrators. Organization audit entries record the platform administrator behind each change. |
 | Organization owner or admin | Manage tenant memberships and projects, read organization schedules, map resources, and approve project time. Owner-level operations include ownership transfer. |
-| Project manager | Read and save the full schedule through ScheduleVault, administer project grants and mappings, view unmapped resources, and approve project time. |
-| Editor or viewer | Editor can save schedule changes through ScheduleVault. Viewer can read the shared schedule. Both are subject to resource, cost, and export restrictions. |
-| Contributor with a mapped resource | See assigned tasks and own assignments, and log own time against that work. A mapping alone requires a separate project grant for access. |
-| Time Entry | Log own time on eligible project tasks or assignments visible to the caller, including task-only entries without a mapped resource. |
-| Time Approver | Review and approve submitted project time. Grant schedule visibility separately as needed. |
+| Edit access (`editor`) | Read and save the full schedule through ScheduleVault, share the project, map resources, enter time on any task for any active member (`vault.desktop_create_time_for`), and approve or return other people's submitted time. |
+| View access (`viewer`) | Read the full schedule through ScheduleVault without saving it. |
+| Anyone with Edit or View access | Enter, change, and submit their own time on tasks assigned to them through a resource mapped to them. A mapping alone, without a project grant, gives no access. |
 
-`vault.bind_manager_context` derives the platform administrator from the authenticated login, never from a setting a client can change, and refuses a suspended organization to everyone else. Combine direct and group permissions by capability. Check active membership and group membership on each request so revocations affect new requests. Unmapped resource details are manager/admin only. Expose sensitive costs or native payloads through separately granted projections or operations. Keep personal time visible to the logger and authorized project approvers/managers and organization admins. Prevent self-approval by default.
+`vault.bind_manager_context` derives the platform administrator from the authenticated login, never from a setting a client can change, and refuses a suspended organization to everyone else. Combine direct and group permissions by capability. Check active membership and group membership on each request so revocations affect new requests. A person or group holds one access level per project; granting one replaces the other. Migration 070 folded the earlier roles into these two: manager, editor, contributor, and time approver became Edit; viewer and time entry became View. Expose sensitive costs or native payloads through separately granted projections or operations. Keep personal time visible to the logger and people with Edit access to the project and organization admins. Prevent self-approval by default.
 
 ## Time and resourcing
 
