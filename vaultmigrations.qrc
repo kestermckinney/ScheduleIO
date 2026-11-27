@@ -70,5 +70,7 @@
     <file alias="068_platform_administration.sql">vault/migrations/068_platform_administration.sql</file>
     <file alias="069_member_access.sql">vault/migrations/069_member_access.sql</file>
     <file alias="070_edit_view_access.sql">vault/migrations/070_edit_view_access.sql</file>
+    <file alias="071_sign_in_identity.sql">vault/migrations/071_sign_in_identity.sql</file>
+    <file alias="072_organization_sign_in.sql">vault/migrations/072_organization_sign_in.sql</file>
   </qresource>
 </RCC>

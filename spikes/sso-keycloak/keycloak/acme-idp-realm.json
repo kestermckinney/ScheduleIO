@@ -1,0 +1,47 @@
+{
+  "realm": "acme-idp",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "vault-broker",
+      "publicClient": false,
+      "secret": "acme-broker-spike-secret",
+      "standardFlowEnabled": true,
+      "redirectUris": [
+        "http://localhost:8080/realms/vault/broker/acme/endpoint*"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "svt_carol",
+      "enabled": true,
+      "email": "carol@acme.example",
+      "emailVerified": true,
+      "firstName": "Carol",
+      "lastName": "Acme",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "testuser1",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "svt_alice",
+      "enabled": true,
+      "email": "mallory@acme.example",
+      "emailVerified": true,
+      "firstName": "Mallory",
+      "lastName": "Acme",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "testuser1",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

@@ -89,6 +89,26 @@ Apply a restrictive tenant and active membership predicate, then command-specifi
 
 `vault.bind_manager_context` derives the platform administrator from the authenticated login, never from a setting a client can change, and refuses a suspended organization to everyone else. Combine direct and group permissions by capability. Check active membership and group membership on each request so revocations affect new requests. A person or group holds one access level per project; granting one replaces the other. Migration 070 folded the earlier roles into these two: manager, editor, contributor, and time approver became Edit; viewer and time entry became View. Expose sensitive costs or native payloads through separately granted projections or operations. Keep personal time visible to the logger and people with Edit access to the project and organization admins. Prevent self-approval by default.
 
+### Single sign-on
+
+A Vault server can let members sign in with a token instead of a password, through PostgreSQL 18 OAuth.
+- **Who checks the token:** `pg_hba.conf` uses the `oauth` method with `delegate_ident_mapping=1`, and a validator decides which login each token may open. In the spike, the token must name the login in a `vault_login` claim that only administrators can assign.
+- **The identity the session carries:** the server reports the person as `system_user = 'oauth:<issuer>#<subject>'`.
+
+Migration 071 has `vault.bind_manager_context` tie that identity to the Vault person:
+- **First token sign-in:** records the token's issuer and subject on `vault.users`. People that Manager creates start with issuer `postgresql`.
+- **Later token sign-ins:** must carry the same identity. A token from another account that opens the same login is refused.
+- **Passwords stop for linked people.** A person whose issuer is an `http(s)` URL (OpenID Connect issuers always are) is linked to single sign-on, and a password session for them is refused.
+- **Unlinked people keep passwords.** Everyone else keeps using passwords as before.
+
+Migration 072 lets each organization choose how its people sign in (`vault.organization_sign_in`):
+- **Password sign-in is a role membership.** On a single sign-on server, `pg_hba.conf` lists the cluster role `vault_password_sign_in` ahead of its `oauth` line. Logins of password organizations and platform administrators belong to it. The Vault owner manages the membership, and creates the role on first use. A server administrator who created the role must grant it to the owner `WITH ADMIN OPTION`, which Manager's **New Vault** does.
+- **Switching to single sign-on** (`vault.manager_set_sign_in`, owners only) removes every member's password and their membership. Switching back restores the membership but no passwords.
+- **People in a single sign-on organization** get logins without a password (`vault.manager_create_login` refuses one) and a sign-in email (`vault.users.sign_in_email`), which Manager uses to find their account at the organization's identity provider.
+- **Platform administrators always keep a password**, so there is a way in when the sign-in service is down.
+
+`ScheduleIO/spikes/sso-keycloak` holds a working Keycloak setup and the validator, and ScheduleVaultManager's `tst_sso_vault` exercises these rules against it.
+
 ## Time and resourcing
 
 ScheduleVault’s **Vault Time** dialog can open its own PostgreSQL connection for users who can log or review time without opening a full schedule. It lists eligible task and assignment targets for the chosen project. Provision the registered desktop login with execution privileges on `vault.desktop_list_time_work`, `vault.desktop_list_time`, `vault.desktop_create_time`, and `vault.desktop_update_time` as its duties require. The project and resource permissions are checked on each call.

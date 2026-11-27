@@ -1,0 +1,13 @@
+FROM docker.io/library/postgres:18
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-server-dev-18 libcurl4-openssl-dev gcc make \
+ && (apt-get install -y --no-install-recommends libpq-oauth || true) \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY validator/ /src/validator/
+RUN make -C /src/validator && make -C /src/validator install
+
+COPY postgres/postgresql.oauth.conf /etc/postgresql/postgresql.oauth.conf
+COPY postgres/pg_hba.conf /etc/postgresql/pg_hba.conf
+COPY postgres/init.sql /docker-entrypoint-initdb.d/10-init.sql
