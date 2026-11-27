@@ -74,6 +74,11 @@ if(SCHEDULEIO_BUILD_VAULT)
     set_tests_properties(tst_vault_platform PROPERTIES
         LABELS "postgresql"
         SKIP_REGULAR_EXPRESSION "Set SCHEDULEIO_VAULT_TEST_DATABASE and the PG\\* variables")
+    # Single sign-on against spikes/sso-keycloak; skips unless SCHEDULEIO_SSO_SPIKE_DIR is set.
+    scheduleio_add_test_executable(tst_vault_signin vault/tst_vault_signin.cpp)
+    add_test(NAME tst_vault_signin COMMAND tst_vault_signin)
+    set_tests_properties(tst_vault_signin PROPERTIES LABELS "sso"
+        SKIP_REGULAR_EXPRESSION "Set SCHEDULEIO_SSO_SPIKE_DIR")
 endif()
 scheduleio_add_test(tst_semantic_roundtrip roundtrip/tst_semantic_roundtrip.cpp)
 

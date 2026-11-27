@@ -34,7 +34,9 @@ QString VaultConnectionSettings::identity() const
 
 bool VaultConnectionSettings::operator==(const VaultConnectionSettings &other) const
 {
-    return identity() == other.identity() && verifyTls == other.verifyTls;
+    return identity() == other.identity() && verifyTls == other.verifyTls
+        && signInIssuer == other.signInIssuer && signInClientId == other.signInClientId
+        && signInProvider == other.signInProvider;
 }
 
 bool isLocalVaultHost(const QString &host)
@@ -77,7 +79,21 @@ bool parseVaultConnectionUri(const QString &input, VaultConnectionSettings &sett
 
     bool verifyTls = true;
     bool hasSslMode = false;
+    QString issuer, clientId, provider;
     for (const auto &option : QUrlQuery(uri).queryItems(QUrl::FullyDecoded)) {
+        QString *signIn = option.first == QStringLiteral("oauth_issuer") ? &issuer
+                        : option.first == QStringLiteral("oauth_client_id") ? &clientId
+                        : option.first == QStringLiteral("idp") ? &provider : nullptr;
+        if (signIn) {
+            const bool url = signIn != &issuer || QUrl(option.second, QUrl::StrictMode).scheme().startsWith(QStringLiteral("http"));
+            if (!signIn->isEmpty() || option.second.trimmed().isEmpty() || option.second.contains(QChar::Null) || !url) {
+                error = QCoreApplication::translate("VaultConnection",
+                                                    "oauth_issuer must be an http(s) address, and each sign-in option may appear once.");
+                return false;
+            }
+            *signIn = option.second.trimmed();
+            continue;
+        }
         if (option.first != QStringLiteral("sslmode") || hasSslMode
             || (option.second != QStringLiteral("verify-full") && option.second != QStringLiteral("prefer"))) {
             error = QCoreApplication::translate("VaultConnection",
@@ -87,6 +103,14 @@ bool parseVaultConnectionUri(const QString &input, VaultConnectionSettings &sett
         hasSslMode = true;
         verifyTls = option.second == QStringLiteral("verify-full");
     }
+    if (issuer.isEmpty() && (!clientId.isEmpty() || !provider.isEmpty())) {
+        error = QCoreApplication::translate("VaultConnection", "oauth_client_id and idp need oauth_issuer.");
+        return false;
+    }
+    settings.signInIssuer = issuer;
+    settings.signInClientId = issuer.isEmpty() ? QString()
+                              : clientId.isEmpty() ? VaultConnectionSettings::defaultSignInClientId() : clientId;
+    settings.signInProvider = provider;
     settings.host = host;
     settings.port = port;
     settings.database = database;
@@ -103,7 +127,20 @@ QSqlDatabase addVaultDatabase(const QString &connectionName, const VaultConnecti
     database.setPort(settings.port);
     database.setDatabaseName(settings.database.trimmed());
     database.setUserName(settings.user.trimmed());
-    database.setConnectOptions(vaultConnectOptions(settings.verifyTls));
+    QString options = vaultConnectOptions(settings.verifyTls);
+    if (settings.usesSingleSignOn()) {
+        // libpq's connection-string quoting: values in single quotes.
+        const auto quoted = [](QString value) {
+            return QLatin1Char('\'') + value.replace(QLatin1Char('\\'), QStringLiteral("\\\\"))
+                                             .replace(QLatin1Char('\''), QStringLiteral("\\'")) + QLatin1Char('\'');
+        };
+        options += QStringLiteral(";oauth_issuer=%1;oauth_client_id=%2")
+                       .arg(quoted(settings.signInIssuer.trimmed()),
+                            quoted(settings.signInClientId.trimmed().isEmpty()
+                                       ? VaultConnectionSettings::defaultSignInClientId()
+                                       : settings.signInClientId.trimmed()));
+    }
+    database.setConnectOptions(options);
     return database;
 }
 

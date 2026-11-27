@@ -149,14 +149,16 @@ target_include_directories(scheduleio_objects
 target_link_libraries(scheduleio_objects PUBLIC Qt${QT_VERSION_MAJOR}::Core)
 
 if(SCHEDULEIO_BUILD_VAULT)
-    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Sql)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Sql Network)
     target_sources(scheduleio_objects PRIVATE
         src/vault/vaultreader.cpp src/vault/vaultreader.h
         src/vault/vaultmigrations.cpp src/vault/vaultmigrations.h
         src/vault/vaultconnection.cpp src/vault/vaultconnection.h
         src/vault/vaultcredentials.cpp src/vault/vaultcredentials.h
+        src/vault/vaultsignin.cpp src/vault/vaultsignin.h
         vaultmigrations.qrc)
-    target_link_libraries(scheduleio_objects PUBLIC Qt${QT_VERSION_MAJOR}::Sql)
+    # Network: single sign-on (vaultsignin.cpp) talks to the sign-in service.
+    target_link_libraries(scheduleio_objects PUBLIC Qt${QT_VERSION_MAJOR}::Sql Qt${QT_VERSION_MAJOR}::Network)
     # The system credential stores behind vaultcredentials.cpp.
     if(WIN32)
         target_link_libraries(scheduleio_objects PUBLIC advapi32)

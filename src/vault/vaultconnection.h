@@ -28,7 +28,17 @@ struct SCHEDULEIO_EXPORT VaultConnectionSettings
     // Certificate and host-name checks, on by default for every server except
     // this computer's (see defaultVerifyTls()).
     bool verifyTls = false;
+    // Single sign-on. signInIssuer is the sign-in service's issuer, exactly as
+    // the server's pg_hba.conf names it; signInClientId is this app's client
+    // there; signInProvider optionally names the organization's identity
+    // provider so sign-in goes straight to it. An empty issuer means the login
+    // signs in with a password.
+    QString signInIssuer;
+    QString signInClientId;
+    QString signInProvider;
 
+    static QString defaultSignInClientId() { return QStringLiteral("schedulevault"); }
+    bool usesSingleSignOn() const { return !signInIssuer.trimmed().isEmpty(); }
     bool isComplete() const;
     // Host, port, database, and user: one saved password belongs to exactly this.
     QString identity() const;
@@ -43,14 +53,17 @@ SCHEDULEIO_EXPORT bool defaultVerifyTls(const QString &host);
 // The libpq options every Vault connection uses.
 SCHEDULEIO_EXPORT QString vaultConnectOptions(bool verifyTls);
 
-// Reads postgresql://user[:password]@host[:port]/database[?sslmode=verify-full|prefer].
+// Reads postgresql://user[:password]@host[:port]/database[?sslmode=verify-full|prefer]
+// with, for single sign-on, oauth_issuer=<issuer>, and optionally
+// oauth_client_id=<client> (default schedulevault) and idp=<provider>.
 // A URI without sslmode verifies certificates. On failure, error says what a
 // usable URI looks like and settings and password are left untouched.
 SCHEDULEIO_EXPORT bool parseVaultConnectionUri(const QString &input, VaultConnectionSettings &settings,
                                                QString &password, QString &error);
 
 // Adds a QPSQL connection named connectionName configured for settings. The
-// caller opens it with the password and removes it when done.
+// caller opens it with the password and removes it when done. With single
+// sign-on, open it with no password after handing VaultSignIn a token.
 SCHEDULEIO_EXPORT QSqlDatabase addVaultDatabase(const QString &connectionName,
                                                 const VaultConnectionSettings &settings);
 

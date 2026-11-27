@@ -59,5 +59,5 @@ podman pod rm -f vault-sso-spike   # tear down
 
 1. Done (2026-11-27): migration 071 links and checks the `system_user` identity in `bind_manager_context`. ScheduleVaultManager's `tests/tst_sso_vault.cpp` runs it against this spike with a real Vault (`SCHEDULEIO_SSO_SPIKE_DIR=$PWD ctest -L sso` from the Manager build).
 2. Done (2026-11-27): Manager's **People → Sign-in** tab (migration 072) switches an organization to single sign-on and assigns `vault_login` to provider accounts by sign-in email. Its client is `vault-manager` (secret `vault-manager-spike-secret`).
-3. In ScheduleVault: use the browser sign-in from `probe/main.cpp`.
+3. Done (2026-11-27): ScheduleIO's `vault/vaultsignin` (browser sign-in, token refresh, libpq hook; `tests/vault/tst_vault_signin.cpp`) and ScheduleVault's **Sign in with your organization** (`tests/gui/tst_vault_sso.qml`, after Manager's `tst_sso_vault`).
 4. Try a SAML provider entry, plus SCIM or Keycloak events for removing people.
