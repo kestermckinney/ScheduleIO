@@ -135,7 +135,7 @@ CREATE TABLE vault.project_members (
     project_id uuid NOT NULL,
     user_id uuid NOT NULL,
     role text NOT NULL CONSTRAINT project_members_role_check CHECK (role IN ('editor', 'viewer')),
-    PRIMARY KEY (organization_id, project_id, user_id, role),
+    PRIMARY KEY (organization_id, project_id, user_id),
     FOREIGN KEY (organization_id, project_id) REFERENCES vault.projects,
     FOREIGN KEY (organization_id, user_id) REFERENCES vault.organization_members
 );
@@ -148,7 +148,7 @@ CREATE TABLE vault.project_group_shares (
     project_id uuid NOT NULL,
     group_id uuid NOT NULL,
     role text NOT NULL CONSTRAINT project_group_shares_role_check CHECK (role IN ('editor', 'viewer')),
-    PRIMARY KEY (organization_id, project_id, group_id, role),
+    PRIMARY KEY (organization_id, project_id, group_id),
     FOREIGN KEY (organization_id, project_id) REFERENCES vault.projects,
     FOREIGN KEY (organization_id, group_id) REFERENCES vault.groups
 );

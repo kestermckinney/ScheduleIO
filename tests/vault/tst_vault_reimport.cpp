@@ -538,7 +538,19 @@ void VaultReimportTest::preservesTimeWhenAssignmentMoves()
     QCOMPARE(sql.value(1).toString(), QStringLiteral("Recipient"));
     QCOMPARE(sql.value(2).toString(), QStringLiteral("viewer"));
     QVERIFY(!sql.next());
-    QVERIFY(execute(share.arg(scope, recipient, QStringLiteral("false"))));
+    // Granting the same access again changes nothing; granting Edit replaces View.
+    QVERIFY(execute(share.arg(scope, recipient, QStringLiteral("true"))));
+    QVERIFY(sql.next() && !sql.value(0).toBool());
+    const QString promote = QStringLiteral("SELECT vault.manager_change_project_share(%1,'user','%2','editor',true)");
+    QVERIFY(execute(promote.arg(scope, recipient)));
+    QVERIFY(sql.next() && sql.value(0).toBool());
+    QVERIFY(execute(QStringLiteral(
+        "SELECT project_role FROM vault.manager_list_project_grants(%1) WHERE principal_kind = 'user'").arg(scope)));
+    QVERIFY(sql.next());
+    QCOMPARE(sql.value(0).toString(), QStringLiteral("editor"));
+    QVERIFY(!sql.next());
+    const QString unshare = QStringLiteral("SELECT vault.manager_change_project_share(%1,'user','%2','editor',false)");
+    QVERIFY(execute(unshare.arg(scope, recipient)));
     QVERIFY(sql.next() && sql.value(0).toBool());
 
     QVERIFY(execute(QStringLiteral("RESET SESSION AUTHORIZATION")));

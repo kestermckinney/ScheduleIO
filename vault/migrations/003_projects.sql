@@ -209,8 +209,8 @@ REVOKE ALL ON FUNCTION vault.desktop_reimport_schedule(
     uuid, uuid, bigint, text, bytea, bytea, jsonb, jsonb, jsonb, text) FROM PUBLIC;
 
 -- ── Sharing ──
--- A principal holds one access level per project: granting Edit or View
--- replaces the other. The old role names are still accepted, so earlier
+-- A principal holds one access level per project (one row, keyed without the
+-- role): granting Edit or View replaces the other. The old role names are still accepted, so earlier
 -- security exports import, and map to the access that replaced them.
 CREATE FUNCTION vault.manager_change_project_share(
     tenant uuid, project uuid, principal_kind text, principal_id uuid, project_role text,
@@ -239,19 +239,15 @@ CREATE FUNCTION vault.manager_change_project_share(
         END IF;
 
         IF principal_kind = 'user' AND grant_access THEN
-            DELETE FROM vault.project_members
-            WHERE organization_id = tenant AND project_id = project
-              AND user_id = principal_id AND role <> access;
-            INSERT INTO vault.project_members (organization_id, project_id, user_id, role)
+            INSERT INTO vault.project_members AS existing (organization_id, project_id, user_id, role)
             VALUES (tenant, project, principal_id, access)
-            ON CONFLICT DO NOTHING;
+            ON CONFLICT (organization_id, project_id, user_id)
+            DO UPDATE SET role = EXCLUDED.role WHERE existing.role <> EXCLUDED.role;
         ELSIF principal_kind = 'group' AND grant_access THEN
-            DELETE FROM vault.project_group_shares
-            WHERE organization_id = tenant AND project_id = project
-              AND group_id = principal_id AND role <> access;
-            INSERT INTO vault.project_group_shares (organization_id, project_id, group_id, role)
+            INSERT INTO vault.project_group_shares AS existing (organization_id, project_id, group_id, role)
             VALUES (tenant, project, principal_id, access)
-            ON CONFLICT DO NOTHING;
+            ON CONFLICT (organization_id, project_id, group_id)
+            DO UPDATE SET role = EXCLUDED.role WHERE existing.role <> EXCLUDED.role;
         ELSIF principal_kind = 'user' THEN
             DELETE FROM vault.project_members
             WHERE organization_id = tenant AND project_id = project
