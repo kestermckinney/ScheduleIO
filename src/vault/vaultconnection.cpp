@@ -5,6 +5,8 @@
 #include <QCoreApplication>
 #include <QSqlDatabase>
 #include <QSqlError>
+#include <QSqlQuery>
+#include <QUuid>
 #include <QUrl>
 #include <QUrlQuery>
 
@@ -156,6 +158,47 @@ QString vaultConnectionFailure(const QSqlDatabase &database)
     if (text.isEmpty())
         text = QCoreApplication::translate("VaultConnection", "the server didn’t respond");
     return QCoreApplication::translate("VaultConnection", "Couldn’t connect: %1").arg(text);
+}
+
+bool looksLikeEmail(const QString &user)
+{
+    return user.trimmed().contains(QLatin1Char('@'));
+}
+
+QString vaultLookupLogin(const QString &database)
+{
+    return database.trimmed() + QStringLiteral("_lookup");
+}
+
+bool lookupVaultLogin(const VaultConnectionSettings &settings, const QString &email, QString &login, QString &error)
+{
+    const auto tr = [](const char *text) { return QCoreApplication::translate("VaultConnection", text); };
+    const QString name = QStringLiteral("vault-login-lookup-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    bool ok = false;
+    {
+        VaultConnectionSettings lookup = settings;
+        lookup.user = vaultLookupLogin(settings.database);
+        QSqlDatabase database = addVaultDatabase(name, lookup);
+        if (!database.open(lookup.user, lookup.user)) {
+            error = tr("Couldn’t look up the login for that email. Sign in with your login name instead. (%1)")
+                        .arg(vaultConnectionFailure(database));
+        } else {
+            QSqlQuery query(database);
+            query.prepare(QStringLiteral("SELECT vault.login_for_email(CAST(? AS text))"));
+            query.addBindValue(email.trimmed());
+            if (!query.exec() || !query.next()) {
+                error = tr("Couldn’t look up the login for that email. Sign in with your login name instead.");
+            } else if (query.value(0).isNull() || query.value(0).toString().isEmpty()) {
+                error = tr("No one with the email %1 can sign in to this Vault.").arg(email.trimmed());
+            } else {
+                login = query.value(0).toString();
+                ok = true;
+            }
+            database.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(name);
+    return ok;
 }
 
 } // namespace schedule

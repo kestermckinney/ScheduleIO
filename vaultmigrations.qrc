@@ -73,5 +73,7 @@
     <file alias="071_sign_in_identity.sql">vault/migrations/071_sign_in_identity.sql</file>
     <file alias="072_organization_sign_in.sql">vault/migrations/072_organization_sign_in.sql</file>
     <file alias="073_sign_in_broker.sql">vault/migrations/073_sign_in_broker.sql</file>
+    <file alias="074_member_password.sql">vault/migrations/074_member_password.sql</file>
+    <file alias="075_login_lookup.sql">vault/migrations/075_login_lookup.sql</file>
   </qresource>
 </RCC>
