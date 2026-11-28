@@ -43,7 +43,9 @@ struct SCHEDULEIO_EXPORT VaultSignInTokens
 
 struct SCHEDULEIO_EXPORT VaultCredential
 {
-    QString login;
+    QString login;      // the Vault login
+    QString user;       // the name to connect with: login, or login.<project
+                        // ref> through Supabase's shared pooler
     QString password;
     QDateTime validUntil;  // UTC
 };

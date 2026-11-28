@@ -4,7 +4,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import pg from 'pg';
-import { BrokerError, candidatesOf, directoryOf, issueCredential, scramVerifier } from '../lib/broker.js';
+import { BrokerError, candidatesOf, connectionUser, directoryOf, issueCredential, poolerRefFor, scramVerifier }
+  from '../lib/broker.js';
 
 const config = { supabaseUrl: 'https://example.supabase.co/', anonKey: 'anon', vault: { host: 'db.example', port: 5432 } };
 const azure = (tid, email = 'ann@acme.example') => ({
@@ -47,10 +48,25 @@ test('issues a credential for the first account the Vault accepts', async () => 
                      directory: 't-1', email: 'ann@acme.example', verifier: undefined });
   assert.match(calls[1].verifier, /^SCRAM-SHA-256\$4096:/);
   assert.equal(credential.login, 'ann');
+  assert.equal(credential.user, 'ann');
   assert.equal(credential.validUntil, '2026-11-27T12:05:00.000Z');
   assert.equal(credential.host, 'db.example');
   assert.ok(credential.password.length >= 40);
   assert.ok(!calls[1].verifier.includes(credential.password));
+});
+
+test('the shared pooler gets <login>.<project ref>', async () => {
+  assert.equal(poolerRefFor({ vaultHost: 'aws-0-us-east-1.pooler.supabase.com', supabaseUrl: 'https://abcdefgh.supabase.co' }),
+               'abcdefgh');
+  assert.equal(poolerRefFor({ vaultHost: 'db.abcdefgh.supabase.co', supabaseUrl: 'https://abcdefgh.supabase.co' }), null);
+  assert.equal(poolerRefFor({ poolerRef: 'explicit', vaultHost: 'db.example' }), 'explicit');
+  assert.equal(connectionUser('ann', null), 'ann');
+  const credential = await issueCredential('Bearer t', { ...config, poolerRef: 'abcdefgh' }, {
+    fetchUser: async () => ({ id: 'u', identities: [azure('t-1')] }),
+    issue: async () => ({ login: 'ann', valid_until: '2026-11-27T12:05:00Z' }),
+  });
+  assert.equal(credential.login, 'ann');
+  assert.equal(credential.user, 'ann.abcdefgh');
 });
 
 test('answers 401 without a current sign-in, 403 when refused, 429 when limited', async () => {

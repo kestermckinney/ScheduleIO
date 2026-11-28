@@ -9,11 +9,14 @@
 //   BROKER_DATABASE_URL    postgres://<broker login>:<password>@<host>:<port>/<database>
 //                          (a login registered with vault.add_sign_in_broker)
 //   BROKER_DATABASE_CA     optional: the database's CA certificate (PEM)
+//   VAULT_POOLER_REF       optional: the project ref the shared pooler needs
+//                          after each login (found from SUPABASE_URL when
+//                          VAULT_HOST is *.pooler.supabase.com)
 //   VAULT_HOST, VAULT_PORT, VAULT_DATABASE   optional: where desktops connect,
 //                          returned with the credential
 
 import pg from 'pg';
-import { BrokerError, fetchSupabaseUser, issueCredential } from '../lib/broker.js';
+import { BrokerError, fetchSupabaseUser, issueCredential, poolerRefFor } from '../lib/broker.js';
 
 let pool;
 function database() {
@@ -33,6 +36,8 @@ function database() {
 const config = () => ({
   supabaseUrl: process.env.SUPABASE_URL,
   anonKey: process.env.SUPABASE_ANON_KEY,
+  poolerRef: poolerRefFor({ poolerRef: process.env.VAULT_POOLER_REF, vaultHost: process.env.VAULT_HOST,
+                            supabaseUrl: process.env.SUPABASE_URL }),
   vault: Object.fromEntries(Object.entries({
     host: process.env.VAULT_HOST,
     port: process.env.VAULT_PORT ? Number(process.env.VAULT_PORT) : undefined,

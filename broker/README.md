@@ -33,6 +33,7 @@ Set these environment variables:
 | `BROKER_DATABASE_URL` | `postgres://vault_broker:<password>@<pooler host>:5432/postgres`. Use the session pooler or the direct connection, not the transaction pooler. |
 | `BROKER_DATABASE_CA` | optional: Supabase's CA certificate (PEM), so the database's certificate is checked |
 | `VAULT_HOST`, `VAULT_PORT`, `VAULT_DATABASE` | optional: where desktops connect, returned with each credential |
+| `VAULT_POOLER_REF` | optional: the project ref for Supabase's shared pooler, which needs usernames of the form `<login>.<project ref>`. When `VAULT_HOST` is `*.pooler.supabase.com`, it comes from `SUPABASE_URL`. |
 
 The endpoint is `https://<deployment>/api/vault-credential`.
 
@@ -47,7 +48,7 @@ The endpoint is `https://<deployment>/api/vault-credential`.
 ## API
 - `GET /api/vault-credential` returns `{ supabaseUrl, anonKey }`, so desktops only need the broker's address.
 - `POST /api/vault-credential` with `Authorization: Bearer <Supabase access token>` returns one of:
-  - `200 { login, password, validUntil, host?, port?, database? }`;
+  - `200 { login, user, password, validUntil, host?, port?, database? }`, where `user` is the name to connect with (`login`, or `login.<project ref>` for the shared pooler);
   - `401` when the token isn't a current sign-in;
   - `403` when the sign-in doesn't open a login;
   - `429` when the person has made too many requests.

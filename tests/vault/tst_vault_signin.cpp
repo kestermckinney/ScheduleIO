@@ -151,6 +151,7 @@ Response VaultSignInTest::serve(const Request &request)
             return {401, {{QStringLiteral("error"), QStringLiteral("Sign in again")}}};
         ++m_credentials;
         return {200, {{QStringLiteral("login"), QStringLiteral("ann_example")},
+                      {QStringLiteral("user"), QStringLiteral("ann_example.abcdefgh")},
                       {QStringLiteral("password"), QStringLiteral("short-lived-%1").arg(m_credentials)},
                       {QStringLiteral("validUntil"), QStringLiteral("2026-11-27T12:05:00.000Z")}}};
     }
@@ -234,6 +235,7 @@ void VaultSignInTest::tradesTheSignInForAPassword()
     QString error;
     QVERIFY2(signin::fetchCredential(m_settings, QStringLiteral("access-1"), credential, error), qPrintable(error));
     QCOMPARE(credential.login, QStringLiteral("ann_example"));
+    QCOMPARE(credential.user, QStringLiteral("ann_example.abcdefgh"));  // for the shared pooler
     QVERIFY(credential.password.startsWith(QStringLiteral("short-lived-")));
     QCOMPARE(credential.validUntil, QDateTime(QDate(2026, 11, 27), QTime(12, 5), QTimeZone::UTC));
 

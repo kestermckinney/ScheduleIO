@@ -282,6 +282,9 @@ bool fetchCredential(const VaultConnectionSettings &settings, const QString &acc
     const QString password = reply.body.value(QStringLiteral("password")).toString();
     if (reply.status == 200 && !login.isEmpty() && !password.isEmpty()) {
         credential.login = login;
+        credential.user = reply.body.value(QStringLiteral("user")).toString();
+        if (credential.user.isEmpty())
+            credential.user = login;
         credential.password = password;
         credential.validUntil = QDateTime::fromString(reply.body.value(QStringLiteral("validUntil")).toString(),
                                                       Qt::ISODateWithMs);

@@ -8,7 +8,9 @@
 //   GET  /api/vault-credential  -> { supabaseUrl, anonKey }, for desktops
 //   POST /api/vault-credential
 //   Authorization: Bearer <Supabase access token>
-//   -> 200 { login, password, validUntil, host?, port?, database? }
+//   -> 200 { login, user, password, validUntil, host?, port?, database? }
+//      user is the name to connect with: login, or login.<project ref> when
+//      desktops connect through Supabase's shared pooler, which needs it.
 //      401 the token isn't a current Supabase sign-in
 //      403 the sign-in doesn't open a Vault login
 //      429 too many sign-ins for this person
@@ -32,6 +34,20 @@ export function scramVerifier(password, salt = randomBytes(16), iterations = 409
   const storedKey = createHash('sha256').update(hmac(salted, 'Client Key')).digest();
   const serverKey = hmac(salted, 'Server Key');
   return `SCRAM-SHA-256$${iterations}:${salt.toString('base64')}$${storedKey.toString('base64')}:${serverKey.toString('base64')}`;
+}
+
+// The shared pooler (Supavisor) reads the project from the username:
+// <role>.<project ref>. config.poolerRef, when set, is that ref.
+export function connectionUser(login, poolerRef) {
+  return poolerRef ? `${login}.${poolerRef}` : login;
+}
+
+// The ref to add: VAULT_POOLER_REF, or, when VAULT_HOST is Supabase's
+// shared pooler, the project's subdomain in SUPABASE_URL.
+export function poolerRefFor({ poolerRef, vaultHost, supabaseUrl }) {
+  if (poolerRef) return poolerRef;
+  if (!/\.pooler\.supabase\.com$/i.test(vaultHost ?? '')) return null;
+  return /^https:\/\/([a-z0-9]+)\.supabase\.co\b/i.exec(supabaseUrl ?? '')?.[1] ?? null;
 }
 
 // ── Who signed in ──
@@ -91,7 +107,7 @@ export class BrokerError extends Error {
   }
 }
 
-// config: { supabaseUrl, anonKey, vault: { host, port, database } }
+// config: { supabaseUrl, anonKey, poolerRef?, vault: { host, port, database } }
 // deps:   { fetchUser(token) -> user|null, issue({issuer, subject, email, provider, directory, verifier}) -> {login, valid_until} }
 export async function issueCredential(authorization, config, deps) {
   const token = /^Bearer\s+(\S+)$/i.exec(authorization ?? '')?.[1];
@@ -107,6 +123,7 @@ export async function issueCredential(authorization, config, deps) {
       const row = await deps.issue({ issuer, subject: user.id, ...candidate, verifier: scramVerifier(password) });
       return {
         login: row.login,
+        user: connectionUser(row.login, config.poolerRef),
         password,
         validUntil: new Date(row.valid_until).toISOString(),
         ...config.vault,
