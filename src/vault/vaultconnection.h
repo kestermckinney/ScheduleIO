@@ -70,7 +70,7 @@ SCHEDULEIO_EXPORT QSqlDatabase addVaultDatabase(const QString &connectionName,
 // ("password authentication failed for user …").
 SCHEDULEIO_EXPORT QString vaultConnectionFailure(const QSqlDatabase &database);
 
-// Signing in with an email (migration 075). An entry with "@" in a password
+// Signing in with an email (vault/migrations/009_sign_in.sql). An entry with "@" in a password
 // connection is an email, not a login.
 SCHEDULEIO_EXPORT bool looksLikeEmail(const QString &user);
 // The Vault's lookup login, "<database>_lookup"; its password is its name.

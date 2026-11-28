@@ -2,7 +2,7 @@
 
 A Vercel function that turns a Supabase Auth sign-in into a PostgreSQL password that works for five minutes. People in single sign-on organizations use it to open their Vault login.
 
-The database decides which login, if any, a sign-in opens. See `vault.broker_issue_sign_in` in `vault/migrations/073_sign_in_broker.sql` and "Single sign-on" in `docs/Design/VaultDataModel.md`. Organizations that use passwords don't involve the broker.
+The database decides which login, if any, a sign-in opens. See `vault.broker_issue_sign_in` in `vault/migrations/009_sign_in.sql` and "Single sign-on" in `docs/Design/VaultDataModel.md`. Organizations that use passwords don't involve the broker.
 
 ## Set up
 

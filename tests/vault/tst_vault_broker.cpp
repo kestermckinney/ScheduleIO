@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Paul McKinney
 // SPDX-License-Identifier: GPL-3.0-only
 
-// The single sign-on credential broker's database side (migration 073):
+// The single sign-on credential broker's database side (vault/migrations/009_sign_in.sql):
 // which logins vault.broker_issue_sign_in will open, and how.
 //
 // Needs a PostgreSQL superuser in PGHOST/PGUSER/PGPASSWORD; it creates and

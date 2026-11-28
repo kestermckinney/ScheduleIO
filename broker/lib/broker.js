@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 // The Schedule Vault sign-in broker: trades a Supabase Auth sign-in for a
-// PostgreSQL password that works for five minutes (see the Vault's migration
-// 073_sign_in_broker.sql, which decides which login, if any, it opens).
+// PostgreSQL password that works for five minutes (see the Vault's
+// vault/migrations/009_sign_in.sql, which decides which login, if any, it opens).
 //
 //   GET  /api/vault-credential  -> { supabaseUrl, anonKey }, for desktops
 //   POST /api/vault-credential

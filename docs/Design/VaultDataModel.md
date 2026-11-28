@@ -87,7 +87,7 @@ Apply a restrictive tenant and active membership predicate, then command-specifi
 | View access (`viewer`) | Read the full schedule through ScheduleVault without saving it. |
 | Anyone with Edit or View access | Enter, change, and submit their own time on tasks assigned to them through a resource mapped to them. A mapping alone, without a project grant, gives no access. |
 
-`vault.bind_manager_context` derives the platform administrator from the authenticated login, never from a setting a client can change, and refuses a suspended organization to everyone else. Combine direct and group permissions by capability. Check active membership and group membership on each request so revocations affect new requests. A person or group holds one access level per project; granting one replaces the other. Migration 070 folded the earlier roles into these two: manager, editor, contributor, and time approver became Edit; viewer and time entry became View. Expose sensitive costs or native payloads through separately granted projections or operations. Keep personal time visible to the logger and people with Edit access to the project and organization admins. Prevent self-approval by default.
+`vault.bind_manager_context` derives the platform administrator from the authenticated login, never from a setting a client can change, and refuses a suspended organization to everyone else. Combine direct and group permissions by capability. Check active membership and group membership on each request so revocations affect new requests. A person or group holds one access level per project; granting one replaces the other. The earlier role names are still accepted and map to these two: manager, editor, contributor, and time approver mean Edit; viewer and time entry mean View. Expose sensitive costs or native payloads through separately granted projections or operations. Keep personal time visible to the logger and people with Edit access to the project and organization admins. Prevent self-approval by default.
 
 ### Single sign-on
 
@@ -95,7 +95,7 @@ Each organization chooses how its people sign in (`vault.organization_sign_in`, 
 - **Passwords**, the default. Each person has an ordinary PostgreSQL login with a password of their own.
 - **Single sign-on** through the organization's identity provider, by way of Supabase Auth and a credential broker. A hosted PostgreSQL can't check tokens itself, so it never sees one.
 
-How a single sign-on works (migration 073, `ScheduleIO/broker`, and `vaultsignin.h`):
+How a single sign-on works (`vault/migrations/009_sign_in.sql`, `ScheduleIO/broker`, and `vaultsignin.h`):
 1. **The person signs in to Supabase Auth.** The desktop opens the browser at the organization's provider: Microsoft Entra (`azure`), Google Workspace (`google`), or another OpenID Connect provider. Supabase redirects back to a one-time address on `127.0.0.1` (PKCE).
 2. **The broker checks who signed in.** It asks Supabase Auth for the account and its provider identities, and works out each identity's *directory*: the Entra tenant ID, the Workspace domain, or the provider's issuer.
 3. **The database decides which login opens.** The broker calls `vault.broker_issue_sign_in` with the Supabase issuer and subject, the verified email, the provider, the directory, and a SCRAM verifier. The function finds the person already linked to that account, or else the person whose `sign_in_email` matches. It requires that:
@@ -116,7 +116,7 @@ Rules that keep this safe:
 
 `tst_vault_broker` tests the database side, `tst_vault_signin` the desktop side, and `ScheduleIO/broker/test` the broker.
 
-Migrations 071 and 072 first built single sign-on for PostgreSQL 18 OAuth (`pg_hba.conf` `oauth` with a validator). Migration 073 replaced that approach, which needs software installed on the server, and its `vault_password_sign_in` membership is no longer recorded.
+The schema still links a PostgreSQL 18 OAuth sign-in (`pg_hba.conf` `oauth` with a validator) to its person, but the broker is the supported approach because OAuth needs software installed on the server. Password sign-in groups in `pg_hba.conf` are not used.
 
 ## Time and resourcing
 
