@@ -1,15 +1,74 @@
 -- Copyright (C) 2026 Paul McKinney
 -- SPDX-License-Identifier: GPL-3.0-only
 
--- A schema owner can grant named sets of entry points to a registered login.
--- Vault membership and project roles remain checked by those entry points.
-CREATE FUNCTION vault.grant_desktop_capability_privileges(desktop_login name, capability text)
+-- What a Vault login may call comes from the person's organization role:
+--   every member gets the ScheduleVault entry points (projects, schedules,
+--   export, transfers, and time), and owners and administrators also get the
+--   Manager entry points. Each entry point still checks the caller's
+--   organization role and project access, which decide what is allowed.
+
+-- The entry points a login gets: the member set, or the Manager set.
+CREATE FUNCTION vault.login_routines(manager boolean) RETURNS text[]
+    LANGUAGE sql IMMUTABLE
+    SET search_path = pg_catalog
+    AS $$
+        SELECT CASE WHEN manager THEN ARRAY[
+            'vault.manager_enroll_member(uuid,text,name)',
+            'vault.manager_set_member_active(uuid,uuid,boolean)',
+            'vault.manager_change_group(uuid,uuid,text,text,uuid)',
+            'vault.manager_change_project_share(uuid,uuid,text,uuid,text,boolean)',
+            'vault.manager_set_project_archived(uuid,uuid,boolean)',
+            'vault.manager_create_login(uuid,name,text)',
+            'vault.manager_sign_in(uuid)',
+            'vault.manager_set_sign_in(uuid,text,text,text)',
+            'vault.manager_set_sign_in_email(uuid,uuid,text)',
+            'vault.manager_set_member_password(uuid,uuid,text)',
+            'vault.manager_list_resources(uuid,uuid)',
+            'vault.manager_set_resource_user(uuid,uuid,uuid,uuid)',
+            'vault.desktop_portfolio_work(uuid,uuid)',
+            'vault.manager_list_audit(uuid,uuid,integer)',
+            'vault.manager_check_project_access(uuid,uuid,uuid)']
+        ELSE ARRAY[
+            'vault.desktop_list_projects(uuid)',
+            'vault.desktop_read_schedule(uuid,uuid)',
+            'vault.desktop_save_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb)',
+            'vault.desktop_reimport_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb,text)',
+            'vault.manager_lookup_import_source(uuid,text,text,text)',
+            'vault.desktop_approved_export_work(uuid,uuid)',
+            'vault.manager_record_transfer(uuid,uuid,uuid,text,boolean,text)',
+            'vault.manager_list_transfers(uuid)',
+            'vault.desktop_list_time_work(uuid,uuid)',
+            'vault.desktop_list_time(uuid,uuid)',
+            'vault.desktop_create_time(uuid,uuid,uuid,uuid,uuid,date,bigint,text,boolean)',
+            'vault.desktop_update_time(uuid,uuid,uuid,text,text,date,bigint,text,boolean)']
+        END
+    $$;
+
+REVOKE ALL ON FUNCTION vault.login_routines(boolean) FROM PUBLIC;
+
+-- The login registered to a Vault user, preferring an active one.
+CREATE FUNCTION vault.member_login(member uuid) RETURNS name
+    LANGUAGE sql STABLE
+    SET search_path = pg_catalog
+    AS $$
+        SELECT login.rolname
+        FROM vault.manager_principals AS principal
+        JOIN pg_roles AS login
+          ON login.oid = principal.database_role_id AND login.rolname = principal.database_role_name
+        WHERE principal.user_id = member AND login.rolcanlogin
+        ORDER BY NOT principal.active, login.rolname LIMIT 1
+    $$;
+
+REVOKE ALL ON FUNCTION vault.member_login(uuid) FROM PUBLIC;
+
+-- Internal: grants (or, for the Manager set, also revokes) a registered,
+-- unprivileged login's entry points. Runs as the Vault schema owner.
+CREATE FUNCTION vault.set_login_routines(desktop_login name, manager boolean, enabled boolean)
     RETURNS void
     LANGUAGE plpgsql
     SET search_path = pg_catalog
     AS $$
     DECLARE
-        routines text[];
         routine text;
     BEGIN
         IF NOT EXISTS (
@@ -25,153 +84,51 @@ CREATE FUNCTION vault.grant_desktop_capability_privileges(desktop_login name, ca
             SELECT FROM vault.manager_principals AS principal
             JOIN pg_roles AS login
               ON login.oid = principal.database_role_id AND login.rolname = principal.database_role_name
-            WHERE login.rolname = desktop_login AND login.rolcanlogin AND principal.active
+            WHERE login.rolname = desktop_login AND login.rolcanlogin
               AND NOT login.rolsuper AND NOT login.rolbypassrls AND NOT login.rolcreaterole
               AND NOT login.rolcreatedb AND NOT login.rolreplication
               AND NOT pg_has_role(login.oid, current_user, 'MEMBER')
         ) THEN
-            RAISE EXCEPTION 'Select an active, registered, unprivileged Vault login'
+            RAISE EXCEPTION 'Select a registered, unprivileged Vault login'
+                USING ERRCODE = 'invalid_parameter_value';
+        END IF;
+        IF NOT (enabled OR manager) THEN
+            RAISE EXCEPTION 'Member entry points are not revoked; deactivate the member instead'
                 USING ERRCODE = 'invalid_parameter_value';
         END IF;
 
-        CASE capability
-            WHEN 'schedule_updates' THEN
-                routines := ARRAY[
-                    'vault.desktop_read_schedule(uuid,uuid)',
-                    'vault.desktop_save_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb)',
-                    'vault.desktop_reimport_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb,text)',
-                    'vault.manager_lookup_import_source(uuid,text,text,text)'];
-            WHEN 'directory' THEN
-                routines := ARRAY['vault.desktop_list_projects(uuid)'];
-            WHEN 'management' THEN
-                routines := ARRAY[
-                    'vault.manager_enroll_member(uuid,text,name,boolean,boolean)',
-                    'vault.manager_set_member_active(uuid,uuid,boolean)',
-                    'vault.manager_change_group(uuid,uuid,text,text,uuid)',
-                    'vault.manager_change_project_share(uuid,uuid,text,uuid,text,boolean)',
-                    'vault.manager_set_project_archived(uuid,uuid,boolean)',
-                    'vault.manager_create_login(uuid,name,text)',
-                    'vault.manager_enable_member_capability(uuid,uuid,text)',
-                    'vault.manager_list_member_access(uuid)',
-                    'vault.manager_set_member_access(uuid,uuid,boolean,boolean)',
-                    'vault.manager_sign_in(uuid)',
-                    'vault.manager_set_sign_in(uuid,text,text,text)',
-                    'vault.manager_set_sign_in_email(uuid,uuid,text)',
-                    'vault.manager_set_member_password(uuid,uuid,text)'];
-            WHEN 'resources' THEN
-                routines := ARRAY[
-                    'vault.manager_list_resources(uuid,uuid)',
-                    'vault.manager_set_resource_user(uuid,uuid,uuid,uuid)',
-                    'vault.desktop_portfolio_work(uuid,uuid)'];
-            WHEN 'audit' THEN
-                routines := ARRAY[
-                    'vault.manager_list_audit(uuid,uuid,integer)',
-                    'vault.manager_check_project_access(uuid,uuid,uuid)'];
-            WHEN 'transfers' THEN
-                routines := ARRAY[
-                    'vault.manager_record_transfer(uuid,uuid,uuid,text,boolean,text)',
-                    'vault.manager_list_transfers(uuid)'];
-            WHEN 'export' THEN
-                routines := ARRAY[
-                    'vault.desktop_read_schedule(uuid,uuid)',
-                    'vault.desktop_approved_export_work(uuid,uuid)'];
-            WHEN 'time' THEN
-                routines := ARRAY[
-                    'vault.desktop_list_time_work(uuid,uuid)',
-                    'vault.desktop_list_time(uuid,uuid)',
-                    'vault.desktop_create_time(uuid,uuid,uuid,uuid,uuid,date,bigint,text,boolean)',
-                    'vault.desktop_update_time(uuid,uuid,uuid,text,text,date,bigint,text,boolean)'];
+        IF enabled THEN
+            EXECUTE format('GRANT USAGE ON SCHEMA vault TO %I', desktop_login);
+        END IF;
+        FOREACH routine IN ARRAY vault.login_routines(manager) LOOP
+            IF enabled THEN
+                EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO %I', routine, desktop_login);
             ELSE
-                RAISE EXCEPTION 'Unknown Vault desktop capability' USING ERRCODE = 'invalid_parameter_value';
-        END CASE;
-
-        EXECUTE format('GRANT USAGE ON SCHEMA vault TO %I', desktop_login);
-        FOREACH routine IN ARRAY routines LOOP
-            EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO %I', routine, desktop_login);
+                EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM %I', routine, desktop_login);
+            END IF;
         END LOOP;
     END
     $$;
 
-REVOKE ALL ON FUNCTION vault.grant_desktop_capability_privileges(name, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION vault.set_login_routines(name, boolean, boolean) FROM PUBLIC;
 
-CREATE FUNCTION vault.revoke_desktop_schedule_update_privileges(desktop_login text)
+-- Internal: gives a member's login the Manager entry points when they are an
+-- owner or administrator, and takes them away when they become a member.
+CREATE FUNCTION vault.sync_manager_routines(member uuid, manager boolean)
     RETURNS void
     LANGUAGE plpgsql
     SET search_path = pg_catalog
     AS $$
     DECLARE
-        login_id oid;
+        member_login name := vault.member_login(member);
     BEGIN
-        IF NOT EXISTS (
-            SELECT FROM pg_namespace AS schema
-            JOIN pg_roles AS owner ON owner.oid = schema.nspowner
-            WHERE schema.nspname = 'vault' AND owner.rolname = current_user
-              AND NOT owner.rolsuper AND NOT owner.rolbypassrls
-        ) THEN
-            RAISE EXCEPTION 'Connect as the Vault schema owner'
-                USING ERRCODE = 'insufficient_privilege';
-        END IF;
-        SELECT login.oid INTO login_id
-        FROM vault.manager_principals AS principal
-        JOIN pg_roles AS login
-          ON (login.oid, login.rolname) = (principal.database_role_id, principal.database_role_name)
-        WHERE login.rolname::text = desktop_login;
-        IF login_id IS NULL THEN
-            RAISE EXCEPTION 'Select a registered Vault login' USING ERRCODE = 'invalid_parameter_value';
-        END IF;
-
-        EXECUTE format(
-            'REVOKE EXECUTE ON FUNCTION
-                vault.desktop_save_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb),
-                vault.desktop_reimport_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb,text)
-             FROM %I', desktop_login);
-
-        -- Reject an apparently successful revocation if another database role
-        -- still grants the same capability. The exception rolls back the change.
-        IF EXISTS (
-            SELECT FROM pg_roles AS candidate WHERE pg_has_role(login_id, candidate.oid, 'MEMBER')
-              AND (has_function_privilege(candidate.oid,
-                    'vault.desktop_save_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb)', 'EXECUTE')
-                   OR has_function_privilege(candidate.oid,
-                    'vault.desktop_reimport_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb,text)', 'EXECUTE'))
-        ) THEN
-            RAISE EXCEPTION 'Another PostgreSQL role still provides schedule updates to this login'
-                USING ERRCODE = 'insufficient_privilege';
+        IF member_login IS NOT NULL THEN
+            PERFORM vault.set_login_routines(member_login, true, manager);
         END IF;
     END
     $$;
 
-REVOKE ALL ON FUNCTION vault.revoke_desktop_schedule_update_privileges(text) FROM PUBLIC;
-
-CREATE FUNCTION vault.enable_desktop_capability(desktop_login name, capability text)
-    RETURNS void
-    LANGUAGE plpgsql
-    SET search_path = pg_catalog
-    AS $$
-    BEGIN
-        PERFORM vault.grant_desktop_capability_privileges(desktop_login, capability);
-        INSERT INTO vault_admin.desktop_capability_events
-            (operator_login, operator_role, target_login, capability, action)
-        VALUES (session_user, current_user, desktop_login, capability, 'enabled');
-    END
-    $$;
-
-REVOKE ALL ON FUNCTION vault.enable_desktop_capability(name, text) FROM PUBLIC;
-
-CREATE FUNCTION vault.revoke_desktop_schedule_updates(desktop_login text)
-    RETURNS void
-    LANGUAGE plpgsql
-    SET search_path = pg_catalog
-    AS $$
-    BEGIN
-        PERFORM vault.revoke_desktop_schedule_update_privileges(desktop_login);
-        INSERT INTO vault_admin.desktop_capability_events
-            (operator_login, operator_role, target_login, capability, action)
-        VALUES (session_user, current_user, desktop_login::name, 'schedule_updates', 'revoked');
-    END
-    $$;
-
-REVOKE ALL ON FUNCTION vault.revoke_desktop_schedule_updates(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION vault.sync_manager_routines(uuid, boolean) FROM PUBLIC;
 
 CREATE FUNCTION vault.manager_check_desktop_project_access(tenant uuid, project uuid, target_user uuid)
     RETURNS TABLE (login_name text, project_visible boolean, schedule_visible boolean, can_save boolean,
@@ -291,9 +248,8 @@ CREATE FUNCTION vault.rebind_restored_desktop_logins(login_names text[])
         WHERE item.requires_change;
         GET DIAGNOSTICS changed = ROW_COUNT;
 
-        INSERT INTO vault_admin.desktop_capability_events
-            (operator_login, operator_role, target_login, capability, action)
-        SELECT session_user, current_user, item.database_role_name, 'desktop_login', 'rebound'
+        INSERT INTO vault_admin.platform_events (operator_login, operation, details)
+        SELECT session_user, 'vault.login_rebound', jsonb_build_object('login', item.database_role_name)
         FROM jsonb_to_recordset(bindings) AS item(database_role_name name, requires_change boolean)
         WHERE item.requires_change;
         RETURN changed;
@@ -301,5 +257,3 @@ CREATE FUNCTION vault.rebind_restored_desktop_logins(login_names text[])
     $$;
 
 REVOKE ALL ON FUNCTION vault.rebind_restored_desktop_logins(text[]) FROM PUBLIC;
-
-REVOKE ALL ON vault_admin.desktop_capability_events FROM PUBLIC;

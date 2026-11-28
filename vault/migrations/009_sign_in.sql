@@ -128,7 +128,7 @@ CREATE FUNCTION vault.manager_set_sign_in_email(tenant uuid, member uuid, email 
         previous_actor text := coalesce(current_setting('app.current_user_id', true), '');
     BEGIN
         IF NOT has_function_privilege(session_user,
-                'vault.manager_enroll_member(uuid,text,name,boolean,boolean)', 'EXECUTE') THEN
+                'vault.manager_enroll_member(uuid,text,name)', 'EXECUTE') THEN
             RAISE EXCEPTION 'Member administration permission required' USING ERRCODE = 'insufficient_privilege';
         END IF;
         PERFORM vault.bind_manager_context(tenant);
@@ -348,7 +348,7 @@ CREATE FUNCTION vault.manager_set_sign_in(tenant uuid, new_method text, new_prov
         member_login name;
     BEGIN
         IF NOT has_function_privilege(session_user,
-                'vault.manager_enroll_member(uuid,text,name,boolean,boolean)', 'EXECUTE') THEN
+                'vault.manager_enroll_member(uuid,text,name)', 'EXECUTE') THEN
             RAISE EXCEPTION 'Member administration permission required' USING ERRCODE = 'insufficient_privilege';
         END IF;
         PERFORM vault.bind_manager_context(tenant);
@@ -425,7 +425,7 @@ CREATE FUNCTION vault.manager_set_member_password(tenant uuid, member uuid, pass
         member_login name;
     BEGIN
         IF NOT has_function_privilege(session_user,
-                'vault.manager_enroll_member(uuid,text,name,boolean,boolean)', 'EXECUTE') THEN
+                'vault.manager_enroll_member(uuid,text,name)', 'EXECUTE') THEN
             RAISE EXCEPTION 'Member administration permission required' USING ERRCODE = 'insufficient_privilege';
         END IF;
         PERFORM vault.bind_manager_context(tenant);

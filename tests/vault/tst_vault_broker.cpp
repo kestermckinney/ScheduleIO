@@ -148,7 +148,7 @@ void VaultBrokerTest::initTestCase()
     m_tenant = QUuid::createUuid();
     m_person = QUuid::createUuid();
     QVERIFY(exec(admin, QStringLiteral("SELECT vault.provision_organization('%1', 'Acme', 'UTC', '%2', "
-                                       "'Ann Example', '%3', true, false)")
+                                       "'Ann Example', '%3')")
                             .arg(id(m_tenant), id(m_person), m_member)));
     QVERIFY(exec(admin, QStringLiteral("GRANT EXECUTE ON FUNCTION vault.manager_sign_in(uuid) TO %1").arg(m_member)));
     QVERIFY(exec(admin, QStringLiteral("CREATE ROLE %1 LOGIN PASSWORD '%2'").arg(m_broker, m_brokerPassword)));

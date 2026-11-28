@@ -110,10 +110,10 @@ void VaultPlatformTest::initTestCase()
                               .arg(tenant, tenant == m_acme ? QStringLiteral("Acme") : QStringLiteral("Globex")),
                     nullptr, &failure), qPrintable(failure));
     }
-    QVERIFY2(as(saas, QStringLiteral("SELECT vault.manager_enroll_member('%1', 'Alice', '%2', true, true)")
+    QVERIFY2(as(saas, QStringLiteral("SELECT vault.manager_enroll_member('%1', 'Alice', '%2')")
                           .arg(m_acme, role(QStringLiteral("alice"))), &value, &failure), qPrintable(failure));
     m_alice = value.toString();
-    QVERIFY2(as(saas, QStringLiteral("SELECT vault.manager_enroll_member('%1', 'Bob', '%2', true, true)")
+    QVERIFY2(as(saas, QStringLiteral("SELECT vault.manager_enroll_member('%1', 'Bob', '%2')")
                           .arg(m_globex, role(QStringLiteral("bob"))), &value, &failure), qPrintable(failure));
     m_bob = value.toString();
     QVERIFY2(as(saas, QStringLiteral("SELECT vault.manager_transfer_ownership('%1', '%2')").arg(m_acme, m_alice),
@@ -186,28 +186,41 @@ void VaultPlatformTest::organizationAdminsStayInTheirOrganization()
     // A login from another organization, or a platform login, can't be added.
     // Both report the same error as a login that doesn't exist.
     QString otherTenant, platformLogin, missing;
-    QVERIFY(!as(alice, QStringLiteral("SELECT vault.manager_enroll_member('%1', 'Bob', '%2', true, true)")
+    QVERIFY(!as(alice, QStringLiteral("SELECT vault.manager_enroll_member('%1', 'Bob', '%2')")
                            .arg(m_acme, role(QStringLiteral("bob"))), nullptr, &otherTenant));
-    QVERIFY(!as(alice, QStringLiteral("SELECT vault.manager_enroll_member('%1', 'SaaS', '%2', true, true)")
+    QVERIFY(!as(alice, QStringLiteral("SELECT vault.manager_enroll_member('%1', 'SaaS', '%2')")
                            .arg(m_acme, role(QStringLiteral("saas"))), nullptr, &platformLogin));
-    QVERIFY(!as(alice, QStringLiteral("SELECT vault.manager_enroll_member('%1', 'Nobody', 'no_such_login_%2', true, true)")
+    QVERIFY(!as(alice, QStringLiteral("SELECT vault.manager_enroll_member('%1', 'Nobody', 'no_such_login_%2')")
                            .arg(m_acme, m_suffix), nullptr, &missing));
     QCOMPARE(otherTenant, missing);
     QCOMPARE(platformLogin, missing);
-
-    // Desktop features can't be turned on for another organization's people.
-    QVERIFY(!as(alice, QStringLiteral("SELECT vault.manager_enable_member_capability('%1', '%2', 'time')")
-                           .arg(m_acme, m_bob), nullptr, &error));
 
     // The owner creates and enrolls their own people without the schema owner.
     const QString carol = role(QStringLiteral("carol"));
     QVERIFY2(as(alice, QStringLiteral("SELECT vault.manager_create_login('%1', '%2', "
                                       "'SCRAM-SHA-256$4096:c2FsdHNhbHRzYWx0$aGFzaA==:aGFzaA==')")
                            .arg(m_acme, carol), nullptr, &error), qPrintable(error));
-    QVERIFY2(as(alice, QStringLiteral("SELECT vault.manager_enroll_member('%1', 'Carol', '%2', true, true)")
+    QVERIFY2(as(alice, QStringLiteral("SELECT vault.manager_enroll_member('%1', 'Carol', '%2')")
                            .arg(m_acme, carol), &value, &error), qPrintable(error));
-    QVERIFY2(as(alice, QStringLiteral("SELECT vault.manager_enable_member_capability('%1', '%2', 'directory')")
-                           .arg(m_acme, value.toString()), nullptr, &error), qPrintable(error));
+    const QString carolId = value.toString();
+    // A member gets the ScheduleVault entry points, and the Manager ones only
+    // while they are an administrator.
+    const auto canManage = [&](bool expected) {
+        QVariant granted;
+        return as(alice, QStringLiteral("SELECT has_function_privilege('%1', "
+                                        "'vault.manager_set_member_active(uuid,uuid,boolean)', 'EXECUTE')")
+                             .arg(carol), &granted) && granted.toBool() == expected;
+    };
+    QVERIFY(as(alice, QStringLiteral("SELECT has_function_privilege('%1', "
+                                     "'vault.desktop_create_time(uuid,uuid,uuid,uuid,uuid,date,bigint,text,boolean)', "
+                                     "'EXECUTE')").arg(carol), &value) && value.toBool());
+    QVERIFY(canManage(false));
+    QVERIFY2(as(alice, QStringLiteral("SELECT vault.manager_set_member_role('%1', '%2', 'admin')")
+                           .arg(m_acme, carolId), nullptr, &error), qPrintable(error));
+    QVERIFY(canManage(true));
+    QVERIFY2(as(alice, QStringLiteral("SELECT vault.manager_set_member_role('%1', '%2', 'member')")
+                           .arg(m_acme, carolId), nullptr, &error), qPrintable(error));
+    QVERIFY(canManage(false));
     // A plaintext password is refused, so none reaches the server's logs.
     QVERIFY(!as(alice, QStringLiteral("SELECT vault.manager_create_login('%1', 'plain_%2', 'secret-password')")
                            .arg(m_acme, m_suffix), nullptr, &error));

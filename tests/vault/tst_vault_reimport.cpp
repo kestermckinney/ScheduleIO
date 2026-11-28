@@ -280,12 +280,14 @@ void VaultReimportTest::preservesTimeWhenAssignmentMoves()
     const QUuid project = QUuid::createUuid(), entry = QUuid::createUuid();
     QVERIFY(execute(QStringLiteral(
         "SELECT vault.provision_organization('%1', 'Test tenant', 'UTC', '%2', "
-        "'Test operator', '%3', true, false)").arg(id(tenant), id(actor), actorRole)));
+        "'Test operator', '%3')").arg(id(tenant), id(actor), actorRole)));
+    // Every entry point still needs its grant: take schedule saving away to
+    // check that the desktop reports the missing permission.
     QVERIFY(execute(QStringLiteral(
-        "GRANT EXECUTE ON FUNCTION vault.desktop_create_time(uuid,uuid,uuid,uuid,uuid,date,bigint,text,boolean), "
-        "vault.desktop_list_time(uuid,uuid), "
-        "vault.desktop_update_time(uuid,uuid,uuid,text,text,date,bigint,text,boolean), "
-        "vault.manager_check_project_access(uuid,uuid,uuid) TO %1").arg(actorRole)));
+        "REVOKE EXECUTE ON FUNCTION "
+        "vault.desktop_save_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb), "
+        "vault.desktop_reimport_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb,text) "
+        "FROM %1").arg(actorRole)));
     QVERIFY(execute(QStringLiteral("RESET ROLE")));
     QVERIFY(execute(QStringLiteral("SET SESSION AUTHORIZATION %1").arg(actorRole)));
 
@@ -335,7 +337,7 @@ void VaultReimportTest::preservesTimeWhenAssignmentMoves()
 
     QVERIFY(execute(QStringLiteral("RESET SESSION AUTHORIZATION")));
     QVERIFY(execute(QStringLiteral("SET ROLE %1").arg(ownerRole)));
-    QVERIFY(execute(QStringLiteral("SELECT vault.enable_desktop_capability('%1','schedule_updates')").arg(actorRole)));
+    QVERIFY(execute(QStringLiteral("SELECT vault.set_login_routines('%1', false, true)").arg(actorRole)));
     QVERIFY(execute(QStringLiteral("RESET ROLE")));
     QVERIFY(execute(QStringLiteral("SET SESSION AUTHORIZATION %1").arg(actorRole)));
     QVERIFY(execute(QStringLiteral(
@@ -407,18 +409,11 @@ void VaultReimportTest::preservesTimeWhenAssignmentMoves()
 
     QVERIFY(execute(QStringLiteral("RESET SESSION AUTHORIZATION")));
     QVERIFY(execute(QStringLiteral("SET ROLE %1").arg(ownerRole)));
-    QVERIFY(execute(QStringLiteral("SELECT vault.revoke_desktop_schedule_updates('%1')").arg(actorRole)));
     QVERIFY(execute(QStringLiteral(
-        "SELECT action, operator_login::text = session_user::text, operator_role::text = current_user::text "
-        "FROM vault_admin.desktop_capability_events WHERE target_login = '%1' AND capability = 'schedule_updates' "
-        "ORDER BY id").arg(actorRole)));
-    QVERIFY(sql.next());
-    QCOMPARE(sql.value(0).toString(), QStringLiteral("enabled"));
-    QVERIFY(sql.value(1).toBool() && sql.value(2).toBool());
-    QVERIFY(sql.next());
-    QCOMPARE(sql.value(0).toString(), QStringLiteral("revoked"));
-    QVERIFY(sql.value(1).toBool() && sql.value(2).toBool());
-    QVERIFY(!sql.next());
+        "REVOKE EXECUTE ON FUNCTION "
+        "vault.desktop_save_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb), "
+        "vault.desktop_reimport_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb,text) "
+        "FROM %1").arg(actorRole)));
     QVERIFY(execute(QStringLiteral("RESET ROLE")));
     QVERIFY(execute(QStringLiteral("SET SESSION AUTHORIZATION %1").arg(actorRole)));
     QVERIFY(execute(accessReport));
@@ -435,7 +430,7 @@ void VaultReimportTest::preservesTimeWhenAssignmentMoves()
     QVERIFY2(error.contains(QStringLiteral("permission"), Qt::CaseInsensitive), qPrintable(error));
     QVERIFY(execute(QStringLiteral("RESET SESSION AUTHORIZATION")));
     QVERIFY(execute(QStringLiteral("SET ROLE %1").arg(ownerRole)));
-    QVERIFY(execute(QStringLiteral("SELECT vault.enable_desktop_capability('%1','schedule_updates')").arg(actorRole)));
+    QVERIFY(execute(QStringLiteral("SELECT vault.set_login_routines('%1', false, true)").arg(actorRole)));
     QVERIFY(execute(QStringLiteral("RESET ROLE")));
     QVERIFY(execute(QStringLiteral("SET SESSION AUTHORIZATION %1").arg(actorRole)));
 

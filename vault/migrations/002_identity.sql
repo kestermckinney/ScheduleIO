@@ -152,8 +152,7 @@ REVOKE ALL ON FUNCTION vault.manager_lookup_import_source(uuid, text, text, text
 -- instances and tests. The owner's home is the new organization.
 CREATE FUNCTION vault.provision_organization(
     tenant uuid, organization_name text, organization_time_zone text,
-    actor uuid, display_name text, desktop_login name,
-    allow_initial_import boolean, allow_schedule_updates boolean)
+    actor uuid, display_name text, desktop_login name)
     RETURNS void
     LANGUAGE plpgsql
     SET search_path = pg_catalog
@@ -175,10 +174,6 @@ CREATE FUNCTION vault.provision_organization(
             RAISE EXCEPTION 'A separate unprivileged PostgreSQL login is required'
                 USING ERRCODE = 'invalid_parameter_value';
         END IF;
-        IF NOT (coalesce(allow_initial_import, false) OR coalesce(allow_schedule_updates, false)) THEN
-            RAISE EXCEPTION 'Select a desktop capability' USING ERRCODE = 'invalid_parameter_value';
-        END IF;
-
         PERFORM vault.create_organization_record(tenant, organization_name, organization_time_zone);
         INSERT INTO vault.users (id, issuer, subject, display_name, home_organization_id)
         VALUES (actor, 'postgresql', actor::text, display_name, tenant);
@@ -187,26 +182,15 @@ CREATE FUNCTION vault.provision_organization(
         INSERT INTO vault.manager_principals (database_role_id, database_role_name, user_id)
         VALUES (login_id, desktop_login, actor);
 
-        EXECUTE format('GRANT USAGE ON SCHEMA vault TO %I', desktop_login);
+        PERFORM vault.set_login_routines(desktop_login, false, true);
+        PERFORM vault.set_login_routines(desktop_login, true, true);
         EXECUTE format(
-            'GRANT EXECUTE ON FUNCTION vault.manager_lookup_import_source(uuid,text,text,text) TO %I',
-            desktop_login);
-        IF allow_initial_import THEN
-            EXECUTE format(
-                'GRANT EXECUTE ON FUNCTION vault.manager_import_initial_schedule(
-                    uuid,uuid,text,text,text,text,bytea,bytea,jsonb,jsonb,jsonb) TO %I', desktop_login);
-        END IF;
-        IF allow_schedule_updates THEN
-            EXECUTE format(
-                'GRANT EXECUTE ON FUNCTION vault.desktop_read_schedule(uuid,uuid),
-                    vault.desktop_save_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb),
-                    vault.desktop_reimport_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb,text)
-                 TO %I', desktop_login);
-        END IF;
+            'GRANT EXECUTE ON FUNCTION vault.manager_import_initial_schedule(
+                uuid,uuid,text,text,text,text,bytea,bytea,jsonb,jsonb,jsonb) TO %I', desktop_login);
     END
     $$;
 
-REVOKE ALL ON FUNCTION vault.provision_organization(uuid,text,text,uuid,text,name,boolean,boolean)
+REVOKE ALL ON FUNCTION vault.provision_organization(uuid,text,text,uuid,text,name)
     FROM PUBLIC;
 
 -- This helper checks only the actor's own membership. Group policies can use
@@ -285,7 +269,7 @@ REVOKE ALL ON FUNCTION vault.manager_change_group(uuid, uuid, text, text, uuid) 
 -- ── Members stay in their home organization ───────────────────────────────
 
 CREATE FUNCTION vault.manager_enroll_member(
-    tenant uuid, display_name text, desktop_login name, allow_schedule boolean, allow_time boolean)
+    tenant uuid, display_name text, desktop_login name)
     RETURNS uuid
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path = pg_catalog
@@ -303,10 +287,8 @@ CREATE FUNCTION vault.manager_enroll_member(
             RAISE EXCEPTION 'Organization administrator required' USING ERRCODE = 'insufficient_privilege';
         END IF;
         actor := vault.context_id('app.current_user_id');
-        IF nullif(btrim(display_name), '') IS NULL
-           OR NOT (coalesce(allow_schedule, false) OR coalesce(allow_time, false)) THEN
-            RAISE EXCEPTION 'A member name and desktop capability are required'
-                USING ERRCODE = 'invalid_parameter_value';
+        IF nullif(btrim(display_name), '') IS NULL THEN
+            RAISE EXCEPTION 'Enter the member''s name' USING ERRCODE = 'invalid_parameter_value';
         END IF;
 
         SELECT oid INTO login_id FROM pg_roles
@@ -353,22 +335,7 @@ CREATE FUNCTION vault.manager_enroll_member(
             VALUES (tenant, actor, 'organization.member_enrolled', jsonb_build_object('user_id', member_id));
         END IF;
 
-        EXECUTE format('GRANT USAGE ON SCHEMA vault TO %I', desktop_login);
-        IF allow_schedule THEN
-            EXECUTE format(
-                'GRANT EXECUTE ON FUNCTION vault.desktop_read_schedule(uuid,uuid),
-                    vault.desktop_save_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb),
-                    vault.desktop_reimport_schedule(uuid,uuid,bigint,text,bytea,bytea,jsonb,jsonb,jsonb,text),
-                    vault.manager_lookup_import_source(uuid,text,text,text) TO %I', desktop_login);
-        END IF;
-        IF allow_time THEN
-            EXECUTE format(
-                'GRANT EXECUTE ON FUNCTION vault.desktop_list_time_work(uuid,uuid),
-                    vault.desktop_list_time(uuid,uuid),
-                    vault.desktop_create_time(uuid,uuid,uuid,uuid,uuid,date,bigint,text,boolean),
-                    vault.desktop_update_time(uuid,uuid,uuid,text,text,date,bigint,text,boolean)
-                 TO %I', desktop_login);
-        END IF;
+        PERFORM vault.set_login_routines(desktop_login, false, true);
 
         PERFORM set_config('app.current_organization_id', previous_tenant, true);
         PERFORM set_config('app.current_user_id', previous_actor, true);
@@ -376,7 +343,7 @@ CREATE FUNCTION vault.manager_enroll_member(
     END
     $$;
 
-REVOKE ALL ON FUNCTION vault.manager_enroll_member(uuid, text, name, boolean, boolean) FROM PUBLIC;
+REVOKE ALL ON FUNCTION vault.manager_enroll_member(uuid, text, name) FROM PUBLIC;
 
 CREATE FUNCTION vault.manager_set_member_active(tenant uuid, member_id uuid, new_active boolean)
     RETURNS boolean
@@ -446,6 +413,7 @@ CREATE FUNCTION vault.manager_set_member_role(tenant uuid, member_id uuid, new_r
           AND membership.active;
         changed := FOUND;
         IF changed THEN
+            PERFORM vault.sync_manager_routines(member_id, new_role = 'admin');
             INSERT INTO vault.audit_events (organization_id, actor_id, operation, details)
             VALUES (tenant, actor, 'organization.member_role_changed',
                     jsonb_build_object('user_id', member_id, 'role', new_role));
@@ -536,7 +504,7 @@ CREATE FUNCTION vault.manager_transfer_ownership(tenant uuid, new_owner uuid)
               AND NOT vault.is_service_account(member.user_id);
             UPDATE vault.organization_members AS member SET role = 'owner'
             WHERE member.organization_id = tenant AND member.user_id = new_owner;
-            PERFORM vault.grant_owner_capabilities(tenant, new_owner);
+            PERFORM vault.sync_manager_routines(new_owner, true);
             INSERT INTO vault.audit_events (organization_id, actor_id, operation, details)
             VALUES (tenant, actor, 'organization.ownership_transferred', jsonb_build_object('new_owner', new_owner));
             PERFORM set_config('app.current_organization_id', previous_tenant, true);
@@ -578,7 +546,7 @@ CREATE FUNCTION vault.manager_transfer_ownership(tenant uuid, new_owner uuid)
             RAISE EXCEPTION 'Ownership requires an active member in this organization'
                 USING ERRCODE = 'invalid_parameter_value';
         END IF;
-        PERFORM vault.grant_owner_capabilities(tenant, new_owner);
+        PERFORM vault.sync_manager_routines(new_owner, true);
 
         INSERT INTO vault.audit_events (organization_id, actor_id, operation, details)
         VALUES (tenant, actor, 'organization.ownership_transferred',

@@ -358,16 +358,6 @@ CREATE INDEX audit_events_by_project
 CREATE INDEX audit_events_by_actor
     ON vault.audit_events (organization_id, actor_id, occurred_at DESC);
 
-CREATE TABLE vault_admin.desktop_capability_events (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    recorded_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    operator_login name NOT NULL,
-    operator_role name NOT NULL,
-    target_login name NOT NULL,
-    capability text NOT NULL,
-    action text NOT NULL CHECK (action IN ('enabled', 'revoked', 'rebound'))
-);
-
 -- ── Platform administration ───────────────────────────────────────────────
 
 -- One service account per organization. Platform operators act through it, so
