@@ -8,37 +8,15 @@
 #include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLibrary>
 #include <QMutex>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
-#include <QPointer>
 #include <QProcess>
 #include <QRandomGenerator>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
 #include <QUrlQuery>
-
-#include <cstdlib>
-#include <cstring>
-
-// From PostgreSQL 18's libpq-fe.h. The headers needn't be installed: the hook
-// is looked up at run time in the libpq the QPSQL driver loaded.
-extern "C" {
-typedef struct pg_conn PGconn;
-typedef enum { PQAUTHDATA_PROMPT_OAUTH_DEVICE, PQAUTHDATA_OAUTH_BEARER_TOKEN } PGauthData;
-typedef struct PGoauthBearerRequest
-{
-    const char *const openid_configuration;
-    const char *const scope;
-    int (*async)(PGconn *conn, struct PGoauthBearerRequest *request, void *altsock);
-    void (*cleanup)(PGconn *conn, struct PGoauthBearerRequest *request);
-    char *token;
-    void *user;
-} PGoauthBearerRequest;
-typedef int (*PQauthDataHook_type)(PGauthData type, PGconn *conn, void *data);
-}
 
 namespace schedule {
 
@@ -57,65 +35,16 @@ QString tr(const char *text)
     return QCoreApplication::translate("VaultSignIn", text);
 }
 
-QMutex g_lock;
-QHash<QString, QByteArray> g_tokens;  // issuer (no trailing slash) -> access token
-PQauthDataHook_type g_previousHook = nullptr;
-bool g_installed = false;
 BrowserLauncher g_launcher;
 
-QString normalizedIssuer(QString issuer)
+// The Supabase project a broker trusts: { supabaseUrl, anonKey }.
+struct Service
 {
-    issuer = issuer.trimmed();
-    while (issuer.endsWith(QLatin1Char('/')))
-        issuer.chop(1);
-    return issuer;
-}
-
-void freeToken(PGconn *, PGoauthBearerRequest *request)
-{
-    std::free(request->token);
-    request->token = nullptr;
-}
-
-int supplyToken(PGauthData type, PGconn *conn, void *data)
-{
-    if (type == PQAUTHDATA_OAUTH_BEARER_TOKEN && data) {
-        auto *request = static_cast<PGoauthBearerRequest *>(data);
-        // The server names its issuer's discovery document, which lives under
-        // the issuer: <issuer>/.well-known/openid-configuration.
-        const QString discovery = QString::fromUtf8(request->openid_configuration);
-        QByteArray token;
-        {
-            QMutexLocker locker(&g_lock);
-            for (auto it = g_tokens.cbegin(); it != g_tokens.cend(); ++it)
-                if (discovery.startsWith(it.key() + QLatin1Char('/')))
-                    token = it.value();
-        }
-        if (!token.isEmpty()) {
-            request->token = strdup(token.constData());
-            request->cleanup = freeToken;
-            return 1;
-        }
-    }
-    return g_previousHook ? g_previousHook(type, conn, data) : 0;
-}
-
-QFunctionPointer libpqSymbol(const char *name)
-{
-#if defined(Q_OS_WIN)
-    const QStringList names{QStringLiteral("libpq")};
-#elif defined(Q_OS_MACOS)
-    const QStringList names{QStringLiteral("libpq.5"), QStringLiteral("pq")};
-#else
-    const QStringList names{QStringLiteral("libpq.so.5"), QStringLiteral("pq")};
-#endif
-    for (const QString &library : names) {
-        QLibrary libpq(library);
-        if (QFunctionPointer symbol = libpq.resolve(name))
-            return symbol;  // QLibrary keeps it loaded
-    }
-    return nullptr;
-}
+    QString url;
+    QString key;
+};
+QMutex g_lock;
+QHash<QString, Service> g_services;  // broker address -> its project
 
 bool openInBrowser(const QUrl &url)
 {
@@ -140,55 +69,82 @@ QByteArray randomUrlSafe(int bytes)
     return raw.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
 }
 
-QString clientId(const VaultConnectionSettings &settings)
+struct Reply
 {
-    return settings.signInClientId.trimmed().isEmpty() ? VaultConnectionSettings::defaultSignInClientId()
-                                                        : settings.signInClientId.trimmed();
-}
+    int status = 0;
+    QJsonObject body;
+};
 
-// The sign-in service's endpoints, from its discovery document.
-bool discover(QNetworkAccessManager &network, const QString &issuer, QJsonObject &document, QString &error)
+// Sends one request and waits up to 20 seconds for the answer.
+Reply send(QNetworkAccessManager &network, QNetworkRequest request, const QByteArray &verb,
+           const QByteArray &body = {})
 {
-    QNetworkReply *reply = network.get(QNetworkRequest(QUrl(issuer + QStringLiteral("/.well-known/openid-configuration"))));
+    request.setTransferTimeout(20000);
+    request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
+    QNetworkReply *reply = network.sendCustomRequest(request, verb, body);
     QEventLoop loop;
     QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    QTimer::singleShot(20000, &loop, &QEventLoop::quit);
-    loop.exec();
-    const bool ok = reply->isFinished() && reply->error() == QNetworkReply::NoError;
-    document = QJsonDocument::fromJson(reply->readAll()).object();
-    reply->abort();
+    if (!reply->isFinished())
+        loop.exec();
+    Reply out;
+    out.status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    out.body = QJsonDocument::fromJson(reply->readAll()).object();
     reply->deleteLater();
-    if (!ok || document.value(QStringLiteral("authorization_endpoint")).toString().isEmpty()) {
-        error = tr("Couldn’t reach the sign-in service at %1.").arg(issuer);
+    return out;
+}
+
+QString brokerAddress(const VaultConnectionSettings &settings)
+{
+    return settings.signInBroker.trimmed();
+}
+
+bool service(QNetworkAccessManager &network, const VaultConnectionSettings &settings, Service &out, QString &error)
+{
+    const QString broker = brokerAddress(settings);
+    {
+        QMutexLocker locker(&g_lock);
+        if (g_services.contains(broker)) {
+            out = g_services.value(broker);
+            return true;
+        }
+    }
+    const Reply reply = send(network, QNetworkRequest(QUrl(broker)), "GET");
+    out.url = reply.body.value(QStringLiteral("supabaseUrl")).toString();
+    while (out.url.endsWith(QLatin1Char('/')))
+        out.url.chop(1);
+    out.key = reply.body.value(QStringLiteral("anonKey")).toString();
+    if (reply.status != 200 || !isSignInAddress(out.url) || out.key.isEmpty()) {
+        error = tr("Couldn’t reach the sign-in service at %1.").arg(broker);
         return false;
     }
+    QMutexLocker locker(&g_lock);
+    g_services.insert(broker, out);
     return true;
 }
 
-bool tokenRequest(QNetworkAccessManager &network, const QString &endpoint, const QUrlQuery &form,
-                  VaultSignInTokens &tokens, QString &error)
+QNetworkRequest supabaseRequest(const Service &project, const QString &path)
 {
-    QNetworkRequest request{QUrl(endpoint)};
-    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
-    QNetworkReply *reply = network.post(request, form.toString(QUrl::FullyEncoded).toUtf8());
-    QEventLoop loop;
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    QTimer::singleShot(20000, &loop, &QEventLoop::quit);
-    loop.exec();
-    const QJsonObject body = QJsonDocument::fromJson(reply->readAll()).object();
-    reply->abort();
-    reply->deleteLater();
-    const QString access = body.value(QStringLiteral("access_token")).toString();
-    if (access.isEmpty()) {
-        const QString reason = body.value(QStringLiteral("error_description")).toString();
-        error = reason.isEmpty() ? tr("The sign-in service didn’t issue a token.")
-                                 : tr("The sign-in service didn’t issue a token: %1").arg(reason);
+    QNetworkRequest request{QUrl(project.url + path)};
+    request.setRawHeader("apikey", project.key.toUtf8());
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    return request;
+}
+
+bool readTokens(const Reply &reply, VaultSignInTokens &tokens, QString &error)
+{
+    const QString access = reply.body.value(QStringLiteral("access_token")).toString();
+    if (reply.status != 200 || access.isEmpty()) {
+        QString reason = reply.body.value(QStringLiteral("error_description")).toString();
+        if (reason.isEmpty())
+            reason = reply.body.value(QStringLiteral("msg")).toString();
+        error = reason.isEmpty() ? tr("The sign-in service didn’t accept the sign-in.")
+                                 : tr("The sign-in service didn’t accept the sign-in: %1").arg(reason);
         return false;
     }
     tokens.accessToken = access;
-    if (body.contains(QStringLiteral("refresh_token")))
-        tokens.refreshToken = body.value(QStringLiteral("refresh_token")).toString();
-    const int lifetime = body.value(QStringLiteral("expires_in")).toInt();
+    if (reply.body.contains(QStringLiteral("refresh_token")))
+        tokens.refreshToken = reply.body.value(QStringLiteral("refresh_token")).toString();
+    const int lifetime = reply.body.value(QStringLiteral("expires_in")).toInt();
     tokens.expiresAt = lifetime > 0 ? QDateTime::currentDateTimeUtc().addSecs(lifetime) : QDateTime();
     return true;
 }
@@ -203,32 +159,6 @@ const char *page(bool ok)
 
 } // namespace
 
-bool installTokenHook(QString &error)
-{
-    QMutexLocker locker(&g_lock);
-    if (g_installed)
-        return true;
-    auto set = reinterpret_cast<void (*)(PQauthDataHook_type)>(libpqSymbol("PQsetAuthDataHook"));
-    auto get = reinterpret_cast<PQauthDataHook_type (*)()>(libpqSymbol("PQgetAuthDataHook"));
-    if (!set || !get) {
-        error = tr("Single sign-on needs PostgreSQL 18’s client library (libpq 18 or later).");
-        return false;
-    }
-    g_previousHook = get();
-    set(supplyToken);
-    g_installed = true;
-    return true;
-}
-
-void setAccessToken(const QString &issuer, const QString &token)
-{
-    QMutexLocker locker(&g_lock);
-    if (token.isEmpty())
-        g_tokens.remove(normalizedIssuer(issuer));
-    else
-        g_tokens.insert(normalizedIssuer(issuer), token.toUtf8());
-}
-
 void setBrowserLauncher(BrowserLauncher launcher)
 {
     g_launcher = std::move(launcher);
@@ -236,37 +166,38 @@ void setBrowserLauncher(BrowserLauncher launcher)
 
 bool signIn(const VaultConnectionSettings &settings, VaultSignInTokens &tokens, QString &error, int timeoutMs)
 {
-    const QString issuer = normalizedIssuer(settings.signInIssuer);
     QNetworkAccessManager network;
-    QJsonObject document;
-    if (!discover(network, issuer, document, error))
+    Service project;
+    if (!service(network, settings, project, error))
         return false;
+    const QString provider = settings.signInProvider.trimmed();
+    if (provider.isEmpty()) {
+        error = tr("Enter the organization’s sign-in provider.");
+        return false;
+    }
 
     QTcpServer server;
     if (!server.listen(QHostAddress::LocalHost, 0)) {
         error = tr("Couldn’t prepare the sign-in: %1").arg(server.errorString());
         return false;
     }
-    const QString redirect = QStringLiteral("http://127.0.0.1:%1/callback").arg(server.serverPort());
+    // Supabase keeps redirect_to's path, so the one-time state rides in it.
+    const QByteArray state = randomUrlSafe(24);
+    const QString callbackPath = QStringLiteral("/callback/") + QString::fromLatin1(state);
+    const QString redirect = QStringLiteral("http://127.0.0.1:%1%2").arg(server.serverPort()).arg(callbackPath);
     const QByteArray verifier = randomUrlSafe(48);
     const QByteArray challenge = QCryptographicHash::hash(verifier, QCryptographicHash::Sha256)
                                      .toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
-    const QByteArray state = randomUrlSafe(24);
 
-    QUrl authorize(document.value(QStringLiteral("authorization_endpoint")).toString());
-    QUrlQuery query(authorize);
-    query.addQueryItem(QStringLiteral("response_type"), QStringLiteral("code"));
-    query.addQueryItem(QStringLiteral("client_id"), clientId(settings));
-    query.addQueryItem(QStringLiteral("redirect_uri"), redirect);
-    query.addQueryItem(QStringLiteral("scope"), QStringLiteral("openid"));
-    query.addQueryItem(QStringLiteral("state"), QString::fromLatin1(state));
+    QUrl authorize(project.url + QStringLiteral("/auth/v1/authorize"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("provider"), provider);
+    query.addQueryItem(QStringLiteral("redirect_to"), redirect);
     query.addQueryItem(QStringLiteral("code_challenge"), QString::fromLatin1(challenge));
-    query.addQueryItem(QStringLiteral("code_challenge_method"), QStringLiteral("S256"));
-    if (!settings.user.trimmed().isEmpty())
-        query.addQueryItem(QStringLiteral("login_hint"), settings.user.trimmed());
-    // Keycloak: go straight to the organization's identity provider.
-    if (!settings.signInProvider.trimmed().isEmpty())
-        query.addQueryItem(QStringLiteral("kc_idp_hint"), settings.signInProvider.trimmed());
+    query.addQueryItem(QStringLiteral("code_challenge_method"), QStringLiteral("s256"));
+    // Microsoft sends an email address only when asked.
+    if (provider == QStringLiteral("azure"))
+        query.addQueryItem(QStringLiteral("scopes"), QStringLiteral("email"));
     authorize.setQuery(query);
 
     QByteArray code;
@@ -277,11 +208,10 @@ bool signIn(const VaultConnectionSettings &settings, VaultSignInTokens &tokens, 
             QObject::connect(socket, &QTcpSocket::readyRead, &loop, [&, socket] {
                 if (!socket->canReadLine())
                     return;
-                // GET /callback?code=…&state=… HTTP/1.1
+                // GET /callback/<state>?code=… HTTP/1.1
                 const QUrl url(QString::fromLatin1(socket->readLine().split(' ').value(1)));
                 const QUrlQuery reply(url);
-                const bool ours = url.path() == QStringLiteral("/callback")
-                                  && reply.queryItemValue(QStringLiteral("state")).toLatin1() == state;
+                const bool ours = url.path() == callbackPath;
                 const bool ok = ours && !reply.queryItemValue(QStringLiteral("code")).isEmpty();
                 socket->write(QByteArray("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
                                          "Cache-Control: no-store\r\nConnection: close\r\n\r\n") + page(ok));
@@ -292,8 +222,7 @@ bool signIn(const VaultConnectionSettings &settings, VaultSignInTokens &tokens, 
                 if (ok)
                     code = reply.queryItemValue(QStringLiteral("code")).toLatin1();
                 else
-                    refused = reply.queryItemValue(QStringLiteral("error_description"),
-                                                   QUrl::FullyDecoded).isEmpty()
+                    refused = reply.queryItemValue(QStringLiteral("error_description"), QUrl::FullyDecoded).isEmpty()
                                   ? reply.queryItemValue(QStringLiteral("error"))
                                   : reply.queryItemValue(QStringLiteral("error_description"), QUrl::FullyDecoded);
                 loop.quit();
@@ -313,14 +242,12 @@ bool signIn(const VaultConnectionSettings &settings, VaultSignInTokens &tokens, 
         return false;
     }
 
-    QUrlQuery form;
-    form.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("authorization_code"));
-    form.addQueryItem(QStringLiteral("client_id"), clientId(settings));
-    form.addQueryItem(QStringLiteral("code"), QString::fromLatin1(code));
-    form.addQueryItem(QStringLiteral("redirect_uri"), redirect);
-    form.addQueryItem(QStringLiteral("code_verifier"), QString::fromLatin1(verifier));
+    const QJsonObject body{{QStringLiteral("auth_code"), QString::fromLatin1(code)},
+                           {QStringLiteral("code_verifier"), QString::fromLatin1(verifier)}};
     tokens = {};
-    return tokenRequest(network, document.value(QStringLiteral("token_endpoint")).toString(), form, tokens, error);
+    return readTokens(send(network, supabaseRequest(project, QStringLiteral("/auth/v1/token?grant_type=pkce")), "POST",
+                           QJsonDocument(body).toJson(QJsonDocument::Compact)),
+                      tokens, error);
 }
 
 bool refresh(const VaultConnectionSettings &settings, const QString &refreshToken, VaultSignInTokens &tokens,
@@ -331,19 +258,51 @@ bool refresh(const VaultConnectionSettings &settings, const QString &refreshToke
         return false;
     }
     QNetworkAccessManager network;
-    QJsonObject document;
-    if (!discover(network, normalizedIssuer(settings.signInIssuer), document, error))
+    Service project;
+    if (!service(network, settings, project, error))
         return false;
-    QUrlQuery form;
-    form.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("refresh_token"));
-    form.addQueryItem(QStringLiteral("client_id"), clientId(settings));
-    form.addQueryItem(QStringLiteral("refresh_token"), refreshToken);
+    const QJsonObject body{{QStringLiteral("refresh_token"), refreshToken}};
     VaultSignInTokens next;
-    next.refreshToken = refreshToken;  // kept unless the service rotates it
-    if (!tokenRequest(network, document.value(QStringLiteral("token_endpoint")).toString(), form, next, error))
+    if (!readTokens(send(network, supabaseRequest(project, QStringLiteral("/auth/v1/token?grant_type=refresh_token")),
+                         "POST", QJsonDocument(body).toJson(QJsonDocument::Compact)),
+                    next, error))
         return false;
     tokens = next;
     return true;
+}
+
+bool fetchCredential(const VaultConnectionSettings &settings, const QString &accessToken,
+                     VaultCredential &credential, QString &error)
+{
+    QNetworkAccessManager network;
+    QNetworkRequest request{QUrl(brokerAddress(settings))};
+    request.setRawHeader("Authorization", "Bearer " + accessToken.toUtf8());
+    const Reply reply = send(network, request, "POST");
+    const QString login = reply.body.value(QStringLiteral("login")).toString();
+    const QString password = reply.body.value(QStringLiteral("password")).toString();
+    if (reply.status == 200 && !login.isEmpty() && !password.isEmpty()) {
+        credential.login = login;
+        credential.password = password;
+        credential.validUntil = QDateTime::fromString(reply.body.value(QStringLiteral("validUntil")).toString(),
+                                                      Qt::ISODateWithMs);
+        return true;
+    }
+    const QString reason = reply.body.value(QStringLiteral("error")).toString();
+    switch (reply.status) {
+    case 401:
+        error = tr("Sign in again.");
+        break;
+    case 403:
+        error = tr("Your organization’s sign-in doesn’t open a Vault login here. Ask your Vault administrator to "
+                   "check your sign-in email.");
+        break;
+    case 429:
+        error = reason.isEmpty() ? tr("Too many sign-ins. Wait a minute and try again.") : reason;
+        break;
+    default:
+        error = tr("Couldn’t reach the sign-in service at %1.").arg(brokerAddress(settings));
+    }
+    return false;
 }
 
 } // namespace vaultSignIn

@@ -13,37 +13,44 @@
 
 namespace schedule {
 
-// Single sign-on for Vault connections (PostgreSQL 18 OAuth).
+// Single sign-on for Vault connections, through a credential broker.
 //
-// A Vault server that accepts tokens asks libpq for one while connecting.
-// ScheduleIO answers through libpq's process-wide PQsetAuthDataHook with the
-// token handed to setAccessToken() for that issuer, so the QPSQL connections
-// addVaultDatabase() creates need nothing else. The hook is found in the libpq
-// already loaded by the QPSQL driver; libpq 17 and earlier don't have it.
+// A hosted Vault (Supabase) can't accept tokens itself, so people of a single
+// sign-on organization:
+//   1. sign in to Supabase Auth with their organization's identity provider:
+//      signIn() opens the system browser (authorization code with PKCE,
+//      RFC 7636) and Supabase redirects back to a one-time address on
+//      127.0.0.1 (RFC 8252);
+//   2. trade that sign-in for a PostgreSQL password that works for five
+//      minutes: fetchCredential() asks the broker (settings.signInBroker),
+//      which returns the login it opens;
+//   3. open the connection with that login and password. A session stays
+//      open after the password expires; a new connection needs a new one.
+// refresh() renews the Supabase sign-in without the browser.
 //
-// signIn() runs the desktop sign-in: the system browser opens the sign-in
-// service (authorization code with PKCE, RFC 7636), which redirects back to a
-// one-time address on 127.0.0.1 (RFC 8252). refresh() trades a refresh token
-// for a new access token without the browser. Both block, with a nested event
-// loop, so call them from the thread that will open the connection.
+// The broker also says which Supabase project it trusts, so settings name
+// only the broker and the organization's provider. Every call blocks with a
+// nested event loop; call them from the thread that opens the connection.
 struct SCHEDULEIO_EXPORT VaultSignInTokens
 {
     QString accessToken;
     QString refreshToken;
     QDateTime expiresAt;  // UTC; invalid when the service didn't say
 
-    // Usable for a connection starting now, with a minute to spare.
+    // Usable for a request starting now, with a minute to spare.
     bool accessTokenFresh() const;
+};
+
+struct SCHEDULEIO_EXPORT VaultCredential
+{
+    QString login;
+    QString password;
+    QDateTime validUntil;  // UTC
 };
 
 namespace vaultSignIn {
 
-// Installs the token hook once. False with error when libpq lacks it.
-SCHEDULEIO_EXPORT bool installTokenHook(QString &error);
-// The token the hook hands out for connections to issuer; empty forgets it.
-SCHEDULEIO_EXPORT void setAccessToken(const QString &issuer, const QString &token);
-
-// Opens the browser at the sign-in page; the default uses openBrowser().
+// Opens the browser at the sign-in page; the default uses the system's.
 using BrowserLauncher = std::function<bool(const QUrl &)>;
 SCHEDULEIO_EXPORT void setBrowserLauncher(BrowserLauncher launcher);
 
@@ -52,6 +59,9 @@ SCHEDULEIO_EXPORT bool signIn(const VaultConnectionSettings &settings, VaultSign
                               int timeoutMs = 300000);
 SCHEDULEIO_EXPORT bool refresh(const VaultConnectionSettings &settings, const QString &refreshToken,
                                VaultSignInTokens &tokens, QString &error);
+// Trades a current sign-in for a short-lived password.
+SCHEDULEIO_EXPORT bool fetchCredential(const VaultConnectionSettings &settings, const QString &accessToken,
+                                       VaultCredential &credential, QString &error);
 
 } // namespace vaultSignIn
 } // namespace schedule

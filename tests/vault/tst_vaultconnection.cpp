@@ -75,11 +75,12 @@ void VaultConnectionTest::rejectsUnusableUri_data()
     QTest::newRow("two hosts") << QStringLiteral("postgresql://pat@a,b/plans");
     QTest::newRow("unsupported sslmode") << QStringLiteral("postgresql://pat@db/plans?sslmode=disable");
     QTest::newRow("other option") << QStringLiteral("postgresql://pat@db/plans?application_name=x");
-    QTest::newRow("issuer not a web address") << QStringLiteral("postgresql://pat@db/plans?oauth_issuer=keycloak");
-    QTest::newRow("client without issuer") << QStringLiteral("postgresql://pat@db/plans?oauth_client_id=app");
-    QTest::newRow("provider without issuer") << QStringLiteral("postgresql://pat@db/plans?idp=acme");
-    QTest::newRow("issuer twice")
-        << QStringLiteral("postgresql://pat@db/plans?oauth_issuer=https://a/realms/v&oauth_issuer=https://b/realms/v");
+    QTest::newRow("broker not https") << QStringLiteral("postgresql://pat@db/plans?broker=http://sign-in.example.com&provider=azure");
+    QTest::newRow("broker with a user") << QStringLiteral("postgresql://pat@db/plans?broker=https://u@sign-in.example.com&provider=azure");
+    QTest::newRow("provider without broker") << QStringLiteral("postgresql://pat@db/plans?provider=azure");
+    QTest::newRow("broker without provider") << QStringLiteral("postgresql://pat@db/plans?broker=https://sign-in.example.com");
+    QTest::newRow("broker twice")
+        << QStringLiteral("postgresql://pat@db/plans?broker=https://a.example&broker=https://b.example&provider=azure");
 }
 
 void VaultConnectionTest::rejectsUnusableUri()
@@ -130,34 +131,33 @@ void VaultConnectionTest::parsesSingleSignOnUri()
     VaultConnectionSettings settings;
     QString password, error;
     QVERIFY2(schedule::parseVaultConnectionUri(
-                 QStringLiteral("postgresql://pat@db.example.com/plans?sslmode=verify-full"
-                                "&oauth_issuer=https%3A%2F%2Fsign-in.example.com%2Frealms%2Fvault&idp=acme"),
+                 QStringLiteral("postgresql://ann%40acme.example@db.example.com/plans?sslmode=verify-full"
+                                "&broker=https%3A%2F%2Fsign-in.example.com%2Fapi%2Fvault-credential&provider=azure"),
                  settings, password, error), qPrintable(error));
     QVERIFY(settings.usesSingleSignOn());
-    QCOMPARE(settings.signInIssuer, QStringLiteral("https://sign-in.example.com/realms/vault"));
-    QCOMPARE(settings.signInClientId, VaultConnectionSettings::defaultSignInClientId());
-    QCOMPARE(settings.signInProvider, QStringLiteral("acme"));
+    QCOMPARE(settings.user, QStringLiteral("ann@acme.example"));
+    QCOMPARE(settings.signInBroker, QStringLiteral("https://sign-in.example.com/api/vault-credential"));
+    QCOMPARE(settings.signInProvider, QStringLiteral("azure"));
     QVERIFY(password.isEmpty());
 
     QVERIFY(schedule::parseVaultConnectionUri(QStringLiteral("postgresql://pat@db/plans"), settings, password, error));
     QVERIFY(!settings.usesSingleSignOn());
-    QVERIFY(settings.signInClientId.isEmpty());
+    QVERIFY(settings.signInProvider.isEmpty());
 }
 
 void VaultConnectionTest::configuresSingleSignOnConnection()
 {
     if (!QSqlDatabase::isDriverAvailable(QStringLiteral("QPSQL")))
         QSKIP("The Qt PostgreSQL driver isn't installed.");
+    // The broker's password is an ordinary one: no extra libpq options.
     VaultConnectionSettings settings;
-    settings.user = QStringLiteral("pat");
-    settings.signInIssuer = QStringLiteral("https://sign-in.example.com/realms/vault");
+    settings.user = QStringLiteral("ann@acme.example");
+    settings.signInBroker = QStringLiteral("https://sign-in.example.com/api/vault-credential");
+    settings.signInProvider = QStringLiteral("azure");
     const QString name = QStringLiteral("tst_vaultconnection_sso");
     {
         const QSqlDatabase database = schedule::addVaultDatabase(name, settings);
-        QCOMPARE(database.connectOptions(),
-                 schedule::vaultConnectOptions(settings.verifyTls)
-                     + QStringLiteral(";oauth_issuer='https://sign-in.example.com/realms/vault'"
-                                      ";oauth_client_id='schedulevault'"));
+        QCOMPARE(database.connectOptions(), schedule::vaultConnectOptions(settings.verifyTls));
     }
     QSqlDatabase::removeDatabase(name);
 }

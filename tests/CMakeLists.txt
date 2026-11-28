@@ -74,11 +74,14 @@ if(SCHEDULEIO_BUILD_VAULT)
     set_tests_properties(tst_vault_platform PROPERTIES
         LABELS "postgresql"
         SKIP_REGULAR_EXPRESSION "Set SCHEDULEIO_VAULT_TEST_DATABASE and the PG\\* variables")
-    # Single sign-on against spikes/sso-keycloak; skips unless SCHEDULEIO_SSO_SPIKE_DIR is set.
-    scheduleio_add_test_executable(tst_vault_signin vault/tst_vault_signin.cpp)
-    add_test(NAME tst_vault_signin COMMAND tst_vault_signin)
-    set_tests_properties(tst_vault_signin PROPERTIES LABELS "sso"
-        SKIP_REGULAR_EXPRESSION "Set SCHEDULEIO_SSO_SPIKE_DIR")
+    # The single sign-on credential broker's database side. Creates and drops
+    # its own database and roles; needs a superuser in the PG* variables.
+    scheduleio_add_test_executable(tst_vault_broker vault/tst_vault_broker.cpp)
+    add_test(NAME tst_vault_broker COMMAND tst_vault_broker)
+    set_tests_properties(tst_vault_broker PROPERTIES LABELS "postgresql"
+        SKIP_REGULAR_EXPRESSION "Set PGHOST, PGUSER and PGPASSWORD")
+    # The desktop half of single sign-on, against imitation services.
+    scheduleio_add_test(tst_vault_signin vault/tst_vault_signin.cpp)
 endif()
 scheduleio_add_test(tst_semantic_roundtrip roundtrip/tst_semantic_roundtrip.cpp)
 

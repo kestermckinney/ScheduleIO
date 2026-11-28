@@ -28,17 +28,15 @@ struct SCHEDULEIO_EXPORT VaultConnectionSettings
     // Certificate and host-name checks, on by default for every server except
     // this computer's (see defaultVerifyTls()).
     bool verifyTls = false;
-    // Single sign-on. signInIssuer is the sign-in service's issuer, exactly as
-    // the server's pg_hba.conf names it; signInClientId is this app's client
-    // there; signInProvider optionally names the organization's identity
-    // provider so sign-in goes straight to it. An empty issuer means the login
-    // signs in with a password.
-    QString signInIssuer;
-    QString signInClientId;
+    // Single sign-on (see vaultsignin.h). signInBroker is the address of the
+    // credential broker; signInProvider is the organization's identity
+    // provider in Supabase Auth ("azure", "google", ...). With single sign-on,
+    // user is the person's sign-in email, and the broker says which login it
+    // opens. An empty broker means user is the login and has a password.
+    QString signInBroker;
     QString signInProvider;
 
-    static QString defaultSignInClientId() { return QStringLiteral("schedulevault"); }
-    bool usesSingleSignOn() const { return !signInIssuer.trimmed().isEmpty(); }
+    bool usesSingleSignOn() const { return !signInBroker.trimmed().isEmpty(); }
     bool isComplete() const;
     // Host, port, database, and user: one saved password belongs to exactly this.
     QString identity() const;
@@ -47,6 +45,8 @@ struct SCHEDULEIO_EXPORT VaultConnectionSettings
 };
 
 SCHEDULEIO_EXPORT bool isLocalVaultHost(const QString &host);
+// An https address, or http on this computer (for testing).
+SCHEDULEIO_EXPORT bool isSignInAddress(const QString &address);
 // Verify certificates unless the server is this computer, which a local
 // PostgreSQL install rarely has a certificate for.
 SCHEDULEIO_EXPORT bool defaultVerifyTls(const QString &host);
@@ -54,8 +54,7 @@ SCHEDULEIO_EXPORT bool defaultVerifyTls(const QString &host);
 SCHEDULEIO_EXPORT QString vaultConnectOptions(bool verifyTls);
 
 // Reads postgresql://user[:password]@host[:port]/database[?sslmode=verify-full|prefer]
-// with, for single sign-on, oauth_issuer=<issuer>, and optionally
-// oauth_client_id=<client> (default schedulevault) and idp=<provider>.
+// with, for single sign-on, broker=<https address> and provider=<name>.
 // A URI without sslmode verifies certificates. On failure, error says what a
 // usable URI looks like and settings and password are left untouched.
 SCHEDULEIO_EXPORT bool parseVaultConnectionUri(const QString &input, VaultConnectionSettings &settings,
@@ -63,7 +62,7 @@ SCHEDULEIO_EXPORT bool parseVaultConnectionUri(const QString &input, VaultConnec
 
 // Adds a QPSQL connection named connectionName configured for settings. The
 // caller opens it with the password and removes it when done. With single
-// sign-on, open it with no password after handing VaultSignIn a token.
+// sign-on, open it with the broker's login and password instead.
 SCHEDULEIO_EXPORT QSqlDatabase addVaultDatabase(const QString &connectionName,
                                                 const VaultConnectionSettings &settings);
 

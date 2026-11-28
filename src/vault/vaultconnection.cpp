@@ -35,14 +35,22 @@ QString VaultConnectionSettings::identity() const
 bool VaultConnectionSettings::operator==(const VaultConnectionSettings &other) const
 {
     return identity() == other.identity() && verifyTls == other.verifyTls
-        && signInIssuer == other.signInIssuer && signInClientId == other.signInClientId
-        && signInProvider == other.signInProvider;
+        && signInBroker == other.signInBroker && signInProvider == other.signInProvider;
 }
 
 bool isLocalVaultHost(const QString &host)
 {
     const QString name = host.trimmed().toLower();
     return name == QStringLiteral("localhost") || name == QStringLiteral("127.0.0.1") || name == QStringLiteral("::1");
+}
+
+bool isSignInAddress(const QString &address)
+{
+    const QUrl url(address.trimmed(), QUrl::StrictMode);
+    if (!url.isValid() || url.host().isEmpty() || !url.userInfo().isEmpty())
+        return false;
+    return url.scheme() == QStringLiteral("https")
+        || (url.scheme() == QStringLiteral("http") && isLocalVaultHost(url.host()));
 }
 
 bool defaultVerifyTls(const QString &host)
@@ -79,16 +87,15 @@ bool parseVaultConnectionUri(const QString &input, VaultConnectionSettings &sett
 
     bool verifyTls = true;
     bool hasSslMode = false;
-    QString issuer, clientId, provider;
+    QString broker, provider;
     for (const auto &option : QUrlQuery(uri).queryItems(QUrl::FullyDecoded)) {
-        QString *signIn = option.first == QStringLiteral("oauth_issuer") ? &issuer
-                        : option.first == QStringLiteral("oauth_client_id") ? &clientId
-                        : option.first == QStringLiteral("idp") ? &provider : nullptr;
+        QString *signIn = option.first == QStringLiteral("broker") ? &broker
+                        : option.first == QStringLiteral("provider") ? &provider : nullptr;
         if (signIn) {
-            const bool url = signIn != &issuer || QUrl(option.second, QUrl::StrictMode).scheme().startsWith(QStringLiteral("http"));
-            if (!signIn->isEmpty() || option.second.trimmed().isEmpty() || option.second.contains(QChar::Null) || !url) {
+            const bool valid = signIn != &broker || isSignInAddress(option.second);
+            if (!signIn->isEmpty() || option.second.trimmed().isEmpty() || option.second.contains(QChar::Null) || !valid) {
                 error = QCoreApplication::translate("VaultConnection",
-                                                    "oauth_issuer must be an http(s) address, and each sign-in option may appear once.");
+                                                    "broker must be an https address, and each sign-in option may appear once.");
                 return false;
             }
             *signIn = option.second.trimmed();
@@ -103,13 +110,11 @@ bool parseVaultConnectionUri(const QString &input, VaultConnectionSettings &sett
         hasSslMode = true;
         verifyTls = option.second == QStringLiteral("verify-full");
     }
-    if (issuer.isEmpty() && (!clientId.isEmpty() || !provider.isEmpty())) {
-        error = QCoreApplication::translate("VaultConnection", "oauth_client_id and idp need oauth_issuer.");
+    if (broker.isEmpty() != provider.isEmpty()) {
+        error = QCoreApplication::translate("VaultConnection", "Single sign-on needs both broker and provider.");
         return false;
     }
-    settings.signInIssuer = issuer;
-    settings.signInClientId = issuer.isEmpty() ? QString()
-                              : clientId.isEmpty() ? VaultConnectionSettings::defaultSignInClientId() : clientId;
+    settings.signInBroker = broker;
     settings.signInProvider = provider;
     settings.host = host;
     settings.port = port;
@@ -127,20 +132,7 @@ QSqlDatabase addVaultDatabase(const QString &connectionName, const VaultConnecti
     database.setPort(settings.port);
     database.setDatabaseName(settings.database.trimmed());
     database.setUserName(settings.user.trimmed());
-    QString options = vaultConnectOptions(settings.verifyTls);
-    if (settings.usesSingleSignOn()) {
-        // libpq's connection-string quoting: values in single quotes.
-        const auto quoted = [](QString value) {
-            return QLatin1Char('\'') + value.replace(QLatin1Char('\\'), QStringLiteral("\\\\"))
-                                             .replace(QLatin1Char('\''), QStringLiteral("\\'")) + QLatin1Char('\'');
-        };
-        options += QStringLiteral(";oauth_issuer=%1;oauth_client_id=%2")
-                       .arg(quoted(settings.signInIssuer.trimmed()),
-                            quoted(settings.signInClientId.trimmed().isEmpty()
-                                       ? VaultConnectionSettings::defaultSignInClientId()
-                                       : settings.signInClientId.trimmed()));
-    }
-    database.setConnectOptions(options);
+    database.setConnectOptions(vaultConnectOptions(settings.verifyTls));
     return database;
 }
 

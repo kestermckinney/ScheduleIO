@@ -91,23 +91,32 @@ Apply a restrictive tenant and active membership predicate, then command-specifi
 
 ### Single sign-on
 
-A Vault server can let members sign in with a token instead of a password, through PostgreSQL 18 OAuth.
-- **Who checks the token:** `pg_hba.conf` uses the `oauth` method with `delegate_ident_mapping=1`, and a validator decides which login each token may open. In the spike, the token must name the login in a `vault_login` claim that only administrators can assign.
-- **The identity the session carries:** the server reports the person as `system_user = 'oauth:<issuer>#<subject>'`.
+Each organization chooses how its people sign in (`vault.organization_sign_in`, set by owners with `vault.manager_set_sign_in`):
+- **Passwords**, the default. Each person has an ordinary PostgreSQL login with a password of their own.
+- **Single sign-on** through the organization's identity provider, by way of Supabase Auth and a credential broker. A hosted PostgreSQL can't check tokens itself, so it never sees one.
 
-Migration 071 has `vault.bind_manager_context` tie that identity to the Vault person:
-- **First token sign-in:** records the token's issuer and subject on `vault.users`. People that Manager creates start with issuer `postgresql`.
-- **Later token sign-ins:** must carry the same identity. A token from another account that opens the same login is refused.
-- **Passwords stop for linked people.** A person whose issuer is an `http(s)` URL (OpenID Connect issuers always are) is linked to single sign-on, and a password session for them is refused.
-- **Unlinked people keep passwords.** Everyone else keeps using passwords as before.
+How a single sign-on works (migration 073, `ScheduleIO/broker`, and `vaultsignin.h`):
+1. **The person signs in to Supabase Auth.** The desktop opens the browser at the organization's provider: Microsoft Entra (`azure`), Google Workspace (`google`), or another OpenID Connect provider. Supabase redirects back to a one-time address on `127.0.0.1` (PKCE).
+2. **The broker checks who signed in.** It asks Supabase Auth for the account and its provider identities, and works out each identity's *directory*: the Entra tenant ID, the Workspace domain, or the provider's issuer.
+3. **The database decides which login opens.** The broker calls `vault.broker_issue_sign_in` with the Supabase issuer and subject, the verified email, the provider, the directory, and a SCRAM verifier. The function finds the person already linked to that account, or else the person whose `sign_in_email` matches. It requires that:
+   - the person's home organization signs in with single sign-on through that provider and directory;
+   - the person and their membership are active;
+   - the person is not a service account or a platform administrator.
 
-Migration 072 lets each organization choose how its people sign in (`vault.organization_sign_in`):
-- **Password sign-in is a role membership.** On a single sign-on server, `pg_hba.conf` lists the cluster role `vault_password_sign_in` ahead of its `oauth` line. Logins of password organizations and platform administrators belong to it. The Vault owner manages the membership, and creates the role on first use. A server administrator who created the role must grant it to the owner `WITH ADMIN OPTION`, which Manager's **New Vault** does.
-- **Switching to single sign-on** (`vault.manager_set_sign_in`, owners only) removes every member's password and their membership. Switching back restores the membership but no passwords.
-- **People in a single sign-on organization** get logins without a password (`vault.manager_create_login` refuses one) and a sign-in email (`vault.users.sign_in_email`), which Manager uses to find their account at the organization's identity provider.
+   It then sets the verifier on the person's login with `VALID UNTIL` five minutes ahead, records the issuer and subject on `vault.users` on first use, and audits the credential.
+4. **The desktop connects with that password.** A session stays open after it expires, and the next connection needs a new one.
+
+Rules that keep this safe:
+- **Brokers belong to one Vault.** The owner registers each broker's login with `vault.add_sign_in_broker`, which grants only `broker_issue_sign_in`. A broker of another Vault on the same server can't open this one's logins. The broker's row-level security policies apply only inside that function, in a registered broker's session.
+- **The password never reaches the database.** The broker sends only its verifier, and returns the password once, to the desktop.
+- **The first account sticks.** After it links, another account with the same email no longer matches.
+- **No lasting passwords.** A person linked to single sign-on, or in a single sign-on organization, can't use a lasting password (one without `VALID UNTIL`): `vault.bind_manager_context` refuses the session. Switching an organization to single sign-on removes its people's passwords, and switching back gives them none: an administrator sets new ones.
+- **At most six credentials a minute** for one person.
 - **Platform administrators always keep a password**, so there is a way in when the sign-in service is down.
 
-`ScheduleIO/spikes/sso-keycloak` holds a working Keycloak setup and the validator, and ScheduleVaultManager's `tst_sso_vault` exercises these rules against it.
+`tst_vault_broker` tests the database side, `tst_vault_signin` the desktop side, and `ScheduleIO/broker/test` the broker.
+
+Migrations 071 and 072 first built single sign-on for PostgreSQL 18 OAuth (`pg_hba.conf` `oauth` with a validator). Migration 073 replaced that approach, which needs software installed on the server, and its `vault_password_sign_in` membership is no longer recorded.
 
 ## Time and resourcing
 
