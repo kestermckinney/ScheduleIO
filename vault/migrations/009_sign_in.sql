@@ -73,15 +73,6 @@ CREATE FUNCTION vault.organization_uses_sso(tenant uuid)
 
 REVOKE ALL ON FUNCTION vault.organization_uses_sso(uuid) FROM PUBLIC;
 
--- Sign-in groups in pg_hba.conf aren't used, so there is nothing to record.
-CREATE FUNCTION vault.sync_password_sign_in(desktop_login name, allowed boolean)
-    RETURNS void
-    LANGUAGE sql
-    SET search_path = pg_catalog
-    AS $$ SELECT $$;
-
-REVOKE ALL ON FUNCTION vault.sync_password_sign_in(name, boolean) FROM PUBLIC;
-
 -- ── Reading and changing the setting ──
 CREATE FUNCTION vault.manager_sign_in(tenant uuid)
     RETURNS jsonb

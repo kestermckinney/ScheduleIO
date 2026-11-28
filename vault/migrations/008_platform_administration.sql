@@ -498,7 +498,6 @@ CREATE FUNCTION vault.platform_create_login(desktop_login name, password_verifie
                 USING ERRCODE = 'invalid_parameter_value';
         END IF;
         PERFORM vault.create_vault_login(desktop_login, password_verifier);
-        PERFORM vault.sync_password_sign_in(desktop_login, true);
         INSERT INTO vault_admin.platform_events (operator_id, operator_login, operation, details)
         VALUES (operator, session_user, 'platform.login_created', jsonb_build_object('login', desktop_login));
     END
@@ -535,7 +534,6 @@ CREATE FUNCTION vault.manager_create_login(tenant uuid, desktop_login name, pass
                 USING ERRCODE = 'invalid_parameter_value';
         END IF;
         PERFORM vault.create_vault_login(desktop_login, password_verifier);
-        PERFORM vault.sync_password_sign_in(desktop_login, NOT sso);
         INSERT INTO vault.audit_events (organization_id, actor_id, operation, details)
         VALUES (tenant, vault.context_id('app.current_user_id'), 'organization.login_created',
                 jsonb_build_object('login', desktop_login, 'single_sign_on', sso));
